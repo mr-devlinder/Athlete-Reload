@@ -1,4 +1,12 @@
-export const todayLabel = 'Monday, July 27'
+import { addDays, format } from 'date-fns'
+
+const today = new Date()
+
+function dateOffset(days) {
+  return format(addDays(today, days), 'yyyy-MM-dd')
+}
+
+export const todayLabel = format(today, 'EEEE, MMMM d')
 
 export const checkInDefaults = {
   energy: 6,
@@ -17,48 +25,10 @@ export const checkInDefaults = {
   notes: 'Felt tight during acceleration work yesterday.',
 }
 
-export const recentCheckIns = [
-  {
-    day: 'Tue',
-    score: 82,
-    location: 'None',
-    fatigue: 3,
-    note: 'Good lift. No pain after practice.',
-  },
-  {
-    day: 'Wed',
-    score: 68,
-    location: 'Hamstring',
-    fatigue: 5,
-    note: 'Tight after repeated sprints.',
-  },
-  {
-    day: 'Thu',
-    score: 74,
-    location: 'None',
-    fatigue: 4,
-    note: 'Technical session felt smooth.',
-  },
-  {
-    day: 'Fri',
-    score: 58,
-    location: 'Hamstring',
-    fatigue: 7,
-    note: 'Pulled up early on last sprint.',
-  },
-  {
-    day: 'Sat',
-    score: 49,
-    location: 'Hamstring',
-    fatigue: 8,
-    note: 'Back-to-back practice load showed up.',
-  },
-]
-
 export const schedule = [
   {
-    id: 'event-2026-07-27-practice',
-    date: '2026-07-27',
+    id: 'event-today-practice',
+    date: dateOffset(0),
     load: 'Medium',
     note: 'Technical work plus controlled team drills',
     time: '6:00 PM',
@@ -66,8 +36,8 @@ export const schedule = [
     type: 'Team practice',
   },
   {
-    id: 'event-2026-07-28-gym',
-    date: '2026-07-28',
+    id: 'event-tomorrow-gym',
+    date: dateOffset(1),
     load: 'Low',
     note: 'Upper body and mobility emphasis',
     time: '4:30 PM',
@@ -75,8 +45,8 @@ export const schedule = [
     type: 'Gym session',
   },
   {
-    id: 'event-2026-07-29-practice',
-    date: '2026-07-29',
+    id: 'event-plus-two-practice',
+    date: dateOffset(2),
     load: 'High',
     note: 'Team tactical session',
     time: '6:00 PM',
@@ -84,8 +54,8 @@ export const schedule = [
     type: 'Team practice',
   },
   {
-    id: 'event-2026-07-30-recovery',
-    date: '2026-07-30',
+    id: 'event-plus-three-recovery',
+    date: dateOffset(3),
     load: 'Low',
     note: 'Stretching, mobility, light bike',
     time: '5:00 PM',
@@ -93,8 +63,8 @@ export const schedule = [
     type: 'Recovery',
   },
   {
-    id: 'event-2026-07-31-game',
-    date: '2026-07-31',
+    id: 'event-plus-four-game',
+    date: dateOffset(4),
     load: 'High',
     note: 'Friday match',
     time: '7:00 PM',
@@ -114,5 +84,4 @@ export const avoidRules = {
   Back: ['No heavy loading', 'No twisting volume', 'Mobility first'],
   Neck: ['No headers', 'No contact', 'Avoid sudden twisting'],
   Head: ['Do not train', 'Tell an adult or trainer immediately'],
-  None: ['Full warm-up', 'Normal session', 'Post-practice notes'],
 }

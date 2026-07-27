@@ -1,4 +1,17 @@
 import { useMemo, useState } from 'react'
+import {
+  addDays,
+  addMonths,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameMonth,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
+} from 'date-fns'
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 
@@ -15,10 +28,11 @@ const eventTypes = [
 
 const loadLevels = ['Low', 'Medium', 'High']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const monthDate = new Date(2026, 6, 1)
+const today = new Date()
+const todayIso = toIsoDate(today)
 
 const emptyEvent = {
-  date: '2026-07-27',
+  date: todayIso,
   load: 'Medium',
   note: '',
   time: '',
@@ -32,12 +46,19 @@ export function ScheduleView({
   onUpdate,
   schedule,
 }) {
-  const [selectedDate, setSelectedDate] = useState('2026-07-27')
+  const [visibleMonth, setVisibleMonth] = useState(startOfMonth(today))
+  const [selectedDate, setSelectedDate] = useState(todayIso)
   const [modalMode, setModalMode] = useState(null)
   const [draftEvent, setDraftEvent] = useState(emptyEvent)
 
-  const days = useMemo(() => getCalendarDays(monthDate), [])
+  const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth])
   const selectedEvents = schedule.filter((event) => event.date === selectedDate)
+  const monthLabel = format(visibleMonth, 'MMMM yyyy')
+
+  function showToday() {
+    setVisibleMonth(startOfMonth(today))
+    setSelectedDate(todayIso)
+  }
 
   function openCreateModal(date = selectedDate) {
     setDraftEvent({
@@ -85,7 +106,7 @@ export function ScheduleView({
       <div className="schedule-header">
         <SectionHeading
           eyebrow="Team training mode"
-          title="July 2026 training calendar."
+          title="Training calendar."
         />
         <button
           className="secondary-button"
@@ -99,8 +120,28 @@ export function ScheduleView({
       <div className="calendar-shell">
         <section className="month-calendar">
           <div className="calendar-title">
-            <strong>July 2026</strong>
+            <strong>{monthLabel}</strong>
             <span>{schedule.length} scheduled events</span>
+          </div>
+
+          <div className="calendar-controls" aria-label="Calendar month controls">
+            <button
+              className="ghost-close"
+              onClick={() => setVisibleMonth((current) => subMonths(current, 1))}
+              type="button"
+            >
+              Previous
+            </button>
+            <button className="ghost-close" onClick={showToday} type="button">
+              Today
+            </button>
+            <button
+              className="ghost-close"
+              onClick={() => setVisibleMonth((current) => addMonths(current, 1))}
+              type="button"
+            >
+              Next
+            </button>
           </div>
 
           <div className="weekday-row">
@@ -118,7 +159,10 @@ export function ScheduleView({
                 <button
                   className={`calendar-day ${day.inMonth ? '' : 'muted'} ${isSelected ? 'selected' : ''}`}
                   key={day.iso}
-                  onClick={() => setSelectedDate(day.iso)}
+                  onClick={() => {
+                    setSelectedDate(day.iso)
+                    setVisibleMonth(startOfMonth(parseISO(day.iso)))
+                  }}
                   type="button"
                 >
                   <span>{day.dayNumber}</span>
@@ -270,34 +314,34 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
 }
 
 function getCalendarDays(date) {
-  const year = date.getFullYear()
-  const month = date.getMonth()
-  const firstDay = new Date(year, month, 1)
-  const startDate = new Date(year, month, 1 - firstDay.getDay())
-
-  return Array.from({ length: 42 }, (_, index) => {
-    const day = new Date(startDate)
-    day.setDate(startDate.getDate() + index)
-
-    return {
-      dayNumber: day.getDate(),
-      inMonth: day.getMonth() === month,
-      iso: toIsoDate(day),
-    }
+  const monthStart = startOfMonth(date)
+  const calendarStart = startOfWeek(monthStart)
+  const calendarEnd = endOfWeek(endOfMonth(date))
+  const allDays = eachDayOfInterval({
+    start: calendarStart,
+    end: calendarEnd,
   })
+  const paddedDays =
+    allDays.length >= 42
+      ? allDays
+      : [
+          ...allDays,
+          ...Array.from({ length: 42 - allDays.length }, (_, index) =>
+            addDays(calendarEnd, index + 1),
+          ),
+        ]
+
+  return paddedDays.map((day) => ({
+    dayNumber: format(day, 'd'),
+    inMonth: isSameMonth(day, monthStart),
+    iso: toIsoDate(day),
+  }))
 }
 
 function toIsoDate(date) {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+  return format(date, 'yyyy-MM-dd')
 }
 
 function formatDisplayDate(value) {
-  return new Date(`${value}T12:00:00`).toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'long',
-    weekday: 'long',
-  })
+  return format(parseISO(value), 'EEEE, MMMM d')
 }

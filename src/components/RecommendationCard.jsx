@@ -1,9 +1,7 @@
-import { AdviceList } from './AdviceList'
-
 export function RecommendationCard({ recommendation, session }) {
   return (
     <aside className={`recommendation ${recommendation.tone}`}>
-      <p className="eyebrow">Recommendation</p>
+      <p className="eyebrow">{session}</p>
       <div className="score-row">
         <div
           className="score-ring"
@@ -18,24 +16,30 @@ export function RecommendationCard({ recommendation, session }) {
         </div>
       </div>
 
-      <div className="advice-grid">
-        <AdviceList title="Avoid" items={recommendation.avoid} />
-        <AdviceList title="Focus" items={recommendation.focus} />
+      <div className="training-action">
+        <strong>{recommendation.intensity}</strong>
+        <p>{recommendation.action}</p>
       </div>
 
-      {recommendation.reasons.length > 0 && (
-        <div className="reason-strip">
-          {recommendation.reasons.map((reason) => (
-            <span key={reason}>{reason}</span>
+      <div className="advice-grid">
+        <div className="advice-list">
+          <strong>Avoid</strong>
+          {recommendation.avoid.length === 0 ? (
+            <span>No restrictions</span>
+          ) : (
+            recommendation.avoid.map((item) => (
+              <span key={item}>{item}</span>
+            ))
+          )}
+        </div>
+        <div className="advice-list">
+          <strong>Focus</strong>
+          {recommendation.focus.map((item) => (
+            <span key={item}>{item}</span>
           ))}
         </div>
-      )}
-
-      <div className="coach-note">
-        <p className="eyebrow">{session}</p>
-        <strong>Coach message</strong>
-        <p>{recommendation.coachMessage}</p>
       </div>
+
     </aside>
   )
 }

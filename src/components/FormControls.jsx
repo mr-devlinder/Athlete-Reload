@@ -12,15 +12,23 @@ export function Select({ label, value, options, onChange }) {
 }
 
 export function Slider({ label, min = 0, max, value, unit, onChange }) {
+  const progress = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+
+  function handleChange(event) {
+    onChange(Number(event.target.value))
+  }
+
   return (
     <label className="slider-field">
       {label}
       <input
         max={max}
         min={min}
+        style={{ '--range-progress': `${progress}%` }}
         type="range"
         value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        onChange={handleChange}
+        onInput={handleChange}
       />
       <span>
         {value}

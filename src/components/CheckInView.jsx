@@ -2,11 +2,52 @@ import { Select, Slider } from './FormControls'
 import { RecommendationCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 
-export function CheckInView({ checkIn, recommendation, onSave, onUpdate }) {
+export function CheckInView({
+  checkIn,
+  isSavedToday,
+  nextEvent,
+  recommendation,
+  todayEvents = [],
+  todayLabel,
+  onSave,
+  onEditToday,
+  onUpdate,
+}) {
+  const hasPain = checkIn.pain > 0
+  const todayScheduleLabel = todayEvents[0]?.title ?? checkIn.session
+  const nextLabel = nextEvent ? nextEvent.title : 'No upcoming events'
+
+  if (isSavedToday) {
+    return (
+      <div className="saved-checkin">
+        <SectionHeading eyebrow={todayLabel} title="Check-in saved." />
+        <p>Come back tomorrow for your next readiness check.</p>
+        <button className="ghost-close" onClick={onEditToday} type="button">
+          Edit today's check-in
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="check-in-grid">
       <div className="form-panel">
-        <SectionHeading eyebrow="Daily check-in" title="How are you showing up?" />
+        <SectionHeading eyebrow={todayLabel} title="Daily check-in." />
+
+        <div className="schedule-source">
+          <span>
+            <strong>Yesterday</strong>
+            {checkIn.yesterdayLoad}
+          </span>
+          <span className="today-chip">
+            <strong>Today</strong>
+            {todayScheduleLabel}
+          </span>
+          <span>
+            <strong>Next</strong>
+            {nextLabel}
+          </span>
+        </div>
 
         <Slider
           label="Energy"
@@ -53,92 +94,73 @@ export function CheckInView({ checkIn, recommendation, onSave, onUpdate }) {
             onChange={(value) => onUpdate('stress', value)}
           />
           <Select
-            label="Yesterday"
-            value={checkIn.yesterdayLoad}
-            options={['Rest', 'Light', 'Moderate', 'Hard', 'Game']}
-            onChange={(value) => onUpdate('yesterdayLoad', value)}
-          />
-          <Select
             label="Hydration"
             value={checkIn.hydration}
             options={['Good', 'Okay', 'Poor']}
             onChange={(value) => onUpdate('hydration', value)}
           />
-          <Select
-            label="Pain location"
-            value={checkIn.location}
-            options={[
-              'Hamstring',
-              'Quad',
-              'Calf',
-              'Ankle',
-              'Knee',
-              'Hip',
-              'Back',
-              'Neck',
-              'Head',
-              'Shoulder',
-              'None',
-            ]}
-            onChange={(value) => onUpdate('location', value)}
-          />
-          <Select
-            label="Injury type"
-            value={checkIn.injuryType}
-            options={[
-              'Muscle strain',
-              'Joint irritation',
-              'Impact bruise',
-              'Tendon soreness',
-              'Unknown',
-            ]}
-            onChange={(value) => onUpdate('injuryType', value)}
-          />
-          <Select
-            label="Pain type"
-            value={checkIn.painType}
-            options={[
-              'Tight / pulling',
-              'Dull ache',
-              'Sharp / stabbing',
-              'Swelling',
-              'Instability',
-              'Numbness',
-              'Headache / dizziness',
-              'No pain',
-            ]}
-            onChange={(value) => onUpdate('painType', value)}
-          />
-          <Select
-            label="Hurts when"
-            value={checkIn.hurtsWhen}
-            options={[
-              'At rest',
-              'Jogging',
-              'Sprinting',
-              'Cutting',
-              'Jumping',
-              'Contact',
-              'Stretching',
-              'Bending',
-            ]}
-            onChange={(value) => onUpdate('hurtsWhen', value)}
-          />
-          <Select
-            label="Upcoming"
-            value={checkIn.session}
-            options={[
-              'Rest day',
-              'Recovery day',
-              'Optional training',
-              'Team practice',
-              'Game day',
-              'Gym session',
-              'Conditioning',
-              'Tournament',
-            ]}
-            onChange={(value) => onUpdate('session', value)}
-          />
+          {hasPain && (
+            <>
+              <Select
+                label="Pain location"
+                value={checkIn.location}
+                options={[
+                  'Hamstring',
+                  'Quad',
+                  'Calf',
+                  'Ankle',
+                  'Knee',
+                  'Hip',
+                  'Back',
+                  'Neck',
+                  'Head',
+                  'Shoulder',
+                ]}
+                onChange={(value) => onUpdate('location', value)}
+              />
+              <Select
+                label="Injury type"
+                value={checkIn.injuryType}
+                options={[
+                  'Muscle strain',
+                  'Joint irritation',
+                  'Impact bruise',
+                  'Tendon soreness',
+                  'Unknown',
+                ]}
+                onChange={(value) => onUpdate('injuryType', value)}
+              />
+              <Select
+                label="Pain type"
+                value={checkIn.painType}
+                options={[
+                  'Tight / pulling',
+                  'Dull ache',
+                  'Sharp / stabbing',
+                  'Swelling',
+                  'Instability',
+                  'Numbness',
+                  'Headache / dizziness',
+                ]}
+                onChange={(value) => onUpdate('painType', value)}
+              />
+              <Select
+                label="Hurts when"
+                value={checkIn.hurtsWhen}
+                options={[
+                  'At rest',
+                  'Jogging',
+                  'Sprinting',
+                  'Cutting',
+                  'Jumping',
+                  'Contact',
+                  'Stretching',
+                  'Bending',
+                ]}
+                onChange={(value) => onUpdate('hurtsWhen', value)}
+              />
+            </>
+          )}
         </div>
 
         <label className="notes-field">

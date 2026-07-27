@@ -1,31 +1,190 @@
-import { avoidRules } from '../data/appData'
-
-const scheduleCopy = {
-  'Rest day':
-    'Keep the day recovery-focused. Prioritize sleep, hydration, mobility, and light movement.',
-  'Recovery day':
-    'Keep the session easy. Mobility, stretching, light bike, and controlled movement fit today.',
-  'Optional training':
-    'Skip the extra workout or replace it with light technical work if readiness is low.',
-  'Team practice':
-    'Attend practice, but reduce intensity where possible and avoid unnecessary extra conditioning.',
-  'Game day':
-    'Warm up carefully, monitor symptoms, and tell a coach or trainer if pain gets worse.',
-  'Gym session':
-    'Adjust load before you adjust effort. Avoid heavy work that stresses the painful area.',
-  Conditioning:
-    'Conditioning should be reduced or replaced if soreness or pain is elevated.',
-  Tournament:
-    'Treat this as a load-management day. Save high effort for the moments that matter.',
-}
-
 const statusLevels = [
-  { max: 40, label: 'Do Not Participate', intensity: 'Stop and report' },
-  { max: 55, label: 'Technical Only', intensity: 'Light skill work' },
-  { max: 70, label: 'Modified Participation', intensity: '50-70% load' },
-  { max: 84, label: 'Train With Caution', intensity: '75-85% load' },
+  { max: 40, label: 'Stop and Check In', intensity: 'No training' },
+  { max: 55, label: 'Rehab / Mobility', intensity: 'Very light' },
+  { max: 70, label: 'Modified Training', intensity: '50-70% load' },
+  { max: 84, label: 'Controlled Training', intensity: '75-85% load' },
   { max: 101, label: 'Full Training', intensity: 'Normal load' },
 ]
+
+const trainingProfiles = {
+  'Rest day': {
+    action: 'Keep this as a true recovery day. Use easy movement only if it makes you feel better.',
+    avoid: ['Extra conditioning', 'Testing the painful movement'],
+    focus: ['Sleep', 'Hydration', 'Gentle mobility'],
+  },
+  'Recovery day': {
+    action: 'Use the session to restore range and leave feeling better than when you started.',
+    avoid: ['Hard intervals', 'Heavy loading', 'Pushing through symptoms'],
+    focus: ['Mobility flow', 'Light bike or walk', 'Breathing and reset work'],
+  },
+  'Optional training': {
+    action: 'Treat this as optional volume. If symptoms show up, replace the workout with light skill work.',
+    avoid: ['Bonus high-intensity work', 'Max effort sets', 'Extra conditioning'],
+    focus: ['Technique quality', 'Short session', 'Stop while symptoms are quiet'],
+  },
+  'Team practice': {
+    action: 'Attend practice, but choose your intensity based on the warm-up and the first few reps.',
+    avoid: ['Unneeded extra reps', 'Competitive contact if symptoms rise'],
+    focus: ['Technical work', 'Controlled reps', 'Coach communication'],
+  },
+  'Game day': {
+    action: 'Warm up honestly and decide based on whether symptoms stay stable at game speed.',
+    avoid: ['Ignoring symptoms to stay in', 'Max effort before warm-up is complete'],
+    focus: ['Progressive warm-up', 'Clear stop point', 'Tell coach early'],
+  },
+  'Gym session': {
+    action: 'Lift with exercise selection first. Keep the session productive without chasing painful ranges.',
+    avoid: ['Painful lifts', 'Max attempts', 'Grinding reps'],
+    focus: ['Pain-free ranges', 'Controlled tempo', 'Substitute smartly'],
+  },
+  Conditioning: {
+    action: 'Conditioning should match today’s tissue tolerance, not the planned intensity on paper.',
+    avoid: ['All-out intervals', 'Repeated max-speed reps'],
+    focus: ['Steady pace', 'Longer warm-up', 'Stop if mechanics change'],
+  },
+  Tournament: {
+    action: 'Manage the day in blocks. Save high effort for important moments and reassess between games.',
+    avoid: ['Skipping cooldowns', 'Playing through worsening pain'],
+    focus: ['Between-game recovery', 'Short warm-ups', 'Hydration and food'],
+  },
+}
+
+const locationRules = {
+  Hamstring: {
+    avoid: ['Max sprinting', 'Long stride accelerations', 'Heavy hip-hinge loading if it bites'],
+    focus: ['Shorter stride buildup', 'Glute activation', 'Pain-free hamstring range'],
+    gym: ['Heavy RDLs if symptoms appear', 'Explosive hip hinges', 'Deep loaded stretching'],
+    contact: ['Chasing full-speed runs early', 'Repeated breakaway sprints'],
+  },
+  Quad: {
+    avoid: ['Heavy knee-dominant loading', 'Repeated jumping', 'Hard deceleration volume'],
+    focus: ['Controlled knee bends', 'Gradual quad warm-up', 'Smooth landing mechanics'],
+    gym: ['Heavy squats if pain shows up', 'Deep painful lunges', 'High-volume leg extensions'],
+    contact: ['Repeated hard stops', 'Explosive jumping battles'],
+  },
+  Calf: {
+    avoid: ['Repeated sprint starts', 'Plyometric volume', 'Hard hill work'],
+    focus: ['Progressive calf raises', 'Easy buildup runs', 'Ankle stiffness check'],
+    gym: ['Heavy calf work early', 'Loaded jumping', 'Pushing off through sharp pain'],
+    contact: ['Repeated first-step bursts', 'Long toe-off sprints'],
+  },
+  Ankle: {
+    avoid: ['Sharp cuts', 'Uneven surfaces', 'Jump landings without control'],
+    focus: ['Balance work', 'Stable footwear or brace if used', 'Linear movement first'],
+    gym: ['Unstable loaded work', 'Painful single-leg jumps', 'Heavy lateral lunges'],
+    contact: ['Contact landings', 'Unplanned direction changes'],
+  },
+  Knee: {
+    avoid: ['Hard cutting', 'Deep painful knee angles', 'Jump volume'],
+    focus: ['Linear drills', 'Controlled landings', 'Hip and quad activation'],
+    gym: ['Painful deep squats', 'Heavy lunges', 'Jump squats'],
+    contact: ['Twisting under contact', 'Repeated hard decels'],
+  },
+  Hip: {
+    avoid: ['Hard cutting', 'Deep loaded hip ranges', 'High-knee sprint volume'],
+    focus: ['Hip mobility', 'Glute activation', 'Short controlled accelerations'],
+    gym: ['Painful deep squats', 'Heavy lateral work', 'Loaded end-range positions'],
+    contact: ['Wide cutting angles', 'Awkward contact positions'],
+  },
+  Back: {
+    avoid: ['Heavy spinal loading', 'Twisting volume', 'Grinding reps'],
+    focus: ['Bracing quality', 'Neutral spine positions', 'Lower-load alternatives'],
+    gym: ['Heavy axial loading', 'Deadlift maxes', 'Loaded rotation'],
+    contact: ['Twisting under pressure', 'Contact while extended'],
+  },
+  Shoulder: {
+    avoid: ['Painful shoulder ranges', 'Heavy overhead work', 'Forcing end range'],
+    focus: ['Scapular control', 'Pain-free pressing angle', 'Controlled pulling'],
+    gym: ['Heavy overhead pressing', 'Deep painful bench range', 'Kipping or jerky reps'],
+    contact: ['Contact through the shoulder', 'Falling or bracing on that arm'],
+  },
+  Neck: {
+    avoid: ['Headers', 'Contact', 'Heavy axial loading'],
+    focus: ['Tell an adult or trainer', 'Gentle range only', 'Monitor symptoms'],
+    gym: ['Heavy shrugs', 'Axial loading', 'Valsalva-heavy maxes'],
+    contact: ['Headers', 'Any head or neck contact'],
+  },
+  Head: {
+    avoid: ['Training', 'Contact', 'Conditioning through symptoms'],
+    focus: ['Tell an adult or trainer now', 'Monitor symptoms', 'Follow return-to-play guidance'],
+    gym: ['Lifting', 'Conditioning', 'Anything that worsens symptoms'],
+    contact: ['All contact', 'Headers', 'Game-speed play'],
+  },
+}
+
+const painTypeRules = {
+  'Tight / pulling': {
+    avoid: ['Explosive first reps', 'End-range stretching under load'],
+    focus: ['Longer warm-up', 'Gradual speed build', 'Stop if tightness becomes pain'],
+  },
+  'Dull ache': {
+    avoid: ['High-volume pounding', 'Chasing personal records'],
+    focus: ['Easy first set', 'Check symptoms between blocks', 'Keep movement smooth'],
+  },
+  'Sharp / stabbing': {
+    avoid: ['Recreating the sharp pain', 'Fast reps through that pattern'],
+    focus: ['Find a pain-free angle', 'Slow tempo', 'Stop if sharpness rises'],
+  },
+  Swelling: {
+    avoid: ['Loading through swelling', 'Tight gear over the area'],
+    focus: ['Reduce volume', 'Elevate after training', 'Check with an adult if swelling grows'],
+  },
+  Instability: {
+    avoid: ['Unplanned direction changes', 'Single-leg max effort', 'Contact situations'],
+    focus: ['Stable surfaces', 'Controlled balance work', 'Brace/support if prescribed'],
+  },
+  Numbness: {
+    avoid: ['Training through numbness', 'Heavy loading', 'Contact'],
+    focus: ['Stop and tell an adult', 'Track symptoms', 'Get medical guidance'],
+  },
+  'Headache / dizziness': {
+    avoid: ['Training', 'Screens if symptoms worsen', 'Contact'],
+    focus: ['Tell an adult now', 'Rest', 'Follow concussion protocol if relevant'],
+  },
+  'No pain': {
+    avoid: [],
+    focus: ['Full warm-up', 'Normal training load', 'Post-session notes'],
+  },
+}
+
+const movementRules = {
+  'At rest': {
+    avoid: ['Training through resting pain', 'Max effort testing'],
+    focus: ['Treat this as higher priority', 'Tell coach or adult', 'Start with gentle movement only'],
+  },
+  Jogging: {
+    avoid: ['Conditioning volume that changes your stride'],
+    focus: ['Short easy jog test', 'Keep stride smooth', 'Switch to bike if symptoms rise'],
+  },
+  Sprinting: {
+    avoid: ['Max sprinting', 'Repeated accelerations', 'Long stride fly runs'],
+    focus: ['Build speed gradually', 'Cap sprint volume', 'Stop if mechanics change'],
+  },
+  Cutting: {
+    avoid: ['Hard cuts', 'Reactive agility', 'Defensive change-of-direction reps'],
+    focus: ['Linear work first', 'Controlled angles', 'Slow-to-fast progression'],
+  },
+  Jumping: {
+    avoid: ['Repeated jumps', 'Hard landings', 'Loaded plyometrics'],
+    focus: ['Landing control', 'Low amplitude first', 'Stop if pain appears on takeoff or landing'],
+  },
+  Contact: {
+    avoid: ['Contact drills', 'Tackles or checks', 'Competing through pain'],
+    focus: ['Technical no-contact work', 'Coach communication', 'Reassess after warm-up'],
+  },
+  Stretching: {
+    avoid: ['Aggressive stretching', 'Loaded end-range holds'],
+    focus: ['Gentle range', 'Dynamic warm-up', 'Keep stretch below pain'],
+  },
+  Bending: {
+    avoid: ['Loaded painful bending', 'Rounding into symptoms'],
+    focus: ['Brace first', 'Shorten range', 'Use supported alternatives'],
+  },
+}
+
+function unique(items) {
+  return [...new Set(items)].filter(Boolean).slice(0, 4)
+}
 
 function riskFromChoice(value, weights) {
   return weights[value] ?? 0
@@ -35,7 +194,24 @@ function getStatus(score) {
   return statusLevels.find((level) => score < level.max) ?? statusLevels.at(-1)
 }
 
+function getPain(checkIn) {
+  return checkIn.pain
+}
+
+function getSeverity(pain) {
+  if (pain === 0) return 'none'
+  if (pain <= 2) return 'low'
+  if (pain <= 4) return 'moderate'
+  if (pain <= 7) return 'high'
+  return 'severe'
+}
+
+function isContactSession(session) {
+  return ['Team practice', 'Game day', 'Tournament'].includes(session)
+}
+
 function getReasons(checkIn) {
+  const pain = getPain(checkIn)
   const reasons = []
 
   if (checkIn.sleep < 7) reasons.push('low sleep')
@@ -47,46 +223,171 @@ function getReasons(checkIn) {
     reasons.push(`a ${checkIn.yesterdayLoad.toLowerCase()} session yesterday`)
   }
   if (checkIn.hydration === 'Poor') reasons.push('poor hydration or nutrition')
-  if (checkIn.pain > 0 && checkIn.location !== 'None') {
-    reasons.push(`${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()}`)
+  if (pain > 0) {
+    reasons.push(`${pain}/10 ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()}`)
   }
 
   return reasons
 }
 
 function hasRedFlag(checkIn) {
+  const pain = getPain(checkIn)
+
   return (
-    checkIn.pain >= 8 ||
-    ['Sharp / stabbing', 'Swelling', 'Instability', 'Numbness', 'Headache / dizziness'].includes(
-      checkIn.painType,
-    ) ||
-    ['Head', 'Neck'].includes(checkIn.location) && checkIn.painType !== 'No pain'
+    pain >= 8 ||
+    checkIn.painType === 'Numbness' ||
+    checkIn.painType === 'Headache / dizziness' ||
+    (checkIn.painType === 'Instability' && pain >= 3) ||
+    (checkIn.painType === 'Swelling' && pain >= 4) ||
+    (checkIn.painType === 'Sharp / stabbing' && pain >= 5) ||
+    (['Head', 'Neck'].includes(checkIn.location) && pain >= 2)
   )
 }
 
-function getScheduleAdjustment(checkIn, status) {
-  const session = checkIn.session
-  const scheduleAdvice = scheduleCopy[session] ?? scheduleCopy['Team practice']
+function getPainTypeRisk(checkIn, pain) {
+  if (pain === 0) return 0
 
-  if (status.label === 'Do Not Participate') {
-    return 'Do not train today. Tell a coach, parent, or trainer before participating.'
+  return riskFromChoice(checkIn.painType, {
+    'No pain': 0,
+    'Tight / pulling': 2,
+    'Dull ache': 2,
+    'Sharp / stabbing': pain <= 2 ? 4 : 10,
+    Swelling: pain <= 2 ? 5 : 12,
+    Instability: pain <= 2 ? 8 : 16,
+    Numbness: 18,
+    'Headache / dizziness': 18,
+  })
+}
+
+function getMovementRisk(checkIn, pain) {
+  if (pain === 0) return 0
+
+  return riskFromChoice(checkIn.hurtsWhen, {
+    'At rest': 12,
+    Jogging: 4,
+    Sprinting: 7,
+    Cutting: 8,
+    Jumping: 8,
+    Contact: 7,
+    Stretching: 4,
+    Bending: 4,
+  })
+}
+
+function getSessionRisk(checkIn, pain) {
+  if (pain === 0) return 0
+
+  return riskFromChoice(checkIn.session, {
+    'Rest day': -4,
+    'Recovery day': -2,
+    'Optional training': 0,
+    'Team practice': 4,
+    'Game day': 8,
+    'Gym session': 2,
+    Conditioning: ['Hamstring', 'Calf', 'Knee', 'Ankle'].includes(checkIn.location) ? 7 : 3,
+    Tournament: 9,
+  })
+}
+
+function getContextualAvoid(checkIn, redFlag) {
+  const pain = getPain(checkIn)
+  const location = locationRules[checkIn.location]
+  const painType = painTypeRules[checkIn.painType] ?? painTypeRules['No pain']
+  const movement = movementRules[checkIn.hurtsWhen] ?? { avoid: [], focus: [] }
+  const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
+
+  if (redFlag) {
+    return unique([
+      'Do not test max effort',
+      ...painType.avoid,
+      ...(location?.avoid ?? []),
+      ...training.avoid,
+    ])
   }
 
-  if (session === 'Rest day' || session === 'Recovery day') {
-    return scheduleAdvice
+  if (pain === 0) {
+    return []
   }
 
-  if (session === 'Optional training' && status.label !== 'Full Training') {
-    return scheduleCopy['Optional training']
+  const sessionSpecific =
+    checkIn.session === 'Gym session'
+      ? location?.gym
+      : isContactSession(checkIn.session)
+        ? location?.contact
+        : location?.avoid
+
+  return unique([
+    ...(sessionSpecific ?? []),
+    ...painType.avoid,
+    ...movement.avoid,
+  ])
+}
+
+function getContextualFocus(checkIn, status, redFlag) {
+  const pain = getPain(checkIn)
+  const location = locationRules[checkIn.location]
+  const painType = painTypeRules[checkIn.painType] ?? painTypeRules['No pain']
+  const movement = movementRules[checkIn.hurtsWhen] ?? { avoid: [], focus: [] }
+  const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
+
+  if (redFlag || status.label === 'Stop and Check In') {
+    return unique(['Tell an adult or trainer', ...painType.focus, ...(location?.focus ?? [])])
   }
 
-  return scheduleAdvice
+  if (pain === 0) {
+    return unique(['Full warm-up', ...training.focus])
+  }
+
+  return unique([
+    ...training.focus,
+    ...(location?.focus ?? []),
+    ...painType.focus,
+    ...movement.focus,
+  ])
+}
+
+function getPersonalAction(checkIn, status, redFlag) {
+  const pain = getPain(checkIn)
+  const severity = getSeverity(pain)
+  const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
+
+  if (redFlag || status.label === 'Stop and Check In') {
+    return `This combination needs an adult, coach, athletic trainer, or medical check before training: ${pain}/10 ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()} during ${checkIn.hurtsWhen.toLowerCase()}.`
+  }
+
+  if (pain === 0) {
+    return training.action
+  }
+
+  if (checkIn.session === 'Gym session') {
+    return `Lift today, but build the workout around your ${severity} ${checkIn.location.toLowerCase()} symptoms. Keep exercises pain-free, avoid the trigger (${checkIn.hurtsWhen.toLowerCase()}), and swap lifts before forcing a rep.`
+  }
+
+  if (isContactSession(checkIn.session)) {
+    return `Join the session with boundaries. Your ${severity} ${checkIn.location.toLowerCase()} pain shows up with ${checkIn.hurtsWhen.toLowerCase()}, so keep the useful technical work and limit the drills most likely to recreate it.`
+  }
+
+  return `Train with a modification. Your ${severity} ${checkIn.location.toLowerCase()} symptoms are tied to ${checkIn.hurtsWhen.toLowerCase()}, so keep work controlled and stop if the pain climbs.`
+}
+
+function getSummary(checkIn, status, reasons) {
+  const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
+
+  if (status.label === 'Stop and Check In') {
+    return `Pause the planned session until someone checks this. The decision is based on ${reasons.join(', ')}.`
+  }
+
+  return `${training.action} This is based on ${reasons.length ? reasons.join(', ') : 'a clean check-in'}.`
 }
 
 export function getRecommendation(checkIn) {
+  const pain = getPain(checkIn)
   const risk =
     checkIn.soreness * 4 +
-    checkIn.pain * 8 +
+    pain * 8 +
+    getPainTypeRisk(checkIn, pain) +
+    getMovementRisk(checkIn, pain) +
+    getSessionRisk(checkIn, pain) +
     checkIn.fatigue * 4 +
     Math.max(0, 8 - checkIn.sleep) * 6 +
     Math.max(0, 8 - checkIn.energy) * 4 +
@@ -103,45 +404,49 @@ export function getRecommendation(checkIn) {
   const score = Math.max(6, Math.min(98, 100 - risk))
   const redFlag = hasRedFlag(checkIn)
   const status = redFlag
-    ? { label: 'Do Not Participate', intensity: 'Stop and report' }
+    ? { label: 'Stop and Check In', intensity: 'No training' }
     : getStatus(score)
   const reasons = getReasons(checkIn)
-  const avoid = redFlag
-    ? ['No contact', 'No sprinting', 'Do not push through symptoms']
-    : avoidRules[checkIn.location] ?? avoidRules.None
-  const scheduleAdjustment = getScheduleAdjustment(checkIn, status)
-  const reasonText = reasons.length
-    ? ` because of ${reasons.join(', ')}`
-    : ' with no major recovery flags'
+  const avoid = getContextualAvoid(checkIn, redFlag)
+  const focus = getContextualFocus(checkIn, status, redFlag)
 
   return {
     score,
     label: status.label,
-    tone: redFlag || status.label === 'Do Not Participate' ? 'danger' : score < 56 ? 'warning' : score < 84 ? 'caution' : 'ready',
+    tone:
+      redFlag || status.label === 'Stop and Check In'
+        ? 'danger'
+        : score < 56
+          ? 'warning'
+          : score < 84
+            ? 'caution'
+            : 'ready',
     intensity: status.intensity,
-    summary: `Your readiness is ${score}/100${reasonText}. ${scheduleAdjustment}`,
+    summary: getSummary(checkIn, status, reasons),
     avoid,
-    focus:
-      status.label === 'Full Training'
-        ? ['Normal session', 'Honest warm-up', 'Post-training notes']
-        : ['Longer warm-up', 'Controlled reps', 'Stop if symptoms climb'],
+    focus,
     reasons,
-    coachMessage: `Coach, I am at ${score}/100 readiness today with ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()}. I will show up for ${checkIn.session.toLowerCase()}, but I may need to limit ${avoid.slice(0, 2).join(' and ').toLowerCase()} if symptoms increase.`,
+    action: getPersonalAction(checkIn, status, redFlag),
+    coachMessage: `Coach, I am at ${score}/100 readiness today. I can do ${checkIn.session.toLowerCase()}, but I need to manage ${avoid.slice(0, 2).join(' and ').toLowerCase() || 'my load'} if symptoms increase.`,
   }
 }
 
 export function getTrendInsights(history) {
-  const hamstringDays = history.filter((item) => item.location === 'Hamstring')
-  const highFatigueDays = history.filter((item) => item.fatigue >= 7)
+  const sevenDaysAgo = new Date()
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
+  sevenDaysAgo.setHours(0, 0, 0, 0)
+  const recentHistory = history.filter((item) => {
+    if (!item.date) return false
+    return new Date(`${item.date}T12:00:00`) >= sevenDaysAgo
+  })
+
+  if (recentHistory.length === 0) {
+    return ['No check-ins saved in the last 7 days.']
+  }
+
   const averageScore = Math.round(
-    history.reduce((total, item) => total + item.score, 0) / history.length,
+    recentHistory.reduce((total, item) => total + item.score, 0) / recentHistory.length,
   )
 
-  return [
-    `Average readiness is ${averageScore} across the last ${history.length} check-ins.`,
-    `Hamstring pain appeared ${hamstringDays.length} times this week.`,
-    highFatigueDays.length >= 2
-      ? 'Fatigue is high after back-to-back practices.'
-      : 'Fatigue has stayed mostly manageable.',
-  ]
+  return [`Average readiness is ${averageScore} across the last 7 days.`]
 }
