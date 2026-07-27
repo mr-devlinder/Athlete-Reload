@@ -9,6 +9,13 @@ export function CheckInView({ checkIn, recommendation, onSave, onUpdate }) {
         <SectionHeading eyebrow="Daily check-in" title="How are you showing up?" />
 
         <Slider
+          label="Energy"
+          max={10}
+          value={checkIn.energy}
+          unit="/10"
+          onChange={(value) => onUpdate('energy', value)}
+        />
+        <Slider
           label="Soreness"
           max={10}
           value={checkIn.soreness}
@@ -40,9 +47,39 @@ export function CheckInView({ checkIn, recommendation, onSave, onUpdate }) {
 
         <div className="select-row">
           <Select
+            label="Stress"
+            value={checkIn.stress}
+            options={['Low', 'Medium', 'High']}
+            onChange={(value) => onUpdate('stress', value)}
+          />
+          <Select
+            label="Yesterday"
+            value={checkIn.yesterdayLoad}
+            options={['Rest', 'Light', 'Moderate', 'Hard', 'Game']}
+            onChange={(value) => onUpdate('yesterdayLoad', value)}
+          />
+          <Select
+            label="Hydration"
+            value={checkIn.hydration}
+            options={['Good', 'Okay', 'Poor']}
+            onChange={(value) => onUpdate('hydration', value)}
+          />
+          <Select
             label="Pain location"
             value={checkIn.location}
-            options={['Hamstring', 'Knee', 'Ankle', 'Shoulder', 'Back', 'None']}
+            options={[
+              'Hamstring',
+              'Quad',
+              'Calf',
+              'Ankle',
+              'Knee',
+              'Hip',
+              'Back',
+              'Neck',
+              'Head',
+              'Shoulder',
+              'None',
+            ]}
             onChange={(value) => onUpdate('location', value)}
           />
           <Select
@@ -64,18 +101,41 @@ export function CheckInView({ checkIn, recommendation, onSave, onUpdate }) {
               'Tight / pulling',
               'Dull ache',
               'Sharp / stabbing',
+              'Swelling',
+              'Instability',
+              'Numbness',
+              'Headache / dizziness',
               'No pain',
             ]}
             onChange={(value) => onUpdate('painType', value)}
           />
           <Select
+            label="Hurts when"
+            value={checkIn.hurtsWhen}
+            options={[
+              'At rest',
+              'Jogging',
+              'Sprinting',
+              'Cutting',
+              'Jumping',
+              'Contact',
+              'Stretching',
+              'Bending',
+            ]}
+            onChange={(value) => onUpdate('hurtsWhen', value)}
+          />
+          <Select
             label="Upcoming"
             value={checkIn.session}
             options={[
+              'Rest day',
+              'Recovery day',
+              'Optional training',
               'Team practice',
               'Game day',
-              'Strength session',
-              'Recovery day',
+              'Gym session',
+              'Conditioning',
+              'Tournament',
             ]}
             onChange={(value) => onUpdate('session', value)}
           />

@@ -1,11 +1,31 @@
 import { SectionHeading } from './SectionHeading'
 
-export function HistoryView({ history, insights }) {
+export function HistoryView({ history, insights, onClear, onReset }) {
   const maxScore = Math.max(...history.map((item) => item.score))
+  const hasSavedHistory = history.length > 1
 
   return (
     <div className="history-view">
-      <SectionHeading eyebrow="History" title="Patterns are the product." />
+      <div className="schedule-header">
+        <SectionHeading eyebrow="History" title="Patterns are the product." />
+        <div className="history-actions">
+          <button
+            className="remove-button compact-action"
+            disabled={!hasSavedHistory}
+            onClick={onClear}
+            type="button"
+          >
+            Clear saved history
+          </button>
+          <button
+            className="secondary-button compact-action"
+            onClick={onReset}
+            type="button"
+          >
+            Reset app data
+          </button>
+        </div>
+      </div>
 
       <div className="trend-grid">
         {insights.map((insight) => (

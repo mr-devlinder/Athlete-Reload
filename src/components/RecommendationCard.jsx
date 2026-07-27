@@ -23,13 +23,18 @@ export function RecommendationCard({ recommendation, session }) {
         <AdviceList title="Focus" items={recommendation.focus} />
       </div>
 
+      {recommendation.reasons.length > 0 && (
+        <div className="reason-strip">
+          {recommendation.reasons.map((reason) => (
+            <span key={reason}>{reason}</span>
+          ))}
+        </div>
+      )}
+
       <div className="coach-note">
         <p className="eyebrow">{session}</p>
         <strong>Coach message</strong>
-        <p>
-          I can train today, but I need the modified plan above and will stop if
-          symptoms climb.
-        </p>
+        <p>{recommendation.coachMessage}</p>
       </div>
     </aside>
   )
