@@ -1,16 +1,105 @@
-# React + Vite
+# Athlete Reload
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Athlete Reload is a training readiness planner for athletes. It combines a daily check-in, a schedule calendar, and saved history to recommend how training should be adjusted for the day instead of defaulting to a simple rest/no-rest answer.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- Email/password authentication with Supabase
+- Device session persistence for familiar-device sign-in
+- Daily readiness check-in
+- Schedule-aware recommendations
+- Injury and pain-aware training guidance
+- Editable monthly calendar
+- Saved check-in history
+- History detail modal
+- Mobile-friendly layout
+- Liquid glass navigation effect with `react-glassy`
 
-## React Compiler
+## Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- React
+- Vite
+- Supabase
+- date-fns
+- react-glassy
+- Oxlint
+- GitHub Pages
 
-## Expanding the Oxlint configuration
+## Getting Started
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+Build for production:
+
+```bash
+npm run build
+```
+
+Run lint:
+
+```bash
+npm run lint
+```
+
+Preview a production build locally:
+
+```bash
+npm run preview
+```
+
+## Environment Variables
+
+Create a `.env.local` file from `.env.example`:
+
+```bash
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
+```
+
+Use the Supabase project URL and publishable key. Do not put a service role key in the frontend.
+
+## Supabase
+
+The app uses Supabase for authentication and account-owned data.
+
+The schema is tracked in:
+
+```bash
+supabase/migrations/20260727210000_create_athlete_reload_user_data.sql
+```
+
+Tables:
+
+- `schedule_events`
+- `check_ins`
+
+Both tables use row level security so each authenticated user can only access their own schedule and check-in records.
+
+## Deployment
+
+This repo is set up for GitHub Pages using `gh-pages`.
+
+Typical deploy flow:
+
+```bash
+git add .
+git commit -m "message"
+git push
+npm.cmd run deploy
+```
+
+The Vite base path is configured for GitHub Pages in `vite.config.js`.
+
+## Notes
+
+Athlete Reload is a planning tool, not a medical diagnosis tool. High-risk symptoms should still be handled by a coach, parent, athletic trainer, or medical professional.

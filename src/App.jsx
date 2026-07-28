@@ -99,6 +99,7 @@ function sortScheduleEvents(events) {
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
+  const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
   const [dataStatus, setDataStatus] = useState('ready')
   const [isEditingToday, setIsEditingToday] = useState(false)
@@ -114,7 +115,7 @@ function App() {
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
   const visualActiveView = navLens?.activeLabel ?? activeView
-  const isSupabaseSession = Boolean(supabase && session?.user?.id)
+  const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
   const todayIso = getTodayIso()
   const todayEvents = useMemo(
     () => sortScheduleEvents(schedule.filter((event) => event.date === todayIso)),
@@ -205,6 +206,9 @@ function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession)
+      if (!nextSession) {
+        setIsAppUnlocked(false)
+      }
       setIsAuthReady(true)
     })
 
@@ -234,20 +238,44 @@ function App() {
     let isMounted = true
     setDataStatus('loading')
 
-    loadAthleteData()
-      .then((data) => {
+    async function loadRemoteData() {
+      try {
+        const data = await loadAthleteData()
+
         if (!isMounted) return
 
         setSchedule(data.schedule)
         setHistory(data.history)
         setDataStatus('ready')
-      })
-      .catch((error) => {
-        console.error(error)
-        if (isMounted) {
-          setDataStatus('error')
+      } catch (error) {
+        if (error?.status === 401 || error?.code === 'PGRST301') {
+          const { error: refreshError } = await supabase.auth.refreshSession()
+
+          if (!refreshError) {
+            try {
+              const data = await loadAthleteData()
+
+              if (!isMounted) return
+
+              setSchedule(data.schedule)
+              setHistory(data.history)
+              setDataStatus('ready')
+              return
+            } catch (retryError) {
+              console.error(retryError)
+            }
+          }
+        } else {
+          console.error(error)
         }
-      })
+
+        if (isMounted) {
+          setDataStatus(navigator.onLine ? 'error' : 'offline')
+        }
+      }
+    }
+
+    loadRemoteData()
 
     return () => {
       isMounted = false
@@ -362,10 +390,10 @@ function App() {
     }
   }
 
-  async function clearHistory() {
+  async function clearHistory(cutoffDate) {
     if (isSupabaseSession) {
       try {
-        await clearCheckIns()
+        await clearCheckIns(cutoffDate)
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -373,7 +401,11 @@ function App() {
       }
     }
 
-    setHistory([])
+    setHistory((current) =>
+      cutoffDate
+        ? current.filter((entry) => !entry.date || entry.date < cutoffDate)
+        : [],
+    )
   }
 
   function startDemoSession(email) {
@@ -382,6 +414,16 @@ function App() {
         email,
       },
     })
+    setIsAppUnlocked(true)
+  }
+
+  function unlockRememberedSession() {
+    setIsAppUnlocked(true)
+  }
+
+  function finishAuthentication(nextSession) {
+    setSession(nextSession)
+    setIsAppUnlocked(true)
   }
 
   async function signOut() {
@@ -390,6 +432,7 @@ function App() {
     }
 
     setSession(null)
+    setIsAppUnlocked(false)
     setActiveView('Check-in')
   }
 
@@ -584,9 +627,16 @@ function App() {
 
       {!isAuthReady && <div className="auth-loading glass-panel">Loading</div>}
 
-      {isAuthReady && !session && <AuthGate onDemoSession={startDemoSession} />}
+      {isAuthReady && !isAppUnlocked && (
+        <AuthGate
+          rememberedSession={session}
+          onAuthenticated={finishAuthentication}
+          onDemoSession={startDemoSession}
+          onUseRememberedSession={unlockRememberedSession}
+        />
+      )}
 
-      {isAuthReady && session && (
+      {isAuthReady && isAppUnlocked && session && (
         <>
           <nav className="top-bar glass-panel">
         <div className="brand-lockup">
@@ -678,6 +728,12 @@ function App() {
               <div className="data-status error">
                 Supabase data sync needs attention. Your screen may be showing the
                 last loaded state.
+              </div>
+            )}
+
+            {dataStatus === 'offline' && (
+              <div className="data-status">
+                You appear to be offline. Showing the last loaded state.
               </div>
             )}
 

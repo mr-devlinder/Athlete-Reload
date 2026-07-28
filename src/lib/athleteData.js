@@ -145,11 +145,14 @@ export async function deleteCheckInsForDate(date) {
   if (error) throw error
 }
 
-export async function clearCheckIns() {
-  const { error } = await supabase
-    .from('check_ins')
-    .delete()
-    .not('id', 'is', null)
+export async function clearCheckIns(cutoffDate) {
+  let query = supabase.from('check_ins').delete()
+
+  query = cutoffDate
+    ? query.gte('check_in_date', cutoffDate)
+    : query.not('id', 'is', null)
+
+  const { error } = await query
 
   if (error) throw error
 }

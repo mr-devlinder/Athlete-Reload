@@ -7,7 +7,12 @@ const authDefaults = {
   password: '',
 }
 
-export function AuthGate({ onDemoSession }) {
+export function AuthGate({
+  onAuthenticated,
+  onDemoSession,
+  onUseRememberedSession,
+  rememberedSession,
+}) {
   const [mode, setMode] = useState('landing')
   const [authForm, setAuthForm] = useState(authDefaults)
   const [authMessage, setAuthMessage] = useState('')
@@ -45,7 +50,7 @@ export function AuthGate({ onDemoSession }) {
           password: authForm.password,
         })
 
-    const { error } = await authRequest
+    const { data, error } = await authRequest
     setIsSubmitting(false)
 
     if (error) {
@@ -55,6 +60,11 @@ export function AuthGate({ onDemoSession }) {
 
     if (isSigningUp) {
       setAuthMessage('Check your email to finish creating your account.')
+      return
+    }
+
+    if (data.session) {
+      onAuthenticated(data.session)
     }
   }
 
@@ -75,7 +85,14 @@ export function AuthGate({ onDemoSession }) {
           <div className="landing-actions">
             <button
               className="primary-button compact-action"
-              onClick={() => setMode('signin')}
+              onClick={() => {
+                if (rememberedSession) {
+                  onUseRememberedSession()
+                  return
+                }
+
+                setMode('signin')
+              }}
               type="button"
             >
               Sign in

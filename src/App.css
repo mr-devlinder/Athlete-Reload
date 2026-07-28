@@ -1283,18 +1283,38 @@ textarea {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 2147483647;
   display: grid;
   place-items: center;
-  padding: 20px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
   background: rgba(17, 17, 19, 0.28);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  touch-action: none;
+}
+
+body.modal-open .nav-tabs {
+  pointer-events: none;
 }
 
 .event-modal {
   width: min(640px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
+
+.history-modal-backdrop {
+  align-items: start;
+}
+
+.history-modal {
+  margin: auto 0;
 }
 
 .modal-form {
@@ -1516,6 +1536,18 @@ textarea {
 
 .history-note p {
   margin: 0;
+}
+
+.clear-range-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.clear-range-grid .remove-button {
+  min-height: 44px;
+  margin-top: 0;
 }
 
 @media (max-width: 1060px) {
