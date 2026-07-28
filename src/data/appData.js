@@ -1,4 +1,5 @@
 import { addDays, format } from 'date-fns'
+import { createEmptyPainMap } from './bodyPainMap'
 
 const today = new Date()
 
@@ -12,6 +13,10 @@ export const checkInDefaults = {
   energy: 6,
   soreness: 3,
   pain: 2,
+  painMap: {
+    ...createEmptyPainMap(),
+    'left-hamstring': 20,
+  },
   fatigue: 4,
   sleep: 7,
   stress: 'Medium',

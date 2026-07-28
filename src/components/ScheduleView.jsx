@@ -14,6 +14,7 @@ import {
 } from 'date-fns'
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
+import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
 
 const eventTypes = [
   'Rest day',
@@ -27,6 +28,7 @@ const eventTypes = [
 ]
 
 const loadLevels = ['Low', 'Medium', 'High']
+const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const today = new Date()
 const todayIso = toIsoDate(today)
@@ -38,10 +40,14 @@ const emptyEvent = {
   time: '',
   title: '',
   type: 'Team practice',
+  repeat: 'Does not repeat',
+  repeatCount: 4,
 }
 
 export function ScheduleView({
+  checkouts = [],
   onAdd,
+  onOpenCheckout,
   onRemove,
   onUpdate,
   schedule,
@@ -85,16 +91,20 @@ export function ScheduleView({
     }))
   }
 
-  function saveDraft() {
+  async function saveDraft() {
     const event = {
       ...draftEvent,
       title: draftEvent.title || draftEvent.type,
     }
 
     if (modalMode === 'edit') {
-      onUpdate(event.id, event)
+      await onUpdate(event.id, event)
     } else {
-      onAdd(event)
+      const events = createRecurringEvents(event)
+
+      for (const scheduledEvent of events) {
+        await onAdd(scheduledEvent)
+      }
     }
 
     setSelectedDate(event.date)
@@ -197,35 +207,54 @@ export function ScheduleView({
             </div>
           ) : (
             <div className="event-list">
-              {selectedEvents.map((event) => (
-                <article className="event-card" key={event.id}>
-                  <span className={`load ${event.load.toLowerCase()}`}>
-                    {event.load}
-                  </span>
-                  <h4>{event.title}</h4>
+              {selectedEvents.map((event) => {
+                const checkout = getCheckoutForEvent(checkouts, event.id)
+                const canCheckout = hasEventStarted(event)
+
+                return (
+                  <article className="event-card" key={event.id}>
+                    <span className={`load ${event.load.toLowerCase()}`}>
+                      {event.load}
+                    </span>
+                    <h4>{event.title}</h4>
                   <p>
                     {event.type}
-                    {event.time ? ` at ${event.time}` : ''}
+                    {event.time ? ` at ${formatTimeLabel(event.time)}` : ''}
                   </p>
-                  {event.note && <p>{event.note}</p>}
-                  <div className="event-actions">
-                    <button
-                      className="secondary-button compact-action"
-                      onClick={() => openEditModal(event)}
-                      type="button"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      className="remove-button compact-action"
-                      onClick={() => onRemove(event.id)}
-                      type="button"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </article>
-              ))}
+                    {checkout && (
+                      <p>
+                        Actual: {checkout.actualMinutes} min, {checkout.difficulty}/10 difficulty
+                      </p>
+                    )}
+                    {event.note && <p>{event.note}</p>}
+                    <div className="event-actions">
+                      {canCheckout && (
+                        <button
+                          className="secondary-button compact-action"
+                          onClick={() => onOpenCheckout(event)}
+                          type="button"
+                        >
+                          {checkout ? 'View checkout' : 'Log checkout'}
+                        </button>
+                      )}
+                      <button
+                        className="secondary-button compact-action"
+                        onClick={() => openEditModal(event)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="remove-button compact-action"
+                        onClick={() => onRemove(event.id)}
+                        type="button"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
             </div>
           )}
         </aside>
@@ -278,9 +307,9 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
           <label className="compact-field">
             Time
             <input
-              value={draftEvent.time}
+              type="time"
+              value={toTimeInputValue(draftEvent.time)}
               onChange={(event) => onUpdate('time', event.target.value)}
-              placeholder="6:00 PM"
             />
           </label>
           <Select
@@ -295,6 +324,28 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
             options={loadLevels}
             onChange={(value) => onUpdate('load', value)}
           />
+          {mode === 'create' && (
+            <>
+              <Select
+                label="Repeat"
+                value={draftEvent.repeat}
+                options={repeatOptions}
+                onChange={(value) => onUpdate('repeat', value)}
+              />
+              {draftEvent.repeat !== 'Does not repeat' && (
+                <label className="compact-field">
+                  Number of events
+                  <input
+                    max="52"
+                    min="1"
+                    type="number"
+                    value={draftEvent.repeatCount}
+                    onChange={(event) => onUpdate('repeatCount', event.target.value)}
+                  />
+                </label>
+              )}
+            </>
+          )}
           <label className="compact-field modal-notes">
             Notes
             <textarea
@@ -344,4 +395,53 @@ function toIsoDate(date) {
 
 function formatDisplayDate(value) {
   return format(parseISO(value), 'EEEE, MMMM d')
+}
+
+function toTimeInputValue(value) {
+  if (!value) return ''
+  if (/^\d{2}:\d{2}$/.test(value)) return value
+
+  const parsed = new Date(`2000-01-01 ${value}`)
+
+  if (Number.isNaN(parsed.getTime())) return ''
+
+  return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
+}
+
+function formatTimeLabel(value) {
+  const timeValue = toTimeInputValue(value)
+
+  if (!timeValue) return value
+
+  const [hourText, minuteText] = timeValue.split(':')
+  const hour = Number(hourText)
+  const suffix = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = hour % 12 || 12
+
+  return `${displayHour}:${minuteText} ${suffix}`
+}
+
+function createRecurringEvents(event) {
+  const count = event.repeat === 'Does not repeat'
+    ? 1
+    : Math.max(1, Math.min(52, Number(event.repeatCount) || 1))
+
+  return Array.from({ length: count }, (_, index) => {
+    const date = parseISO(event.date)
+    const nextDate = event.repeat === 'Daily'
+      ? addDays(date, index)
+      : event.repeat === 'Weekly'
+        ? addDays(date, index * 7)
+        : date
+
+    return {
+      date: toIsoDate(nextDate),
+      id: index === 0 ? event.id : `event-${Date.now()}-${index}`,
+      load: event.load,
+      note: event.note,
+      time: event.time,
+      title: event.title,
+      type: event.type,
+    }
+  })
 }

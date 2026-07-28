@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { format, parseISO, startOfWeek } from 'date-fns'
 import { SectionHeading } from './SectionHeading'
 
 const clearOptions = [
@@ -15,12 +16,15 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ history, insights, onClear }) {
+export function HistoryView({ checkouts = [], history, insights, onClear, onOpenCheckout }) {
   const maxScore = Math.max(...history.map((item) => item.score), 1)
   const hasSavedHistory = history.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
-  const isModalOpen = Boolean(selectedEntry || isClearModalOpen)
+  const [selectedWeek, setSelectedWeek] = useState(null)
+  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set())
+  const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
+  const weeks = getHistoryWeeks(history, checkouts)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -42,6 +46,20 @@ export function HistoryView({ history, insights, onClear }) {
   async function clearRange(option) {
     await onClear(getCutoffDate(option.days))
     setIsClearModalOpen(false)
+  }
+
+  function toggleWeek(weekKey) {
+    setExpandedWeeks((current) => {
+      const next = new Set(current)
+
+      if (next.has(weekKey)) {
+        next.delete(weekKey)
+      } else {
+        next.add(weekKey)
+      }
+
+      return next
+    })
   }
 
   return (
@@ -69,26 +87,64 @@ export function HistoryView({ history, insights, onClear }) {
       </div>
 
       <div className="history-list">
-        {history.length === 0 ? (
+        {weeks.length === 0 ? (
           <article className="history-row empty-history">
             <p>No saved check-ins yet.</p>
           </article>
         ) : (
-          history.map((item) => (
-            <button
-              className="history-row history-button"
-              key={`${item.date}-${item.createdAt ?? item.note}`}
-              onClick={() => setSelectedEntry(item)}
-              type="button"
-            >
-              <div className="history-score">
-                <span style={{ height: `${(item.score / maxScore) * 100}%` }} />
+          weeks.map((week) => (
+            <section className="history-week" key={week.key}>
+              <div className="history-week-header">
+                <button className="history-week-toggle" onClick={() => toggleWeek(week.key)} type="button">
+                  <span>{expandedWeeks.has(week.key) ? 'Hide' : 'Show'}</span>
+                  <strong>Week of {week.label}</strong>
+                  <em>{week.items.length} item{week.items.length === 1 ? '' : 's'}</em>
+                </button>
+                <button
+                  className="secondary-button compact-action"
+                  onClick={() => setSelectedWeek(week)}
+                  type="button"
+                >
+                  Weekly report
+                </button>
               </div>
-              <div>
-                <p className="eyebrow">{formatHistoryDate(item)}</p>
-                <strong>{item.score} readiness</strong>
-              </div>
-            </button>
+
+              {expandedWeeks.has(week.key) && (
+                <div className="history-week-items">
+                  {week.items.map((item) => item.kind === 'check-in' ? (
+                    <button
+                      className="history-row history-button"
+                      key={`check-${item.entry.date}-${item.entry.createdAt ?? item.entry.note}`}
+                      onClick={() => setSelectedEntry(item.entry)}
+                      type="button"
+                    >
+                      <div className="history-score">
+                        <span style={{ height: `${(item.entry.score / maxScore) * 100}%` }} />
+                      </div>
+                      <div>
+                        <p className="eyebrow">{formatHistoryDate(item.entry)}</p>
+                        <strong>{item.entry.score} readiness</strong>
+                      </div>
+                    </button>
+                  ) : (
+                    <button
+                      className="history-row history-button checkout-history-row"
+                      key={`checkout-${item.entry.id}`}
+                      onClick={() => onOpenCheckout(item.entry)}
+                      type="button"
+                    >
+                      <div className="history-score checkout-score">
+                        <span style={{ height: `${Math.min(100, item.entry.difficulty * 10)}%` }} />
+                      </div>
+                      <div>
+                        <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
+                        <strong>{item.entry.title}: {item.entry.actualMinutes} min, {item.entry.difficulty}/10</strong>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
           ))
         )}
       </div>
@@ -108,6 +164,54 @@ export function HistoryView({ history, insights, onClear }) {
         />,
         document.body,
       )}
+
+      {selectedWeek && createPortal(
+        <WeeklyReportModal
+          week={selectedWeek}
+          onClose={() => setSelectedWeek(null)}
+        />,
+        document.body,
+      )}
+    </div>
+  )
+}
+
+function WeeklyReportModal({ week, onClose }) {
+  const checkIns = week.items.filter((item) => item.kind === 'check-in').map((item) => item.entry)
+  const checkouts = week.items.filter((item) => item.kind === 'checkout').map((item) => item.entry)
+  const averageReadiness = average(checkIns.map((entry) => entry.score))
+  const averageSleep = average(checkIns.map((entry) => Number(entry.sleep)), 1)
+  const averageFatigue = average(checkIns.map((entry) => entry.fatigue))
+  const workload = checkouts.reduce((total, checkout) => total + checkout.actualMinutes * checkout.difficulty, 0)
+  const painAreas = summarizePainAreas(checkIns)
+
+  return (
+    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+      <section
+        className="event-modal history-modal glass-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="schedule-header">
+          <SectionHeading
+            eyebrow={`Week of ${week.label}`}
+            title="Weekly athlete report."
+          />
+          <button className="ghost-close" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className="history-detail-grid">
+          <span><strong>Readiness</strong>{averageReadiness}/100 average</span>
+          <span><strong>Sleep</strong>{averageSleep}h average</span>
+          <span><strong>Fatigue</strong>{averageFatigue}/10 average</span>
+          <span><strong>Workload</strong>{workload || 'No checkouts'}</span>
+          <span><strong>Availability</strong>{averageReadiness >= 80 ? 'Mostly available' : averageReadiness >= 60 ? 'Modified training likely' : 'Recovery focus'}</span>
+          <span><strong>Pain pattern</strong>{painAreas || 'No recurring pain areas'}</span>
+        </div>
+      </section>
     </div>
   )
 }
@@ -218,6 +322,14 @@ function formatHistoryDate(entry) {
   })
 }
 
+function formatCheckoutDate(entry) {
+  return new Date(`${entry.date}T12:00:00`).toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    weekday: 'short',
+  })
+}
+
 function valueWithUnit(value, unit) {
   if (value === undefined || value === null) return undefined
   return `${value}${unit}`
@@ -234,4 +346,57 @@ function getCutoffDate(days) {
     String(date.getMonth() + 1).padStart(2, '0'),
     String(date.getDate()).padStart(2, '0'),
   ].join('-')
+}
+
+function getHistoryWeeks(history, checkouts) {
+  const grouped = new Map()
+  const items = [
+    ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
+    ...checkouts.map((entry) => ({ date: entry.date, entry, kind: 'checkout' })),
+  ].filter((item) => item.date)
+
+  items.forEach((item) => {
+    const weekStart = startOfWeek(parseISO(item.date))
+    const key = format(weekStart, 'yyyy-MM-dd')
+    const current = grouped.get(key) ?? {
+      items: [],
+      key,
+      label: format(weekStart, 'MMM d'),
+    }
+
+    current.items.push(item)
+    grouped.set(key, current)
+  })
+
+  return [...grouped.values()]
+    .map((week) => ({
+      ...week,
+      items: week.items.sort((first, second) => second.date.localeCompare(first.date)),
+    }))
+    .sort((first, second) => second.key.localeCompare(first.key))
+}
+
+function average(values, digits = 0) {
+  const validValues = values.filter((value) => Number.isFinite(value))
+
+  if (validValues.length === 0) return 0
+
+  const result = validValues.reduce((total, value) => total + value, 0) / validValues.length
+
+  return digits > 0 ? result.toFixed(digits) : Math.round(result)
+}
+
+function summarizePainAreas(checkIns) {
+  const counts = new Map()
+
+  checkIns.forEach((entry) => {
+    if (entry.pain <= 0) return
+
+    counts.set(entry.location, (counts.get(entry.location) ?? 0) + 1)
+  })
+
+  return [...counts.entries()]
+    .sort((first, second) => second[1] - first[1])
+    .map(([area, count]) => `${area} (${count})`)
+    .join(', ')
 }

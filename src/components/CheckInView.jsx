@@ -1,3 +1,4 @@
+import { BodyPainMap } from './BodyPainMap'
 import { Select, Slider } from './FormControls'
 import { RecommendationCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
@@ -64,13 +65,6 @@ export function CheckInView({
           onChange={(value) => onUpdate('soreness', value)}
         />
         <Slider
-          label="Pain"
-          max={10}
-          value={checkIn.pain}
-          unit="/10"
-          onChange={(value) => onUpdate('pain', value)}
-        />
-        <Slider
           label="Fatigue"
           max={10}
           value={checkIn.fatigue}
@@ -99,69 +93,58 @@ export function CheckInView({
             options={['Good', 'Okay', 'Poor']}
             onChange={(value) => onUpdate('hydration', value)}
           />
-          {hasPain && (
-            <>
-              <Select
-                label="Pain location"
-                value={checkIn.location}
-                options={[
-                  'Hamstring',
-                  'Quad',
-                  'Calf',
-                  'Ankle',
-                  'Knee',
-                  'Hip',
-                  'Back',
-                  'Neck',
-                  'Head',
-                  'Shoulder',
-                ]}
-                onChange={(value) => onUpdate('location', value)}
-              />
-              <Select
-                label="Injury type"
-                value={checkIn.injuryType}
-                options={[
-                  'Muscle strain',
-                  'Joint irritation',
-                  'Impact bruise',
-                  'Tendon soreness',
-                  'Unknown',
-                ]}
-                onChange={(value) => onUpdate('injuryType', value)}
-              />
-              <Select
-                label="Pain type"
-                value={checkIn.painType}
-                options={[
-                  'Tight / pulling',
-                  'Dull ache',
-                  'Sharp / stabbing',
-                  'Swelling',
-                  'Instability',
-                  'Numbness',
-                  'Headache / dizziness',
-                ]}
-                onChange={(value) => onUpdate('painType', value)}
-              />
-              <Select
-                label="Hurts when"
-                value={checkIn.hurtsWhen}
-                options={[
-                  'At rest',
-                  'Jogging',
-                  'Sprinting',
-                  'Cutting',
-                  'Jumping',
-                  'Contact',
-                  'Stretching',
-                  'Bending',
-                ]}
-                onChange={(value) => onUpdate('hurtsWhen', value)}
-              />
-            </>
-          )}
         </div>
+
+        <BodyPainMap
+          value={checkIn.painMap}
+          onChange={(value) => onUpdate('painMap', value)}
+        />
+
+        {hasPain && (
+          <div className="select-row">
+            <Select
+              label="Injury type"
+              value={checkIn.injuryType}
+              options={[
+                'Muscle strain',
+                'Joint irritation',
+                'Impact bruise',
+                'Tendon soreness',
+                'Unknown',
+              ]}
+              onChange={(value) => onUpdate('injuryType', value)}
+            />
+            <Select
+              label="Pain type"
+              value={checkIn.painType}
+              options={[
+                'Tight / pulling',
+                'Dull ache',
+                'Sharp / stabbing',
+                'Swelling',
+                'Instability',
+                'Numbness',
+                'Headache / dizziness',
+              ]}
+              onChange={(value) => onUpdate('painType', value)}
+            />
+            <Select
+              label="Hurts when"
+              value={checkIn.hurtsWhen}
+              options={[
+                'At rest',
+                'Jogging',
+                'Sprinting',
+                'Cutting',
+                'Jumping',
+                'Contact',
+                'Stretching',
+                'Bending',
+              ]}
+              onChange={(value) => onUpdate('hurtsWhen', value)}
+            />
+          </div>
+        )}
 
         <label className="notes-field">
           Notes

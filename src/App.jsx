@@ -4,8 +4,11 @@ import { LensGlass, SVGFilters } from 'react-glassy'
 import 'react-glassy/styles.css'
 import { AuthGate } from './components/AuthGate'
 import { CheckInView } from './components/CheckInView'
+import { CheckoutModal } from './components/CheckoutModal'
+import { HomeView } from './components/HomeView'
 import { HistoryView } from './components/HistoryView'
 import { ScheduleView } from './components/ScheduleView'
+import { StatisticsView } from './components/StatisticsView'
 import {
   checkInDefaults,
   schedule as initialSchedule,
@@ -16,18 +19,27 @@ import trainingHero from './assets/training-hero.png'
 import {
   clearCheckIns,
   createCheckIn,
+  createPainReports,
   createScheduleEvent,
+  createTrainingCheckout,
+  deletePainReportsForSource,
   deleteScheduleEvent,
   deleteCheckInsForDate,
   loadAthleteData,
+  updateTrainingCheckout,
   updateScheduleEvent,
 } from './lib/athleteData'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
+import { getPainReportsFromMap, getPrimaryPainArea } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { loadSavedState, saveState } from './utils/storage'
 import './App.css'
 
 const views = [
+  {
+    icon: 'home',
+    label: 'Home',
+  },
   {
     icon: 'pulse',
     label: 'Check-in',
@@ -35,6 +47,10 @@ const views = [
   {
     icon: 'calendar',
     label: 'Schedule',
+  },
+  {
+    icon: 'stats',
+    label: 'Statistics',
   },
   {
     icon: 'trend',
@@ -87,6 +103,42 @@ function getYesterdayLoadFromSchedule(schedule) {
   return 'Rest'
 }
 
+function applyPainMapToCheckIn(checkIn) {
+  const primaryArea = getPrimaryPainArea(checkIn.painMap)
+  const severity = primaryArea?.severity ?? 0
+  const pain = severity > 0 ? Math.max(1, Math.round(severity / 10)) : 0
+
+  return {
+    ...checkIn,
+    hurtsWhen: pain > 0 ? checkIn.hurtsWhen : 'At rest',
+    injuryType: pain > 0 ? checkIn.injuryType : 'Unknown',
+    location: pain > 0 ? primaryArea.recommendationLocation : 'Hamstring',
+    pain,
+    painType: pain > 0 ? checkIn.painType : 'No pain',
+  }
+}
+
+function checkInFromHistoryEntry(entry, fallback) {
+  if (!entry) return fallback
+
+  return {
+    ...fallback,
+    energy: entry.energy,
+    fatigue: entry.fatigue,
+    hurtsWhen: entry.hurtsWhen,
+    hydration: entry.hydration,
+    injuryType: entry.injuryType,
+    location: entry.location,
+    notes: entry.note ?? '',
+    pain: entry.pain,
+    painMap: entry.painMap ?? fallback.painMap,
+    painType: entry.painType,
+    sleep: entry.sleep,
+    soreness: entry.soreness,
+    stress: entry.stress,
+  }
+}
+
 function sortScheduleEvents(events) {
   return [...events].sort((first, second) => {
     const firstValue = `${first.date} ${first.time ?? ''}`
@@ -103,7 +155,8 @@ function App() {
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
   const [dataStatus, setDataStatus] = useState('ready')
   const [isEditingToday, setIsEditingToday] = useState(false)
-  const [activeView, setActiveView] = useState('Check-in')
+  const [activeView, setActiveView] = useState('Home')
+  const [checkoutEvent, setCheckoutEvent] = useState(null)
   const [navLens, setNavLens] = useState(null)
   const lensFrameRef = useRef(null)
   const lensNodeRef = useRef(null)
@@ -111,6 +164,8 @@ function App() {
   const navRef = useRef(null)
   const [checkIn, setCheckIn] = useState(savedState?.checkIn ?? checkInDefaults)
   const [history, setHistory] = useState(savedState?.history ?? [])
+  const [checkouts, setCheckouts] = useState(savedState?.checkouts ?? [])
+  const [painReports, setPainReports] = useState(savedState?.painReports ?? [])
   const [schedule, setSchedule] = useState(
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
@@ -127,7 +182,7 @@ function App() {
   )
   const scheduleDrivenCheckIn = useMemo(
     () => ({
-      ...checkIn,
+      ...applyPainMapToCheckIn(checkIn),
       session: getSessionFromSchedule(todayEvents),
       yesterdayLoad: getYesterdayLoadFromSchedule(schedule),
     }),
@@ -155,6 +210,7 @@ function App() {
       hydration: checkIn.hydration,
       injuryType: checkIn.injuryType,
       painType: checkIn.painType,
+      painMap: checkIn.painMap,
       hurtsWhen: checkIn.hurtsWhen,
       session: scheduleDrivenCheckIn.session,
       note: checkIn.notes,
@@ -168,6 +224,7 @@ function App() {
       checkIn.location,
       checkIn.notes,
       checkIn.pain,
+      checkIn.painMap,
       checkIn.painType,
       checkIn.sleep,
       checkIn.soreness,
@@ -225,10 +282,12 @@ function App() {
 
     saveState({
       checkIn,
+      checkouts,
       history,
+      painReports,
       schedule,
     })
-  }, [checkIn, history, isSupabaseSession, schedule])
+  }, [checkIn, checkouts, history, isSupabaseSession, painReports, schedule])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -246,6 +305,8 @@ function App() {
 
         setSchedule(data.schedule)
         setHistory(data.history)
+        setCheckouts(data.checkouts)
+        setPainReports(data.painReports)
         setDataStatus('ready')
       } catch (error) {
         if (error?.status === 401 || error?.code === 'PGRST301') {
@@ -259,6 +320,8 @@ function App() {
 
               setSchedule(data.schedule)
               setHistory(data.history)
+              setCheckouts(data.checkouts)
+              setPainReports(data.painReports)
               setDataStatus('ready')
               return
             } catch (retryError) {
@@ -291,6 +354,16 @@ function App() {
   }, [])
 
   function updateField(field, value) {
+    if (field === 'painMap') {
+      const nextCheckIn = applyPainMapToCheckIn({
+        ...checkIn,
+        painMap: value,
+      })
+
+      setCheckIn(nextCheckIn)
+      return
+    }
+
     if (field === 'pain' && value === 0) {
       setCheckIn((current) => ({
         ...current,
@@ -321,12 +394,35 @@ function App() {
     if (isSupabaseSession) {
       try {
         if (isEditingToday) {
+          const previousToday = history.find((entry) => entry.date === todayIso)
+
+          if (previousToday?.id) {
+            await deletePainReportsForSource('check_in', previousToday.id)
+          }
+
           await deleteCheckInsForDate(todayIso)
           setHistory((current) => current.filter((entry) => entry.date !== todayIso))
+          setPainReports((current) =>
+            current.filter((report) => report.sourceId !== previousToday?.id),
+          )
         }
 
         const savedEntry = await createCheckIn(scheduleDrivenCheckIn, recommendation)
-        setHistory((current) => [savedEntry, ...current.slice(0, 19)])
+        const savedPainReports = await createPainReports(getPainReportsFromMap(
+          scheduleDrivenCheckIn.painMap,
+          {
+            date: todayIso,
+            notes: scheduleDrivenCheckIn.notes,
+            sourceId: savedEntry.id,
+            sourceType: 'check_in',
+            triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
+          },
+        ))
+        setHistory((current) => [
+          savedEntry,
+          ...current.filter((entry) => entry.date !== todayIso).slice(0, 19),
+        ])
+        setPainReports((current) => [...savedPainReports, ...current])
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -337,9 +433,21 @@ function App() {
         currentEntry,
         ...current.filter((entry) => entry.date !== todayIso).slice(0, 5),
       ])
+      setPainReports((current) => [
+        ...getPainReportsFromMap(scheduleDrivenCheckIn.painMap, {
+          date: todayIso,
+          notes: scheduleDrivenCheckIn.notes,
+          sourceId: currentEntry.date,
+          sourceType: 'check_in',
+          triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
+        }).map((report) => ({
+          ...report,
+          id: `pain-${Date.now()}-${report.bodyPart}`,
+        })),
+        ...current,
+      ])
     }
 
-    setActiveView('History')
     setIsEditingToday(false)
   }
 
@@ -408,6 +516,93 @@ function App() {
     )
   }
 
+  async function saveCheckout(event, checkout, existingCheckout) {
+    if (isSupabaseSession) {
+      try {
+        const savedCheckout = existingCheckout
+          ? await updateTrainingCheckout(existingCheckout.id, event, checkout)
+          : await createTrainingCheckout(event, checkout)
+
+        if (existingCheckout?.id) {
+          await deletePainReportsForSource('checkout', existingCheckout.id)
+        }
+
+        const savedPainReports = await createPainReports(getPainReportsFromMap(
+          checkout.painMap,
+          {
+            date: event.date,
+            notes: checkout.notes,
+            sourceId: savedCheckout.id,
+            sourceType: 'checkout',
+            triggerMovement: checkout.painChange,
+          },
+        ))
+
+        setCheckouts((current) => [
+          savedCheckout,
+          ...current.filter((item) => item.id !== savedCheckout.id),
+        ])
+        setPainReports((current) => [
+          ...savedPainReports,
+          ...current.filter((report) => report.sourceId !== savedCheckout.id),
+        ])
+        setCheckoutEvent(null)
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+      }
+      return
+    }
+
+    const savedCheckout = {
+      actualMinutes: Number(checkout.actualMinutes),
+      completionLevel: checkout.completionLevel,
+      createdAt: new Date().toISOString(),
+      date: event.date,
+      difficulty: Number(checkout.difficulty),
+      eventId: event.id,
+      id: existingCheckout?.id ?? `checkout-${Date.now()}`,
+      notes: checkout.notes ?? '',
+      painChange: checkout.painChange,
+      painMap: checkout.painMap,
+      plannedLoad: event.load,
+      plannedMinutes: Number(checkout.plannedMinutes),
+      plannedType: event.type,
+      title: event.title || event.type,
+    }
+
+    setCheckouts((current) => [
+      savedCheckout,
+      ...current.filter((item) => item.id !== savedCheckout.id),
+    ])
+    setPainReports((current) => [
+      ...getPainReportsFromMap(checkout.painMap, {
+        date: event.date,
+        notes: checkout.notes,
+        sourceId: savedCheckout.id,
+        sourceType: 'checkout',
+        triggerMovement: checkout.painChange,
+      }).map((report) => ({
+        ...report,
+        id: `pain-${Date.now()}-${report.bodyPart}`,
+      })),
+      ...current,
+    ])
+    setCheckoutEvent(null)
+  }
+
+  function openCheckoutFromHistory(checkout) {
+    setCheckoutEvent({
+      checkoutId: checkout.id,
+      date: checkout.date,
+      id: checkout.eventId,
+      load: checkout.plannedLoad,
+      time: '',
+      title: checkout.title,
+      type: checkout.plannedType,
+    })
+  }
+
   function startDemoSession(email) {
     setSession({
       user: {
@@ -426,6 +621,13 @@ function App() {
     setIsAppUnlocked(true)
   }
 
+  function editTodayCheckIn() {
+    const todayEntry = history.find((entry) => entry.date === todayIso)
+
+    setCheckIn((current) => checkInFromHistoryEntry(todayEntry, current))
+    setIsEditingToday(true)
+  }
+
   async function signOut() {
     if (supabase) {
       await supabase.auth.signOut()
@@ -433,7 +635,7 @@ function App() {
 
     setSession(null)
     setIsAppUnlocked(false)
-    setActiveView('Check-in')
+    setActiveView('Home')
   }
 
   function getNearestTab(pointerX) {
@@ -746,29 +948,64 @@ function App() {
                 todayEvents={todayEvents}
                 todayLabel={todayLabel}
                 onSave={saveCheckIn}
-                onEditToday={() => setIsEditingToday(true)}
+                onEditToday={editTodayCheckIn}
                 onUpdate={updateField}
+              />
+            )}
+
+            {activeView === 'Home' && (
+              <HomeView
+                checkouts={checkouts}
+                history={history}
+                isCheckInSavedToday={isCheckInSavedToday}
+                recommendation={recommendation}
+                schedule={schedule}
+                onGoCheckIn={() => setActiveView('Check-in')}
+                onOpenCheckout={setCheckoutEvent}
               />
             )}
 
             {activeView === 'Schedule' && (
               <ScheduleView
+                checkouts={checkouts}
                 onAdd={addScheduleItem}
+                onOpenCheckout={setCheckoutEvent}
                 onRemove={removeScheduleItem}
                 onUpdate={updateScheduleItem}
                 schedule={schedule}
               />
             )}
 
+            {activeView === 'Statistics' && (
+              <StatisticsView
+                checkouts={checkouts}
+                history={history}
+                painReports={painReports}
+              />
+            )}
+
             {activeView === 'History' && (
               <HistoryView
+                checkouts={checkouts}
                 history={history}
                 insights={trendInsights}
                 onClear={clearHistory}
+                onOpenCheckout={openCheckoutFromHistory}
               />
             )}
           </section>
       </section>
+
+      {checkoutEvent && (
+        <CheckoutModal
+          checkout={checkouts.find((checkout) =>
+            checkout.id === checkoutEvent.checkoutId || checkout.eventId === checkoutEvent.id
+          )}
+          event={checkoutEvent}
+          onClose={() => setCheckoutEvent(null)}
+          onSave={saveCheckout}
+        />
+      )}
         </>
       )}
     </main>
@@ -776,6 +1013,15 @@ function App() {
 }
 
 function NavIcon({ type }) {
+  if (type === 'home') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 11.2 12 4l8 7.2v8.1a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 19.3v-8.1Z" />
+        <path d="M9.5 21v-6h5v6" />
+      </svg>
+    )
+  }
+
   if (type === 'calendar') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -788,6 +1034,15 @@ function NavIcon({ type }) {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 17.5h16M6 15l4-4 3 3 5-7M18 7h-4M18 7v4" />
+      </svg>
+    )
+  }
+
+  if (type === 'stats') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M5 19V9M12 19V5M19 19v-7" />
+        <path d="M3.5 19.5h17" />
       </svg>
     )
   }

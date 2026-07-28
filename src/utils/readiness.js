@@ -382,26 +382,36 @@ function getSummary(checkIn, status, reasons) {
 
 export function getRecommendation(checkIn) {
   const pain = getPain(checkIn)
-  const risk =
-    checkIn.soreness * 4 +
-    pain * 8 +
-    getPainTypeRisk(checkIn, pain) +
-    getMovementRisk(checkIn, pain) +
-    getSessionRisk(checkIn, pain) +
-    checkIn.fatigue * 4 +
-    Math.max(0, 8 - checkIn.sleep) * 6 +
-    Math.max(0, 8 - checkIn.energy) * 4 +
-    riskFromChoice(checkIn.stress, { Low: 0, Medium: 5, High: 12 }) +
-    riskFromChoice(checkIn.yesterdayLoad, {
+  const breakdown = [
+    { label: 'Energy', value: -Math.max(0, 8 - checkIn.energy) * 4 },
+    { label: 'Sleep', value: -Math.max(0, 8 - checkIn.sleep) * 6 },
+    { label: 'Fatigue', value: -checkIn.fatigue * 4 },
+    { label: 'Soreness', value: -checkIn.soreness * 4 },
+    { label: 'Pain level', value: -pain * 8 },
+    { label: 'Pain type', value: -getPainTypeRisk(checkIn, pain) },
+    { label: 'Trigger', value: -getMovementRisk(checkIn, pain) },
+    { label: 'Scheduled session', value: -getSessionRisk(checkIn, pain) },
+    {
+      label: 'Stress',
+      value: -riskFromChoice(checkIn.stress, { Low: 0, Medium: 5, High: 12 }),
+    },
+    {
+      label: 'Yesterday',
+      value: -riskFromChoice(checkIn.yesterdayLoad, {
       Rest: 0,
       Light: 3,
       Moderate: 7,
       Hard: 13,
       Game: 16,
-    }) +
-    riskFromChoice(checkIn.hydration, { Good: 0, Okay: 4, Poor: 10 })
-
-  const score = Math.max(6, Math.min(98, 100 - risk))
+      }),
+    },
+    {
+      label: 'Hydration',
+      value: -riskFromChoice(checkIn.hydration, { Good: 0, Okay: 4, Poor: 10 }),
+    },
+  ].filter((item) => item.value !== 0)
+  const adjustment = breakdown.reduce((total, item) => total + item.value, 0)
+  const score = Math.max(6, Math.min(98, 100 + adjustment))
   const redFlag = hasRedFlag(checkIn)
   const status = redFlag
     ? { label: 'Stop and Check In', intensity: 'No training' }
@@ -427,6 +437,7 @@ export function getRecommendation(checkIn) {
     focus,
     reasons,
     action: getPersonalAction(checkIn, status, redFlag),
+    breakdown: breakdown.length ? breakdown : [{ label: 'Clean check-in', value: 0 }],
     coachMessage: `Coach, I am at ${score}/100 readiness today. I can do ${checkIn.session.toLowerCase()}, but I need to manage ${avoid.slice(0, 2).join(' and ').toLowerCase() || 'my load'} if symptoms increase.`,
   }
 }
