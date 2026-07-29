@@ -4,43 +4,59 @@ import { estimatePlannedMinutes } from '../utils/events'
 
 function fromScheduleRow(row) {
   return {
+    association: row.association ?? 'Personal',
     id: row.id,
     date: row.event_date,
     load: row.load_level,
     note: row.note ?? '',
     time: row.event_time ?? '',
-    title: row.title,
+    title: row.event_type,
     type: row.event_type,
   }
 }
 
 function toScheduleRow(event) {
   return {
+    association: event.association ?? 'Personal',
     event_date: event.date,
     event_time: event.time ?? '',
     event_type: event.type,
     load_level: event.load,
     note: event.note ?? '',
-    title: event.title || event.type,
+    title: event.type,
     updated_at: new Date().toISOString(),
+  }
+}
+
+function fromAssociationRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
   }
 }
 
 function fromCheckInRow(row) {
   return {
+    checkInType: row.check_in_type ?? 'pre_event',
     createdAt: row.created_at,
     date: row.check_in_date,
     day: format(parseISO(row.check_in_date), 'EEE'),
     energy: row.energy,
+    eventId: row.schedule_event_id,
+    eventTime: row.event_time ?? '',
+    eventTitle: row.session_title ?? row.session_type,
     fatigue: row.fatigue,
     hurtsWhen: row.hurts_when,
     hydration: row.hydration,
+    hydrationOz: row.hydration_oz ?? 0,
     id: row.id,
     injuryType: row.injury_type,
     location: row.pain_location,
     note: row.notes,
     pain: row.pain,
     painType: row.pain_type,
+    plannedIntensity: row.planned_intensity ?? row.session_type,
+    recommendation: row.recommendation_json,
     score: row.score,
     session: row.session_type,
     sleep: Number(row.sleep),
@@ -52,17 +68,24 @@ function fromCheckInRow(row) {
 
 function toCheckInRow(checkIn, recommendation) {
   return {
-    check_in_date: format(new Date(), 'yyyy-MM-dd'),
+    check_in_date: checkIn.eventDate ?? format(new Date(), 'yyyy-MM-dd'),
+    check_in_type: checkIn.checkInType ?? 'pre_event',
     energy: checkIn.energy,
+    event_time: checkIn.eventTime ?? '',
     fatigue: checkIn.fatigue,
     hurts_when: checkIn.hurtsWhen,
     hydration: checkIn.hydration,
+    hydration_oz: Number(checkIn.hydrationOz ?? 0),
     injury_type: checkIn.injuryType,
     notes: checkIn.notes ?? '',
     pain: checkIn.pain,
     pain_location: checkIn.location,
     pain_type: checkIn.painType,
+    planned_intensity: checkIn.plannedIntensity ?? checkIn.session,
+    recommendation_json: recommendation,
+    schedule_event_id: checkIn.eventId ?? null,
     score: recommendation.score,
+    session_title: checkIn.eventTitle ?? checkIn.session,
     session_type: checkIn.session,
     sleep: checkIn.sleep,
     soreness: checkIn.soreness,
@@ -101,7 +124,7 @@ function toCheckoutRow(event, checkout) {
     planned_type: event.type ?? 'Training',
     schedule_event_id: event.id,
     session_date: event.date,
-    session_title: event.title || event.type || 'Training',
+    session_title: event.type || 'Training',
     updated_at: new Date().toISOString(),
   }
 }
@@ -134,9 +157,31 @@ function toPainReportRow(report) {
   }
 }
 
+function fromPrivacyPreferencesRow(row) {
+  return {
+    analyticsAllowed: row.analytics_allowed,
+    cloudSync: row.cloud_sync,
+    coachIncludeNotes: row.coach_include_notes,
+    coachIncludePain: row.coach_include_pain,
+    localCopy: row.local_copy,
+  }
+}
+
+function toPrivacyPreferencesRow(preferences) {
+  return {
+    analytics_allowed: Boolean(preferences.analyticsAllowed),
+    cloud_sync: Boolean(preferences.cloudSync),
+    coach_include_notes: Boolean(preferences.coachIncludeNotes),
+    coach_include_pain: Boolean(preferences.coachIncludePain),
+    local_copy: Boolean(preferences.localCopy),
+    updated_at: new Date().toISOString(),
+  }
+}
+
 export async function loadAthleteData() {
   const [
     scheduleResponse,
+    associationsResponse,
     checkInsResponse,
     checkoutsResponse,
     painReportsResponse,
@@ -146,6 +191,10 @@ export async function loadAthleteData() {
       .select('*')
       .order('event_date', { ascending: true })
       .order('event_time', { ascending: true }),
+    supabase
+      .from('athlete_associations')
+      .select('*')
+      .order('name', { ascending: true }),
     supabase
       .from('check_ins')
       .select('*')
@@ -167,16 +216,73 @@ export async function loadAthleteData() {
   ])
 
   if (scheduleResponse.error) throw scheduleResponse.error
+  if (associationsResponse.error) throw associationsResponse.error
   if (checkInsResponse.error) throw checkInsResponse.error
   if (checkoutsResponse.error) throw checkoutsResponse.error
   if (painReportsResponse.error) throw painReportsResponse.error
 
   return {
+    associations: associationsResponse.data.map(fromAssociationRow),
     checkouts: checkoutsResponse.data.map(fromCheckoutRow),
     history: checkInsResponse.data.map(fromCheckInRow),
     painReports: painReportsResponse.data.map(fromPainReportRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
   }
+}
+
+export async function loadPrivacyPreferences() {
+  const { data, error } = await supabase
+    .from('privacy_preferences')
+    .select('*')
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  return fromPrivacyPreferencesRow(data)
+}
+
+export async function upsertPrivacyPreferences(preferences) {
+  const { data, error } = await supabase
+    .from('privacy_preferences')
+    .upsert(toPrivacyPreferencesRow(preferences), { onConflict: 'user_id' })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromPrivacyPreferencesRow(data)
+}
+
+export async function createAssociation(name) {
+  const { data, error } = await supabase
+    .from('athlete_associations')
+    .insert({ name })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromAssociationRow(data)
+}
+
+export async function updateAssociation(id, name) {
+  const { data, error } = await supabase
+    .from('athlete_associations')
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromAssociationRow(data)
+}
+
+export async function deleteAssociation(id) {
+  const { error } = await supabase.from('athlete_associations').delete().eq('id', id)
+
+  if (error) throw error
 }
 
 export async function createScheduleEvent(event) {
@@ -222,6 +328,17 @@ export async function createCheckIn(checkIn, recommendation) {
   return fromCheckInRow(data)
 }
 
+export async function deleteCheckInsForEvent(eventId) {
+  if (!eventId) return
+
+  const { error } = await supabase
+    .from('check_ins')
+    .delete()
+    .eq('schedule_event_id', eventId)
+
+  if (error) throw error
+}
+
 export async function deleteCheckInsForDate(date) {
   const { error } = await supabase
     .from('check_ins')
@@ -236,6 +353,30 @@ export async function clearCheckIns(cutoffDate) {
 
   query = cutoffDate
     ? query.gte('check_in_date', cutoffDate)
+    : query.not('id', 'is', null)
+
+  const { error } = await query
+
+  if (error) throw error
+}
+
+export async function clearTrainingCheckouts(cutoffDate) {
+  let query = supabase.from('training_checkouts').delete()
+
+  query = cutoffDate
+    ? query.gte('session_date', cutoffDate)
+    : query.not('id', 'is', null)
+
+  const { error } = await query
+
+  if (error) throw error
+}
+
+export async function clearPainReports(cutoffDate) {
+  let query = supabase.from('pain_reports').delete()
+
+  query = cutoffDate
+    ? query.gte('report_date', cutoffDate)
     : query.not('id', 'is', null)
 
   const { error } = await query

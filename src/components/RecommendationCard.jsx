@@ -1,7 +1,17 @@
-export function RecommendationCard({ recommendation, session }) {
+export function RecommendationCard({ recommendation, recommendationStatus = 'local', session }) {
+  const statusLabel = {
+    ai: 'Gemini AI',
+    fallback: 'Local fallback',
+    loading: 'Generating AI',
+    local: 'Local engine',
+  }[recommendationStatus]
+
   return (
     <aside className={`recommendation ${recommendation.tone}`}>
-      <p className="eyebrow">{session}</p>
+      <div className="recommendation-source">
+        <p className="eyebrow">{session}</p>
+        <span>{statusLabel}</span>
+      </div>
       <div className="score-row">
         <div
           className="score-ring"

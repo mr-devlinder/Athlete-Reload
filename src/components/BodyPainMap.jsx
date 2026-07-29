@@ -1,11 +1,20 @@
 import { useMemo, useState } from 'react'
+import Body from 'react-muscle-highlighter'
 import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 
-export function BodyPainMap({ value, onChange }) {
+export function BodyPainMap({
+  hurtsWhen,
+  injuryType,
+  onChange,
+  onDetailChange,
+  painType,
+  value,
+}) {
   const painMap = value ?? createEmptyPainMap()
   const [activeIndex, setActiveIndex] = useState(0)
   const activeArea = bodyPainAreas[activeIndex]
   const activeValue = Number(painMap[activeArea.id] ?? 0)
+  const activePainScore = Math.round(activeValue / 10)
   const painfulAreas = useMemo(
     () => bodyPainAreas.filter((area) => Number(painMap[area.id] ?? 0) > 0),
     [painMap],
@@ -26,6 +35,40 @@ export function BodyPainMap({ value, onChange }) {
     setActiveIndex((current) => Math.max(0, current - 1))
   }
 
+  function getBodyData(view) {
+    return bodyPainAreas
+      .filter((area) => area.view === view)
+      .map((area) => {
+        const severity = Number(painMap[area.id] ?? 0)
+        const isActive = area.id === activeArea.id
+
+        if (!isActive && severity <= 0) return null
+
+        return {
+          slug: area.slug,
+          side: area.side === 'center' ? undefined : area.side,
+          styles: {
+            fill: isActive ? '#5aa7ff' : getSeverityColor(severity),
+            stroke: isActive ? '#1f78d8' : '#ff6f61',
+            strokeWidth: isActive ? 2 : 1,
+          },
+        }
+      })
+      .filter(Boolean)
+  }
+
+  function selectBodyPart(part, side, view) {
+    const nextIndex = bodyPainAreas.findIndex((area) =>
+      area.view === view &&
+      area.slug === part.slug &&
+      (area.side === 'center' || area.side === side),
+    )
+
+    if (nextIndex >= 0) {
+      setActiveIndex(nextIndex)
+    }
+  }
+
   return (
     <section className="body-pain-map">
       <div className="body-map-heading">
@@ -33,72 +76,64 @@ export function BodyPainMap({ value, onChange }) {
           <strong>Body pain map</strong>
           <p>{activeIndex + 1} of {bodyPainAreas.length}: {activeArea.label}</p>
         </div>
-        <span>{activeValue}%</span>
+        <span>{activePainScore}/10</span>
       </div>
 
       <div className="body-map-layout">
-        <svg className="body-outline" viewBox="0 0 224 532" role="img" aria-label="Body pain map">
-          <path
-            className="body-silhouette"
-            d="M93 35c0-23 38-23 38 0 0 18-4 31-12 36l4 20 23 2c18 2 32 15 36 33l15 79 11 50 19 40-21 14-28-47-10-73-12 113 24 199h-43l-25-169-25 169H44l24-199-12-113-10 73-28 47-21-14 19-40 11-50 15-79c4-18 18-31 36-33l23-2 4-20c-8-5-12-18-12-36Z"
-          />
-          <path className="body-detail" d="M88 96h48M75 137c18-11 56-11 74 0M82 226h60M77 272h70M65 386h94M62 422h100" />
-          <path className="body-detail" d="M112 96v176M112 272l-25 60M112 272l25 60M94 332l-18 169M130 332l18 169" />
-
-          {bodyPainAreas.map((area, index) => {
-            const severity = Number(painMap[area.id] ?? 0)
-            const isActive = area.id === activeArea.id
-
-            return (
-              <g
-                className={[
-                  'body-region',
-                  isActive ? 'active' : '',
-                  severity > 0 ? 'has-pain' : '',
-                ].filter(Boolean).join(' ')}
-                key={area.id}
-                onClick={() => setActiveIndex(index)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    setActiveIndex(index)
-                  }
-                }}
-                role="button"
-                style={{
-                  '--severity-opacity': severity / 100,
-                }}
-                tabIndex={0}
-              >
-                <path d={area.path} />
-                {isActive && (
-                  <text x={area.labelPoint[0]} y={area.labelPoint[1]}>
-                    {area.label}
-                  </text>
-                )}
-              </g>
-            )
-          })}
-        </svg>
+        <div className={`body-turn-stage ${activeArea.view}`}>
+          <div className="body-turner">
+            <div className="body-model-face body-model-front" aria-hidden={activeArea.view !== 'front'}>
+              <span>Front</span>
+              <Body
+                border="#cfd5df"
+                colors={['#ffd166', '#ffb347', '#ff6f61']}
+                data={getBodyData('front')}
+                defaultFill="#f5f7fb"
+                defaultStroke="#dbe0e8"
+                defaultStrokeWidth={1}
+                gender="male"
+                onBodyPartPress={(part, side) => selectBodyPart(part, side, 'front')}
+                scale={1.16}
+                side="front"
+              />
+            </div>
+            <div className="body-model-face body-model-back" aria-hidden={activeArea.view !== 'back'}>
+              <span>Back</span>
+              <Body
+                border="#cfd5df"
+                colors={['#ffd166', '#ffb347', '#ff6f61']}
+                data={getBodyData('back')}
+                defaultFill="#f5f7fb"
+                defaultStroke="#dbe0e8"
+                defaultStrokeWidth={1}
+                gender="male"
+                onBodyPartPress={(part, side) => selectBodyPart(part, side, 'back')}
+                scale={1.16}
+                side="back"
+              />
+            </div>
+          </div>
+        </div>
 
         <div className="body-map-control">
           <label className="compact-field">
-            Pain percentage
+            Pain level (0-10)
             <input
-              max="100"
+              max="10"
               min="0"
               type="number"
-              value={activeValue}
-              onChange={(event) => updateArea(activeArea.id, Number(event.target.value))}
+              value={activePainScore}
+              onChange={(event) => updateArea(activeArea.id, Number(event.target.value) * 10)}
             />
           </label>
           <input
             className="pain-percent-slider"
-            max="100"
+            max="10"
             min="0"
-            style={{ '--range-progress': `${activeValue}%` }}
+            style={{ '--range-progress': `${activePainScore * 10}%` }}
             type="range"
-            value={activeValue}
-            onChange={(event) => updateArea(activeArea.id, Number(event.target.value))}
+            value={activePainScore}
+            onChange={(event) => updateArea(activeArea.id, Number(event.target.value) * 10)}
           />
 
           <div className="body-map-actions">
@@ -114,6 +149,45 @@ export function BodyPainMap({ value, onChange }) {
               Next area
             </button>
           </div>
+
+          {activePainScore > 0 && (
+            <div className="body-part-pain-details">
+              <p className="eyebrow">{activeArea.label} details</p>
+              <label className="compact-field">
+                Injury type
+                <select
+                  value={injuryType}
+                  onChange={(event) => onDetailChange('injuryType', event.target.value)}
+                >
+                  {injuryTypeOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="compact-field">
+                Pain type
+                <select
+                  value={painType}
+                  onChange={(event) => onDetailChange('painType', event.target.value)}
+                >
+                  {painTypeOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="compact-field">
+                Hurts when
+                <select
+                  value={hurtsWhen}
+                  onChange={(event) => onDetailChange('hurtsWhen', event.target.value)}
+                >
+                  {hurtsWhenOptions.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
         </div>
       </div>
 
@@ -123,11 +197,74 @@ export function BodyPainMap({ value, onChange }) {
         ) : (
           painfulAreas.slice(0, 5).map((area) => (
             <span key={area.id}>
-              {area.label} <strong>{painMap[area.id]}%</strong>
+              {area.label} <strong>{Math.round(Number(painMap[area.id] ?? 0) / 10)}/10</strong>
             </span>
           ))
         )}
       </div>
     </section>
   )
+}
+
+const injuryTypeOptions = [
+  'Muscle strain',
+  'Ligament sprain',
+  'Tendon irritation',
+  'Joint irritation',
+  'Impact bruise',
+  'Overuse soreness',
+  'Cramp',
+  'Bone stress',
+  'Cut / scrape',
+  'Blister',
+  'Swelling',
+  'Concussion concern',
+  'Unknown',
+]
+
+const painTypeOptions = [
+  'Tight / pulling',
+  'Dull ache',
+  'Sharp / stabbing',
+  'Burning',
+  'Throbbing',
+  'Pinching',
+  'Pressure',
+  'Cramping',
+  'Shooting',
+  'Tingling',
+  'Swelling',
+  'Instability',
+  'Numbness',
+  'Headache / dizziness',
+]
+
+const hurtsWhenOptions = [
+  'At rest',
+  'Walking',
+  'Jogging',
+  'Sprinting',
+  'Acceleration',
+  'Deceleration',
+  'Cutting',
+  'Jumping',
+  'Landing',
+  'Kicking',
+  'Throwing',
+  'Lifting',
+  'Squatting',
+  'Twisting',
+  'Contact',
+  'Headers',
+  'Stretching',
+  'Bending',
+  'Breathing',
+  'After activity',
+]
+
+function getSeverityColor(severity) {
+  if (severity >= 70) return '#ff6f61'
+  if (severity >= 35) return '#ffb347'
+
+  return '#ffd166'
 }

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO, startOfWeek } from 'date-fns'
+import { RecommendationCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
+import { bodyPainAreas } from '../data/bodyPainMap'
 
 const clearOptions = [
   { label: 'Today', days: 0 },
@@ -16,9 +18,8 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ checkouts = [], history, insights, onClear, onOpenCheckout }) {
-  const maxScore = Math.max(...history.map((item) => item.score), 1)
-  const hasSavedHistory = history.length > 0
+export function HistoryView({ checkouts = [], history, insights, onClear }) {
+  const hasSavedHistory = history.length > 0 || checkouts.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
@@ -111,37 +112,11 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onOpen
 
               {expandedWeeks.has(week.key) && (
                 <div className="history-week-items">
-                  {week.items.map((item) => item.kind === 'check-in' ? (
-                    <button
-                      className="history-row history-button"
-                      key={`check-${item.entry.date}-${item.entry.createdAt ?? item.entry.note}`}
-                      onClick={() => setSelectedEntry(item.entry)}
-                      type="button"
-                    >
-                      <div className="history-score">
-                        <span style={{ height: `${(item.entry.score / maxScore) * 100}%` }} />
-                      </div>
-                      <div>
-                        <p className="eyebrow">{formatHistoryDate(item.entry)}</p>
-                        <strong>{item.entry.score} readiness</strong>
-                      </div>
-                    </button>
-                  ) : (
-                    <button
-                      className="history-row history-button checkout-history-row"
-                      key={`checkout-${item.entry.id}`}
-                      onClick={() => onOpenCheckout(item.entry)}
-                      type="button"
-                    >
-                      <div className="history-score checkout-score">
-                        <span style={{ height: `${Math.min(100, item.entry.difficulty * 10)}%` }} />
-                      </div>
-                      <div>
-                        <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
-                        <strong>{item.entry.title}: {item.entry.actualMinutes} min, {item.entry.difficulty}/10</strong>
-                      </div>
-                    </button>
-                  ))}
+                  <HistoryGroup
+                    checkouts={week.items.filter((item) => item.kind === 'checkout')}
+                    checkIns={week.items.filter((item) => item.kind === 'check-in')}
+                    onSelectEntry={setSelectedEntry}
+                  />
                 </div>
               )}
             </section>
@@ -176,6 +151,63 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onOpen
   )
 }
 
+function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
+  return (
+    <>
+      <div className="history-subsection">
+        <p className="eyebrow">Pre-check-ins</p>
+        {checkIns.length === 0 ? (
+          <p>No pre-check-ins this week.</p>
+        ) : (
+          checkIns.map((item) => (
+            <button
+              className="history-row history-button"
+              key={`check-${item.entry.id ?? item.entry.date}-${item.entry.createdAt ?? item.entry.note}`}
+              onClick={() => onSelectEntry(item.entry)}
+              type="button"
+            >
+              <div
+                className="score-ring history-score-ring"
+                style={{ '--score': `${item.entry.score}%` }}
+              >
+                <span>{item.entry.score}</span>
+              </div>
+              <div>
+                <p className="eyebrow">{formatHistoryDate(item.entry)}</p>
+                <strong>{item.entry.eventTitle ?? item.entry.session}</strong>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+
+      <div className="history-subsection">
+        <p className="eyebrow">Post-checkouts</p>
+        {checkouts.length === 0 ? (
+          <p>No post-checkouts this week.</p>
+        ) : (
+          checkouts.map((item) => (
+            <button
+              className="history-row history-button checkout-history-row"
+              key={`checkout-${item.entry.id}`}
+              onClick={() => onSelectEntry({ ...item.entry, historyKind: 'checkout' })}
+              type="button"
+            >
+              <div className="history-score checkout-score">
+                <span style={{ height: `${Math.min(100, item.entry.difficulty * 10)}%` }} />
+              </div>
+              <div>
+                <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
+                <strong>{item.entry.title}: {item.entry.actualMinutes} min, {item.entry.difficulty}/10</strong>
+              </div>
+            </button>
+          ))
+        )}
+      </div>
+    </>
+  )
+}
+
 function WeeklyReportModal({ week, onClose }) {
   const checkIns = week.items.filter((item) => item.kind === 'check-in').map((item) => item.entry)
   const checkouts = week.items.filter((item) => item.kind === 'checkout').map((item) => item.entry)
@@ -205,6 +237,8 @@ function WeeklyReportModal({ week, onClose }) {
 
         <div className="history-detail-grid">
           <span><strong>Readiness</strong>{averageReadiness}/100 average</span>
+          <span><strong>Pre-check-ins</strong>{checkIns.length}</span>
+          <span><strong>Post-checkouts</strong>{checkouts.length}</span>
           <span><strong>Sleep</strong>{averageSleep}h average</span>
           <span><strong>Fatigue</strong>{averageFatigue}/10 average</span>
           <span><strong>Workload</strong>{workload || 'No checkouts'}</span>
@@ -253,26 +287,12 @@ function ClearHistoryModal({ onClear, onClose }) {
 }
 
 function HistoryModal({ entry, onClose }) {
-  const details = [
-    ['Energy', valueWithUnit(entry.energy, '/10')],
-    ['Soreness', valueWithUnit(entry.soreness, '/10')],
-    ['Pain', valueWithUnit(entry.pain, '/10')],
-    ['Fatigue', valueWithUnit(entry.fatigue, '/10')],
-    ['Sleep', valueWithUnit(entry.sleep, 'h')],
-    ['Stress', entry.stress],
-    ['Hydration', entry.hydration],
-    ['Yesterday', entry.yesterdayLoad],
-    ['Upcoming', entry.session],
-  ]
+  if (entry.historyKind === 'checkout') {
+    return <CheckoutHistoryModal entry={entry} onClose={onClose} />
+  }
 
-  const painDetails = entry.pain > 0
-    ? [
-        ['Pain location', entry.location],
-        ['Injury type', entry.injuryType],
-        ['Pain type', entry.painType],
-        ['Hurts when', entry.hurtsWhen],
-      ]
-    : []
+  const detailSections = getCheckInDetailSections(entry)
+  const painSections = getPainDetailSections(entry)
 
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
@@ -285,15 +305,129 @@ function HistoryModal({ entry, onClose }) {
         <div className="schedule-header">
           <SectionHeading
             eyebrow={formatHistoryDate(entry)}
-            title={`${entry.score} readiness.`}
+            title="Pre-check-in details."
           />
           <button className="ghost-close" onClick={onClose} type="button">
             Close
           </button>
         </div>
 
+        {entry.recommendation ? (
+          <RecommendationCard
+            recommendation={entry.recommendation}
+            recommendationStatus="ai"
+            session={entry.eventTitle ?? entry.session}
+          />
+        ) : (
+          <div className="history-readiness-summary">
+            <div
+              className="score-ring"
+              style={{ '--score': `${entry.score}%` }}
+            >
+              <span>{entry.score}</span>
+            </div>
+            <div>
+              <strong>{entry.eventTitle ?? entry.session}</strong>
+              <p>Saved pre-event check-in.</p>
+            </div>
+          </div>
+        )}
+
+        <div className="history-detail-sections">
+          {detailSections.map((section) => (
+            <section className="history-detail-section" key={section.title}>
+              <h3>{section.title}</h3>
+              <div className="history-detail-grid">
+                {section.items.map(([label, value]) => (
+                  <span key={label}>
+                    <strong>{label}</strong>
+                    {value ?? 'Not saved'}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {painSections.length > 0 && (
+            <section className="history-detail-section">
+              <h3>Pain</h3>
+              <div className="history-pain-stack">
+                {painSections.map((section) => (
+                  <article className="history-pain-card" key={section.title}>
+                    <strong>{section.title}</strong>
+                    <div className="history-detail-grid">
+                      {section.items.map(([label, value]) => (
+                        <span key={label}>
+                          <strong>{label}</strong>
+                          {value ?? 'Not saved'}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
+
+        {entry.note && (
+          <div className="history-note">
+            <strong>Notes</strong>
+            <p>{entry.note}</p>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function CheckoutHistoryModal({ entry, onClose }) {
+  const details = [
+    ['Event', entry.title],
+    ['Date', formatCheckoutDate(entry)],
+    ['Planned type', entry.plannedType],
+    ['Planned load', entry.plannedLoad],
+    ['Planned minutes', valueWithUnit(entry.plannedMinutes, ' min')],
+    ['Actual minutes', valueWithUnit(entry.actualMinutes, ' min')],
+    ['Difficulty', valueWithUnit(entry.difficulty, '/10')],
+    ['Completion', entry.completionLevel],
+    ['Pain change', entry.painChange],
+  ]
+
+  return (
+    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+      <section
+        className="event-modal history-modal glass-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="schedule-header">
+          <SectionHeading
+            eyebrow={formatCheckoutDate(entry)}
+            title="Post-checkout details."
+          />
+          <button className="ghost-close" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className="history-readiness-summary">
+          <div
+            className="score-ring history-workload-ring"
+            style={{ '--score': `${Math.min(100, entry.difficulty * 10)}%` }}
+          >
+            <span>{entry.difficulty}</span>
+            <small>effort</small>
+          </div>
+          <div>
+            <strong>{entry.title}</strong>
+            <p>{entry.actualMinutes} minutes completed at {entry.difficulty}/10 difficulty.</p>
+          </div>
+        </div>
+
         <div className="history-detail-grid">
-          {[...details, ...painDetails].map(([label, value]) => (
+          {details.map(([label, value]) => (
             <span key={label}>
               <strong>{label}</strong>
               {value ?? 'Not saved'}
@@ -301,10 +435,10 @@ function HistoryModal({ entry, onClose }) {
           ))}
         </div>
 
-        {entry.note && (
+        {entry.notes && (
           <div className="history-note">
             <strong>Notes</strong>
-            <p>{entry.note}</p>
+            <p>{entry.notes}</p>
           </div>
         )}
       </section>
@@ -333,6 +467,74 @@ function formatCheckoutDate(entry) {
 function valueWithUnit(value, unit) {
   if (value === undefined || value === null) return undefined
   return `${value}${unit}`
+}
+
+function getCheckInDetailSections(entry) {
+  return [
+    {
+      title: 'Event',
+      items: [
+        ['Event', entry.eventTitle ?? entry.session],
+        ['Date', formatHistoryDate(entry)],
+        ['Planned intensity', entry.plannedIntensity],
+        ['Previous day', entry.yesterdayLoad],
+      ],
+    },
+    {
+      title: 'Readiness inputs',
+      items: [
+        ['Energy', valueWithUnit(entry.energy, '/10')],
+        ['Soreness', valueWithUnit(entry.soreness, '/10')],
+        ['Fatigue', valueWithUnit(entry.fatigue, '/10')],
+        ['Sleep', valueWithUnit(entry.sleep, 'h')],
+      ],
+    },
+    {
+      title: 'Recovery context',
+      items: [
+        ['Stress', entry.stress],
+        ['Hydration', `${entry.hydrationOz ?? 0} fl oz (${entry.hydration})`],
+      ],
+    },
+  ]
+}
+
+function getPainDetailSections(entry) {
+  const painMapSections = bodyPainAreas
+    .map((area) => {
+      const severity = Number(entry.painMap?.[area.id] ?? 0)
+      if (severity <= 0) return null
+
+      return {
+        title: area.label,
+        items: getPainItems(entry, Math.round(severity / 10)),
+      }
+    })
+    .filter(Boolean)
+
+  if (painMapSections.length > 0) {
+    return painMapSections
+  }
+
+  if (Number(entry.pain ?? 0) <= 0) {
+    return []
+  }
+
+  return [
+    {
+      title: entry.location ?? 'Pain area',
+      items: getPainItems(entry, entry.pain),
+    },
+  ]
+}
+
+function getPainItems(entry, score) {
+  return [
+    ['Pain level', valueWithUnit(score, '/10')],
+    ['Injury type', entry.injuryType],
+    ['Pain type', entry.painType],
+    ['Hurts when', entry.hurtsWhen],
+  ]
 }
 
 function getCutoffDate(days) {

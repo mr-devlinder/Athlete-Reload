@@ -125,6 +125,34 @@ const painTypeRules = {
     avoid: ['Recreating the sharp pain', 'Fast reps through that pattern'],
     focus: ['Find a pain-free angle', 'Slow tempo', 'Stop if sharpness rises'],
   },
+  Burning: {
+    avoid: ['Pushing through burning symptoms', 'Heavy repeated sets through the area'],
+    focus: ['Slow buildup', 'Check symptoms each block', 'Stop if burning spreads'],
+  },
+  Throbbing: {
+    avoid: ['High-impact volume', 'Tight wrapping without guidance'],
+    focus: ['Lower intensity first', 'Monitor swelling or heat', 'Reassess after warm-up'],
+  },
+  Pinching: {
+    avoid: ['Forcing the pinching range', 'Deep loaded positions'],
+    focus: ['Shorten the range', 'Use cleaner positions', 'Switch if pinching repeats'],
+  },
+  Pressure: {
+    avoid: ['Compressing the painful area', 'Grinding through pressure'],
+    focus: ['Easy ramp-up', 'Check gear fit', 'Keep reps controlled'],
+  },
+  Cramping: {
+    avoid: ['Repeated max effort bursts', 'Training dehydrated'],
+    focus: ['Progressive warm-up', 'Fluids and sodium if appropriate', 'Stop if cramping returns'],
+  },
+  Shooting: {
+    avoid: ['Training through shooting pain', 'Heavy loading that sends pain away from the area'],
+    focus: ['Stop the trigger', 'Tell an adult or trainer', 'Use only pain-free movement'],
+  },
+  Tingling: {
+    avoid: ['Training through tingling', 'Heavy loading', 'Contact'],
+    focus: ['Stop and tell an adult', 'Track where symptoms travel', 'Get medical guidance'],
+  },
   Swelling: {
     avoid: ['Loading through swelling', 'Tight gear over the area'],
     focus: ['Reduce volume', 'Elevate after training', 'Check with an adult if swelling grows'],
@@ -152,6 +180,10 @@ const movementRules = {
     avoid: ['Training through resting pain', 'Max effort testing'],
     focus: ['Treat this as higher priority', 'Tell coach or adult', 'Start with gentle movement only'],
   },
+  Walking: {
+    avoid: ['Running volume until walking is smooth', 'Ignoring a limp'],
+    focus: ['Walk without compensation', 'Easy mobility', 'Reassess before higher speed'],
+  },
   Jogging: {
     avoid: ['Conditioning volume that changes your stride'],
     focus: ['Short easy jog test', 'Keep stride smooth', 'Switch to bike if symptoms rise'],
@@ -159,6 +191,14 @@ const movementRules = {
   Sprinting: {
     avoid: ['Max sprinting', 'Repeated accelerations', 'Long stride fly runs'],
     focus: ['Build speed gradually', 'Cap sprint volume', 'Stop if mechanics change'],
+  },
+  Acceleration: {
+    avoid: ['Explosive starts', 'Long first-step reps', 'Resisted sprints'],
+    focus: ['Submax build-ups', 'Shorter strides', 'Reassess after the first speed block'],
+  },
+  Deceleration: {
+    avoid: ['Hard stops', 'Repeated braking drills', 'Fatigue-based change of direction'],
+    focus: ['Controlled stops', 'Lower rep count', 'Smooth landing and braking mechanics'],
   },
   Cutting: {
     avoid: ['Hard cuts', 'Reactive agility', 'Defensive change-of-direction reps'],
@@ -168,9 +208,37 @@ const movementRules = {
     avoid: ['Repeated jumps', 'Hard landings', 'Loaded plyometrics'],
     focus: ['Landing control', 'Low amplitude first', 'Stop if pain appears on takeoff or landing'],
   },
+  Landing: {
+    avoid: ['Hard landings', 'Crowded aerial challenges', 'High-volume plyometrics'],
+    focus: ['Soft controlled landings', 'Lower jump volume', 'Reassess after first landing set'],
+  },
+  Kicking: {
+    avoid: ['Max-power shots', 'Repeated long balls', 'Kicking through sharp pain'],
+    focus: ['Short technical touches', 'Build power gradually', 'Stop if mechanics change'],
+  },
+  Throwing: {
+    avoid: ['Max-distance throws', 'High-volume overhead work', 'Throwing through shoulder pain'],
+    focus: ['Short throws first', 'Scapular warm-up', 'Track symptoms between sets'],
+  },
+  Lifting: {
+    avoid: ['Max attempts', 'Painful loaded ranges', 'Grinding reps'],
+    focus: ['Pain-free exercise swaps', 'Controlled tempo', 'Leave reps in reserve'],
+  },
+  Squatting: {
+    avoid: ['Deep painful squats', 'Heavy knee-dominant loading', 'Loaded painful depth'],
+    focus: ['Shorten depth', 'Slow tempo', 'Use alternatives that stay quiet'],
+  },
+  Twisting: {
+    avoid: ['Loaded rotation', 'Reactive twisting under fatigue', 'Awkward contact positions'],
+    focus: ['Brace first', 'Linear patterns', 'Rotate only through pain-free range'],
+  },
   Contact: {
     avoid: ['Contact drills', 'Tackles or checks', 'Competing through pain'],
     focus: ['Technical no-contact work', 'Coach communication', 'Reassess after warm-up'],
+  },
+  Headers: {
+    avoid: ['Headers', 'Aerial contact', 'Playing through head or neck symptoms'],
+    focus: ['Tell coach before drills', 'No-contact technical work', 'Follow head-injury guidance'],
   },
   Stretching: {
     avoid: ['Aggressive stretching', 'Loaded end-range holds'],
@@ -179,6 +247,69 @@ const movementRules = {
   Bending: {
     avoid: ['Loaded painful bending', 'Rounding into symptoms'],
     focus: ['Brace first', 'Shorten range', 'Use supported alternatives'],
+  },
+  Breathing: {
+    avoid: ['Training through breathing pain', 'Contact', 'Hard conditioning'],
+    focus: ['Stop and tell an adult', 'Monitor symptoms', 'Get medical guidance'],
+  },
+  'After activity': {
+    avoid: ['Stacking extra volume', 'Skipping cooldown', 'Ignoring delayed symptom spikes'],
+    focus: ['Limit total volume', 'Cooldown and notes', 'Watch symptoms later today'],
+  },
+}
+
+const injuryTypeRules = {
+  'Muscle strain': {
+    avoid: ['Explosive loading early', 'End-range loaded stretching'],
+    focus: ['Gradual warm-up', 'Pain-free strength range'],
+  },
+  'Ligament sprain': {
+    avoid: ['Unstable positions', 'Twisting or contact before control is solid'],
+    focus: ['Support and control', 'Linear movement first'],
+  },
+  'Tendon irritation': {
+    avoid: ['Sudden load spikes', 'High-volume bouncing reps'],
+    focus: ['Smooth tempo', 'Manage total reps'],
+  },
+  'Joint irritation': {
+    avoid: ['Deep painful ranges', 'Forcing compression'],
+    focus: ['Clean alignment', 'Comfortable range'],
+  },
+  'Impact bruise': {
+    avoid: ['Direct contact on the area', 'Repeated impact'],
+    focus: ['Protect the area', 'Check pain after warm-up'],
+  },
+  'Overuse soreness': {
+    avoid: ['Extra volume', 'Turning a light session into conditioning'],
+    focus: ['Technique quality', 'Recovery between blocks'],
+  },
+  Cramp: {
+    avoid: ['Max bursts before symptoms settle', 'Training without fluids'],
+    focus: ['Gradual intensity', 'Hydration check'],
+  },
+  'Bone stress': {
+    avoid: ['Impact loading', 'Running through focal bone pain'],
+    focus: ['Tell an adult or trainer', 'Use non-impact work only'],
+  },
+  'Cut / scrape': {
+    avoid: ['Contact that reopens it', 'Dirty equipment on the area'],
+    focus: ['Cover it properly', 'Watch for irritation'],
+  },
+  Blister: {
+    avoid: ['Friction-heavy volume', 'Wet socks or poorly fitting shoes'],
+    focus: ['Protect the spot', 'Change footwear setup if needed'],
+  },
+  Swelling: {
+    avoid: ['Loading through swelling', 'Tight gear over the area'],
+    focus: ['Reduce volume', 'Check if swelling grows'],
+  },
+  'Concussion concern': {
+    avoid: ['Training', 'Contact', 'Headers'],
+    focus: ['Tell an adult now', 'Follow return-to-play guidance'],
+  },
+  Unknown: {
+    avoid: ['Testing the painful movement at max effort'],
+    focus: ['Start controlled', 'Track what triggers it'],
   },
 }
 
@@ -235,13 +366,39 @@ function hasRedFlag(checkIn) {
 
   return (
     pain >= 8 ||
+    checkIn.injuryType === 'Concussion concern' ||
+    checkIn.injuryType === 'Bone stress' ||
     checkIn.painType === 'Numbness' ||
+    checkIn.painType === 'Tingling' ||
     checkIn.painType === 'Headache / dizziness' ||
+    (checkIn.painType === 'Shooting' && pain >= 3) ||
     (checkIn.painType === 'Instability' && pain >= 3) ||
     (checkIn.painType === 'Swelling' && pain >= 4) ||
     (checkIn.painType === 'Sharp / stabbing' && pain >= 5) ||
+    checkIn.hurtsWhen === 'Breathing' ||
+    (checkIn.hurtsWhen === 'At rest' && pain >= 4) ||
     (['Head', 'Neck'].includes(checkIn.location) && pain >= 2)
   )
+}
+
+function getInjuryTypeRisk(checkIn, pain) {
+  if (pain === 0) return 0
+
+  return riskFromChoice(checkIn.injuryType, {
+    'Muscle strain': pain <= 2 ? 3 : 6,
+    'Ligament sprain': pain <= 2 ? 5 : 10,
+    'Tendon irritation': pain <= 2 ? 4 : 8,
+    'Joint irritation': pain <= 2 ? 4 : 9,
+    'Impact bruise': pain <= 2 ? 2 : 5,
+    'Overuse soreness': pain <= 2 ? 2 : 5,
+    Cramp: pain <= 2 ? 2 : 5,
+    'Bone stress': 20,
+    'Cut / scrape': pain <= 2 ? 1 : 4,
+    Blister: pain <= 2 ? 1 : 4,
+    Swelling: pain <= 2 ? 5 : 12,
+    'Concussion concern': 24,
+    Unknown: pain <= 2 ? 3 : 6,
+  })
 }
 
 function getPainTypeRisk(checkIn, pain) {
@@ -249,9 +406,16 @@ function getPainTypeRisk(checkIn, pain) {
 
   return riskFromChoice(checkIn.painType, {
     'No pain': 0,
-    'Tight / pulling': 2,
-    'Dull ache': 2,
+    'Tight / pulling': pain <= 2 ? 2 : 5,
+    'Dull ache': pain <= 2 ? 2 : 5,
     'Sharp / stabbing': pain <= 2 ? 4 : 10,
+    Burning: pain <= 2 ? 4 : 8,
+    Throbbing: pain <= 2 ? 4 : 8,
+    Pinching: pain <= 2 ? 4 : 8,
+    Pressure: pain <= 2 ? 3 : 6,
+    Cramping: pain <= 2 ? 2 : 6,
+    Shooting: pain <= 2 ? 8 : 14,
+    Tingling: 18,
     Swelling: pain <= 2 ? 5 : 12,
     Instability: pain <= 2 ? 8 : 16,
     Numbness: 18,
@@ -264,13 +428,25 @@ function getMovementRisk(checkIn, pain) {
 
   return riskFromChoice(checkIn.hurtsWhen, {
     'At rest': 12,
+    Walking: 6,
     Jogging: 4,
     Sprinting: 7,
+    Acceleration: 7,
+    Deceleration: 8,
     Cutting: 8,
     Jumping: 8,
+    Landing: 8,
+    Kicking: 7,
+    Throwing: 6,
+    Lifting: 6,
+    Squatting: 6,
+    Twisting: 8,
     Contact: 7,
+    Headers: 14,
     Stretching: 4,
     Bending: 4,
+    Breathing: 18,
+    'After activity': 5,
   })
 }
 
@@ -293,6 +469,7 @@ function getContextualAvoid(checkIn, redFlag) {
   const pain = getPain(checkIn)
   const location = locationRules[checkIn.location]
   const painType = painTypeRules[checkIn.painType] ?? painTypeRules['No pain']
+  const injuryType = injuryTypeRules[checkIn.injuryType] ?? injuryTypeRules.Unknown
   const movement = movementRules[checkIn.hurtsWhen] ?? { avoid: [], focus: [] }
   const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
 
@@ -300,6 +477,7 @@ function getContextualAvoid(checkIn, redFlag) {
     return unique([
       'Do not test max effort',
       ...painType.avoid,
+      ...injuryType.avoid,
       ...(location?.avoid ?? []),
       ...training.avoid,
     ])
@@ -318,6 +496,7 @@ function getContextualAvoid(checkIn, redFlag) {
 
   return unique([
     ...(sessionSpecific ?? []),
+    ...injuryType.avoid,
     ...painType.avoid,
     ...movement.avoid,
   ])
@@ -327,11 +506,12 @@ function getContextualFocus(checkIn, status, redFlag) {
   const pain = getPain(checkIn)
   const location = locationRules[checkIn.location]
   const painType = painTypeRules[checkIn.painType] ?? painTypeRules['No pain']
+  const injuryType = injuryTypeRules[checkIn.injuryType] ?? injuryTypeRules.Unknown
   const movement = movementRules[checkIn.hurtsWhen] ?? { avoid: [], focus: [] }
   const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
 
   if (redFlag || status.label === 'Stop and Check In') {
-    return unique(['Tell an adult or trainer', ...painType.focus, ...(location?.focus ?? [])])
+    return unique(['Tell an adult or trainer', ...injuryType.focus, ...painType.focus, ...(location?.focus ?? [])])
   }
 
   if (pain === 0) {
@@ -341,6 +521,7 @@ function getContextualFocus(checkIn, status, redFlag) {
   return unique([
     ...training.focus,
     ...(location?.focus ?? []),
+    ...injuryType.focus,
     ...painType.focus,
     ...movement.focus,
   ])
@@ -388,6 +569,7 @@ export function getRecommendation(checkIn) {
     { label: 'Fatigue', value: -checkIn.fatigue * 4 },
     { label: 'Soreness', value: -checkIn.soreness * 4 },
     { label: 'Pain level', value: -pain * 8 },
+    { label: 'Injury type', value: -getInjuryTypeRisk(checkIn, pain) },
     { label: 'Pain type', value: -getPainTypeRisk(checkIn, pain) },
     { label: 'Trigger', value: -getMovementRisk(checkIn, pain) },
     { label: 'Scheduled session', value: -getSessionRisk(checkIn, pain) },

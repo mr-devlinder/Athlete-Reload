@@ -5,12 +5,14 @@ import 'react-glassy/styles.css'
 import { AuthGate } from './components/AuthGate'
 import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
+import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { HomeView } from './components/HomeView'
 import { HistoryView } from './components/HistoryView'
+import { RecommendationCard } from './components/RecommendationCard'
 import { ScheduleView } from './components/ScheduleView'
-import { StatisticsView } from './components/StatisticsView'
 import {
   checkInDefaults,
+  associations as initialAssociations,
   schedule as initialSchedule,
   todayLabel,
 } from './data/appData'
@@ -18,17 +20,26 @@ import appLogo from './assets/athlete-reload-logo-transparent.png'
 import trainingHero from './assets/training-hero.png'
 import {
   clearCheckIns,
+  clearPainReports,
+  clearTrainingCheckouts,
+  createAssociation,
   createCheckIn,
   createPainReports,
   createScheduleEvent,
   createTrainingCheckout,
+  deleteAssociation,
+  deleteCheckInsForEvent,
   deletePainReportsForSource,
   deleteScheduleEvent,
   deleteCheckInsForDate,
   loadAthleteData,
+  loadPrivacyPreferences,
+  upsertPrivacyPreferences,
+  updateAssociation,
   updateTrainingCheckout,
   updateScheduleEvent,
 } from './lib/athleteData'
+import { generateAiRecommendation } from './lib/aiRecommendations'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { getPainReportsFromMap, getPrimaryPainArea } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
@@ -49,14 +60,18 @@ const views = [
     label: 'Schedule',
   },
   {
-    icon: 'stats',
-    label: 'Statistics',
-  },
-  {
     icon: 'trend',
     label: 'History',
   },
 ]
+
+const privacyDefaults = {
+  analyticsAllowed: false,
+  cloudSync: true,
+  coachIncludeNotes: false,
+  coachIncludePain: false,
+  localCopy: false,
+}
 
 function normalizeScheduleItem(item, index) {
   const fallback = new Date()
@@ -72,8 +87,9 @@ function normalizeScheduleItem(item, index) {
     date: /^\d{4}-\d{2}-\d{2}$/.test(item.date ?? '') ? item.date : fallbackDate,
     load: item.load ?? 'Medium',
     note: item.note ?? '',
+    association: item.association ?? 'Personal',
     time: item.time ?? '',
-    title: item.title ?? item.type ?? 'Training',
+    title: item.type ?? item.title ?? 'Training',
     type: item.type ?? 'Team practice',
   }
 }
@@ -90,6 +106,34 @@ function getSessionFromSchedule(events) {
   if (eventType === 'Recovery') return 'Recovery day'
 
   return eventType
+}
+
+function getSessionFromEvent(event) {
+  if (!event) return 'Rest day'
+  if (event.type === 'Game') return 'Game day'
+  if (event.type === 'Recovery') return 'Recovery day'
+
+  return event.type
+}
+
+function getCheckInEventOptions(schedule) {
+  return sortScheduleEvents(schedule)
+}
+
+function getDefaultLoadForEvent(type) {
+  if (['Game', 'Tournament', 'Conditioning'].includes(type)) return 'High'
+  if (['Recovery', 'Rest day'].includes(type)) return 'Low'
+
+  return 'Medium'
+}
+
+function getHydrationStatus(hydrationOz = 0) {
+  const progress = Number(hydrationOz) / 101.4
+
+  if (progress >= 0.9) return 'Good'
+  if (progress >= 0.5) return 'Okay'
+
+  return 'Poor'
 }
 
 function getYesterdayLoadFromSchedule(schedule) {
@@ -127,6 +171,7 @@ function checkInFromHistoryEntry(entry, fallback) {
     fatigue: entry.fatigue,
     hurtsWhen: entry.hurtsWhen,
     hydration: entry.hydration,
+    hydrationOz: entry.hydrationOz ?? fallback.hydrationOz ?? 64,
     injuryType: entry.injuryType,
     location: entry.location,
     notes: entry.note ?? '',
@@ -139,12 +184,106 @@ function checkInFromHistoryEntry(entry, fallback) {
   }
 }
 
+function getComparableCheckIn(checkIn) {
+  return {
+    checkInType: checkIn.checkInType ?? 'pre_event',
+    energy: Number(checkIn.energy),
+    eventDate: checkIn.eventDate ?? checkIn.date ?? '',
+    eventId: checkIn.eventId ?? null,
+    eventTime: checkIn.eventTime ?? '',
+    eventTitle: checkIn.eventTitle ?? '',
+    fatigue: Number(checkIn.fatigue),
+    hurtsWhen: checkIn.hurtsWhen ?? '',
+    hydration: checkIn.hydration ?? '',
+    hydrationOz: Number(checkIn.hydrationOz ?? 0),
+    injuryType: checkIn.injuryType ?? '',
+    location: checkIn.location ?? '',
+    notes: checkIn.notes ?? checkIn.note ?? '',
+    pain: Number(checkIn.pain ?? 0),
+    painMap: checkIn.painMap ?? null,
+    painType: checkIn.painType ?? '',
+    plannedIntensity: checkIn.plannedIntensity ?? '',
+    session: checkIn.session ?? '',
+    sleep: Number(checkIn.sleep),
+    soreness: Number(checkIn.soreness),
+    stress: checkIn.stress ?? '',
+    yesterdayLoad: checkIn.yesterdayLoad ?? '',
+  }
+}
+
+function getComparableHistoryEntry(entry) {
+  if (!entry) return null
+
+  return getComparableCheckIn({
+    ...entry,
+    checkInType: entry.checkInType ?? 'pre_event',
+    eventDate: entry.date,
+    eventTitle: entry.eventTitle ?? entry.session,
+    notes: entry.note ?? '',
+    plannedIntensity: entry.plannedIntensity ?? entry.session,
+  })
+}
+
+function areCheckInsEquivalent(current, previous) {
+  const currentComparable = getComparableCheckIn(current)
+  const previousComparable = getComparableHistoryEntry(previous)
+
+  if (!previousComparable) return false
+
+  if (!previousComparable.painMap) {
+    currentComparable.painMap = null
+  }
+
+  return JSON.stringify(currentComparable) === JSON.stringify(previousComparable)
+}
+
+function getFreshCheckInDefaults() {
+  return {
+    ...checkInDefaults,
+    painMap: { ...checkInDefaults.painMap },
+  }
+}
+
+function getNextTodayEventAfter(schedule, eventId, todayIso, completedEventIds = new Set()) {
+  const todaySchedule = sortScheduleEvents(schedule.filter((event) => event.date === todayIso))
+  const currentIndex = todaySchedule.findIndex((event) => event.id === eventId)
+  const laterEvents = todaySchedule.slice(Math.max(0, currentIndex + 1))
+
+  return laterEvents.find((event) => !completedEventIds.has(event.id)) ?? laterEvents[0] ?? null
+}
+
+function getScheduleTimeValue(value = '') {
+  const trimmed = String(value).trim()
+
+  if (!trimmed) return 24 * 60
+
+  const timeInputMatch = trimmed.match(/^(\d{1,2}):(\d{2})$/)
+
+  if (timeInputMatch) {
+    return Number(timeInputMatch[1]) * 60 + Number(timeInputMatch[2])
+  }
+
+  const displayMatch = trimmed.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i)
+
+  if (!displayMatch) return 24 * 60
+
+  const suffix = displayMatch[3].toUpperCase()
+  let hour = Number(displayMatch[1])
+  const minute = Number(displayMatch[2] ?? 0)
+
+  if (suffix === 'PM' && hour !== 12) hour += 12
+  if (suffix === 'AM' && hour === 12) hour = 0
+
+  return hour * 60 + minute
+}
+
 function sortScheduleEvents(events) {
   return [...events].sort((first, second) => {
-    const firstValue = `${first.date} ${first.time ?? ''}`
-    const secondValue = `${second.date} ${second.time ?? ''}`
+    const dateCompare = String(first.date).localeCompare(String(second.date))
 
-    return firstValue.localeCompare(secondValue)
+    if (dateCompare !== 0) return dateCompare
+
+    return getScheduleTimeValue(first.time) - getScheduleTimeValue(second.time)
   })
 }
 
@@ -153,10 +292,16 @@ function App() {
   const [session, setSession] = useState(null)
   const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
+  const [authEntryMode, setAuthEntryMode] = useState('landing')
   const [dataStatus, setDataStatus] = useState('ready')
   const [isEditingToday, setIsEditingToday] = useState(false)
+  const [selectedCheckInEventId, setSelectedCheckInEventId] = useState(null)
   const [activeView, setActiveView] = useState('Home')
   const [checkoutEvent, setCheckoutEvent] = useState(null)
+  const [submittedRecommendation, setSubmittedRecommendation] = useState(null)
+  const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
+  const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
+  const [activeLegalModal, setActiveLegalModal] = useState(null)
   const [navLens, setNavLens] = useState(null)
   const lensFrameRef = useRef(null)
   const lensNodeRef = useRef(null)
@@ -166,6 +311,10 @@ function App() {
   const [history, setHistory] = useState(savedState?.history ?? [])
   const [checkouts, setCheckouts] = useState(savedState?.checkouts ?? [])
   const [painReports, setPainReports] = useState(savedState?.painReports ?? [])
+  const [privacyPreferences, setPrivacyPreferences] = useState(
+    savedState?.privacyPreferences ?? privacyDefaults,
+  )
+  const [associations, setAssociations] = useState(savedState?.associations ?? initialAssociations)
   const [schedule, setSchedule] = useState(
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
@@ -176,27 +325,63 @@ function App() {
     () => sortScheduleEvents(schedule.filter((event) => event.date === todayIso)),
     [schedule, todayIso],
   )
+  const completedCheckoutEventIds = useMemo(
+    () => new Set(checkouts.map((checkout) => checkout.eventId).filter(Boolean)),
+    [checkouts],
+  )
+  const currentTodayCheckInEvent = useMemo(
+    () => todayEvents.find((event) => !completedCheckoutEventIds.has(event.id)) ?? null,
+    [completedCheckoutEventIds, todayEvents],
+  )
   const nextEvent = useMemo(
     () => sortScheduleEvents(schedule.filter((event) => event.date > todayIso))[0],
     [schedule, todayIso],
   )
+  const checkInEventOptions = useMemo(
+    () => getCheckInEventOptions(schedule),
+    [schedule],
+  )
+  const selectedCheckInEvent = useMemo(
+    () => {
+      const selectedEvent = checkInEventOptions.find((event) => event.id === selectedCheckInEventId)
+
+      if (selectedEvent?.id === currentTodayCheckInEvent?.id) return selectedEvent
+
+      return currentTodayCheckInEvent
+    },
+    [checkInEventOptions, currentTodayCheckInEvent, selectedCheckInEventId],
+  )
   const scheduleDrivenCheckIn = useMemo(
     () => ({
       ...applyPainMapToCheckIn(checkIn),
-      session: getSessionFromSchedule(todayEvents),
+      checkInType: 'pre_event',
+      eventDate: selectedCheckInEvent?.date ?? todayIso,
+      eventId: selectedCheckInEvent?.id ?? null,
+      eventTime: selectedCheckInEvent?.time ?? '',
+      eventTitle: selectedCheckInEvent?.title ?? 'Open training day',
+      plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
+      session: getSessionFromEvent(selectedCheckInEvent) || getSessionFromSchedule(todayEvents),
       yesterdayLoad: getYesterdayLoadFromSchedule(schedule),
     }),
-    [checkIn, schedule, todayEvents],
+    [checkIn, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
 
-  const recommendation = useMemo(
+  const localRecommendation = useMemo(
     () => getRecommendation(scheduleDrivenCheckIn),
     [scheduleDrivenCheckIn],
   )
+  const recommendation = localRecommendation
 
   const currentEntry = useMemo(
     () => ({
-      date: todayIso,
+      date: selectedCheckInEvent?.date ?? todayIso,
+      checkInType: 'pre_event',
+      eventId: selectedCheckInEvent?.id ?? null,
+      eventTime: selectedCheckInEvent?.time ?? '',
+      eventTitle: selectedCheckInEvent?.title ?? scheduleDrivenCheckIn.session,
+      id: selectedCheckInEvent?.id
+        ? `pre-check-${selectedCheckInEvent.id}`
+        : `pre-check-${todayIso}`,
       day: 'Today',
       energy: checkIn.energy,
       score: recommendation.score,
@@ -208,10 +393,12 @@ function App() {
       stress: checkIn.stress,
       yesterdayLoad: scheduleDrivenCheckIn.yesterdayLoad,
       hydration: checkIn.hydration,
+      hydrationOz: checkIn.hydrationOz,
       injuryType: checkIn.injuryType,
       painType: checkIn.painType,
       painMap: checkIn.painMap,
       hurtsWhen: checkIn.hurtsWhen,
+      plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
       session: scheduleDrivenCheckIn.session,
       note: checkIn.notes,
     }),
@@ -220,6 +407,7 @@ function App() {
       checkIn.fatigue,
       checkIn.hurtsWhen,
       checkIn.hydration,
+      checkIn.hydrationOz,
       checkIn.injuryType,
       checkIn.location,
       checkIn.notes,
@@ -232,12 +420,19 @@ function App() {
       recommendation.score,
       scheduleDrivenCheckIn.session,
       scheduleDrivenCheckIn.yesterdayLoad,
+      selectedCheckInEvent,
       todayIso,
     ],
   )
   const isCheckInSavedToday = useMemo(
-    () => !isEditingToday && history.some((entry) => entry.date === todayIso),
-    [history, isEditingToday, todayIso],
+    () =>
+      !isEditingToday &&
+      history.some((entry) =>
+        selectedCheckInEvent?.id
+          ? entry.eventId === selectedCheckInEvent.id
+          : entry.date === todayIso,
+      ),
+    [history, isEditingToday, selectedCheckInEvent, todayIso],
   )
 
   const trendInsights = useMemo(
@@ -261,10 +456,14 @@ function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthEntryMode('reset-password')
+      }
       if (!nextSession) {
         setIsAppUnlocked(false)
+        setAuthEntryMode('landing')
       }
       setIsAuthReady(true)
     })
@@ -282,12 +481,14 @@ function App() {
 
     saveState({
       checkIn,
+      associations,
       checkouts,
       history,
       painReports,
+      privacyPreferences,
       schedule,
     })
-  }, [checkIn, checkouts, history, isSupabaseSession, painReports, schedule])
+  }, [associations, checkIn, checkouts, history, isSupabaseSession, painReports, privacyPreferences, schedule])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -300,13 +501,22 @@ function App() {
     async function loadRemoteData() {
       try {
         const data = await loadAthleteData()
+        let preferences = privacyDefaults
+
+        try {
+          preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
+        } catch (preferencesError) {
+          console.warn(preferencesError)
+        }
 
         if (!isMounted) return
 
         setSchedule(data.schedule)
+        setAssociations(data.associations)
         setHistory(data.history)
         setCheckouts(data.checkouts)
         setPainReports(data.painReports)
+        setPrivacyPreferences(preferences)
         setDataStatus('ready')
       } catch (error) {
         if (error?.status === 401 || error?.code === 'PGRST301') {
@@ -315,13 +525,22 @@ function App() {
           if (!refreshError) {
             try {
               const data = await loadAthleteData()
+              let preferences = privacyDefaults
+
+              try {
+                preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
+              } catch (preferencesError) {
+                console.warn(preferencesError)
+              }
 
               if (!isMounted) return
 
               setSchedule(data.schedule)
+              setAssociations(data.associations)
               setHistory(data.history)
               setCheckouts(data.checkouts)
               setPainReports(data.painReports)
+              setPrivacyPreferences(preferences)
               setDataStatus('ready')
               return
             } catch (retryError) {
@@ -354,6 +573,17 @@ function App() {
   }, [])
 
   function updateField(field, value) {
+    if (field === 'hydrationOz') {
+      const hydrationOz = Math.max(0, Number(value) || 0)
+
+      setCheckIn((current) => ({
+        ...current,
+        hydration: getHydrationStatus(hydrationOz),
+        hydrationOz,
+      }))
+      return
+    }
+
     if (field === 'painMap') {
       const nextCheckIn = applyPainMapToCheckIn({
         ...checkIn,
@@ -391,27 +621,79 @@ function App() {
   }
 
   async function saveCheckIn() {
+    if (isSavingCheckIn) return
+
+    setIsSavingCheckIn(true)
+
+    const previousEntry = isEditingToday
+      ? history.find((entry) =>
+          selectedCheckInEvent?.id
+            ? entry.eventId === selectedCheckInEvent.id
+            : entry.date === todayIso,
+        )
+      : null
+
+    if (isEditingToday && previousEntry && areCheckInsEquivalent(scheduleDrivenCheckIn, previousEntry)) {
+      const existingRecommendation = previousEntry.recommendation ?? localRecommendation
+
+      setIsEditingToday(false)
+      setSubmittedRecommendation(existingRecommendation)
+      setSubmittedRecommendationStatus(previousEntry.recommendation ? 'ai' : 'local')
+      setIsSavingCheckIn(false)
+      return
+    }
+
+    let finalRecommendation = localRecommendation
+    let finalRecommendationStatus = 'local'
+
+    if (isSupabaseSession) {
+      try {
+        finalRecommendation = await generateAiRecommendation({
+          checkIn: scheduleDrivenCheckIn,
+          checkouts: checkouts.slice(0, 12),
+          history: history.slice(0, 10),
+          localRecommendation,
+          painReports: painReports.slice(0, 20),
+          schedule: schedule.slice(0, 20),
+        })
+        finalRecommendationStatus = 'ai'
+      } catch (error) {
+        console.error(error)
+        finalRecommendation = localRecommendation
+        finalRecommendationStatus = 'fallback'
+      }
+    }
+
     if (isSupabaseSession) {
       try {
         if (isEditingToday) {
-          const previousToday = history.find((entry) => entry.date === todayIso)
-
-          if (previousToday?.id) {
-            await deletePainReportsForSource('check_in', previousToday.id)
+          if (previousEntry?.id) {
+            await deletePainReportsForSource('check_in', previousEntry.id)
           }
 
-          await deleteCheckInsForDate(todayIso)
-          setHistory((current) => current.filter((entry) => entry.date !== todayIso))
+          if (selectedCheckInEvent?.id) {
+            await deleteCheckInsForEvent(selectedCheckInEvent.id)
+          } else {
+            await deleteCheckInsForDate(todayIso)
+          }
+
+          setHistory((current) =>
+            current.filter((entry) =>
+              selectedCheckInEvent?.id
+                ? entry.eventId !== selectedCheckInEvent.id
+                : entry.date !== todayIso,
+            ),
+          )
           setPainReports((current) =>
-            current.filter((report) => report.sourceId !== previousToday?.id),
+            current.filter((report) => report.sourceId !== previousEntry?.id),
           )
         }
 
-        const savedEntry = await createCheckIn(scheduleDrivenCheckIn, recommendation)
+        const savedEntry = await createCheckIn(scheduleDrivenCheckIn, finalRecommendation)
         const savedPainReports = await createPainReports(getPainReportsFromMap(
           scheduleDrivenCheckIn.painMap,
           {
-            date: todayIso,
+            date: scheduleDrivenCheckIn.eventDate ?? todayIso,
             notes: scheduleDrivenCheckIn.notes,
             sourceId: savedEntry.id,
             sourceType: 'check_in',
@@ -420,35 +702,49 @@ function App() {
         ))
         setHistory((current) => [
           savedEntry,
-          ...current.filter((entry) => entry.date !== todayIso).slice(0, 19),
+          ...current.filter((entry) =>
+            savedEntry.eventId
+              ? entry.eventId !== savedEntry.eventId
+              : entry.date !== savedEntry.date,
+          ).slice(0, 19),
         ])
         setPainReports((current) => [...savedPainReports, ...current])
       } catch (error) {
         console.error(error)
         setDataStatus('error')
+        setIsSavingCheckIn(false)
         return
       }
     } else {
       setHistory((current) => [
         currentEntry,
-        ...current.filter((entry) => entry.date !== todayIso).slice(0, 5),
+        ...current.filter((entry) =>
+          currentEntry.eventId
+            ? entry.eventId !== currentEntry.eventId
+            : entry.date !== currentEntry.date,
+        ).slice(0, 19),
       ])
       setPainReports((current) => [
         ...getPainReportsFromMap(scheduleDrivenCheckIn.painMap, {
-          date: todayIso,
+          date: scheduleDrivenCheckIn.eventDate ?? todayIso,
           notes: scheduleDrivenCheckIn.notes,
-          sourceId: currentEntry.date,
+          sourceId: currentEntry.id ?? currentEntry.eventId ?? currentEntry.date,
           sourceType: 'check_in',
           triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
         }).map((report) => ({
           ...report,
           id: `pain-${Date.now()}-${report.bodyPart}`,
         })),
-        ...current,
+        ...current.filter((report) =>
+          report.sourceId !== (currentEntry.id ?? currentEntry.eventId ?? currentEntry.date)
+        ),
       ])
     }
 
     setIsEditingToday(false)
+    setSubmittedRecommendation(finalRecommendation)
+    setSubmittedRecommendationStatus(finalRecommendationStatus)
+    setIsSavingCheckIn(false)
   }
 
   async function updateScheduleItem(id, updates) {
@@ -469,9 +765,15 @@ function App() {
   }
 
   async function addScheduleItem(event) {
+    const eventToSave = {
+      ...event,
+      load: getDefaultLoadForEvent(event.type),
+      title: event.type,
+    }
+
     if (isSupabaseSession) {
       try {
-        const savedEvent = await createScheduleEvent(event)
+        const savedEvent = await createScheduleEvent(eventToSave)
         setSchedule((current) => [...current, savedEvent])
       } catch (error) {
         console.error(error)
@@ -480,7 +782,7 @@ function App() {
       return
     }
 
-    setSchedule((current) => [...current, event])
+    setSchedule((current) => [...current, eventToSave])
   }
 
   async function removeScheduleItem(id) {
@@ -502,6 +804,8 @@ function App() {
     if (isSupabaseSession) {
       try {
         await clearCheckIns(cutoffDate)
+        await clearTrainingCheckouts(cutoffDate)
+        await clearPainReports(cutoffDate)
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -514,6 +818,85 @@ function App() {
         ? current.filter((entry) => !entry.date || entry.date < cutoffDate)
         : [],
     )
+    setCheckouts((current) =>
+      cutoffDate
+        ? current.filter((entry) => !entry.date || entry.date < cutoffDate)
+        : [],
+    )
+    setPainReports((current) =>
+      cutoffDate
+        ? current.filter((entry) => !entry.date || entry.date < cutoffDate)
+        : [],
+    )
+  }
+
+  async function addAssociation(name) {
+    const trimmedName = name.trim()
+
+    if (!trimmedName) return
+    if (trimmedName.toLowerCase() === 'personal') return
+    if (associations.some((item) => item.name.toLowerCase() === trimmedName.toLowerCase())) return
+
+    if (isSupabaseSession) {
+      try {
+        const savedAssociation = await createAssociation(trimmedName)
+        setAssociations((current) => [...current, savedAssociation])
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+      }
+      return
+    }
+
+    setAssociations((current) => [
+      ...current,
+      { id: `association-${Date.now()}`, name: trimmedName },
+    ])
+  }
+
+  async function renameAssociation(id, name) {
+    const trimmedName = name.trim()
+
+    if (!trimmedName) return
+    if (trimmedName.toLowerCase() === 'personal') return
+
+    setAssociations((current) =>
+      current.map((association) =>
+        association.id === id ? { ...association, name: trimmedName } : association,
+      ),
+    )
+
+    if (!isSupabaseSession) return
+
+    try {
+      await updateAssociation(id, trimmedName)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function removeAssociation(id) {
+    const association = associations.find((item) => item.id === id)
+
+    setAssociations((current) => current.filter((item) => item.id !== id))
+
+    if (association) {
+      setSchedule((current) =>
+        current.map((event) =>
+          event.association === association.name ? { ...event, association: 'Personal' } : event,
+        ),
+      )
+    }
+
+    if (!isSupabaseSession) return
+
+    try {
+      await deleteAssociation(id)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
   }
 
   async function saveCheckout(event, checkout, existingCheckout) {
@@ -547,6 +930,7 @@ function App() {
           ...current.filter((report) => report.sourceId !== savedCheckout.id),
         ])
         setCheckoutEvent(null)
+        advanceCheckInAfterCheckout(event, savedCheckout)
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -586,21 +970,63 @@ function App() {
         ...report,
         id: `pain-${Date.now()}-${report.bodyPart}`,
       })),
-      ...current,
+      ...current.filter((report) => report.sourceId !== savedCheckout.id),
     ])
     setCheckoutEvent(null)
+    advanceCheckInAfterCheckout(event, savedCheckout)
   }
 
-  function openCheckoutFromHistory(checkout) {
-    setCheckoutEvent({
-      checkoutId: checkout.id,
-      date: checkout.date,
-      id: checkout.eventId,
-      load: checkout.plannedLoad,
-      time: '',
-      title: checkout.title,
-      type: checkout.plannedType,
-    })
+  function advanceCheckInAfterCheckout(event, savedCheckout) {
+    if (event.date !== todayIso) return
+
+    const completedEventIds = new Set([
+      ...checkouts.map((item) => item.eventId),
+      savedCheckout.eventId,
+    ])
+    const nextEvent = getNextTodayEventAfter(schedule, event.id, todayIso, completedEventIds)
+
+    if (nextEvent) {
+      const existingEntry = history.find((entry) => entry.eventId === nextEvent.id)
+
+      setSelectedCheckInEventId(nextEvent.id)
+      setIsEditingToday(false)
+      setCheckIn((current) =>
+        existingEntry
+          ? checkInFromHistoryEntry(existingEntry, current)
+          : getFreshCheckInDefaults(),
+      )
+    }
+  }
+
+  function openPreCheckIn(event) {
+    if (event?.id !== currentTodayCheckInEvent?.id) return
+
+    setSelectedCheckInEventId(event?.id ?? null)
+    setIsEditingToday(false)
+    setCheckIn(getFreshCheckInDefaults())
+    setActiveView('Check-in')
+  }
+
+  function selectCheckInEvent(eventId) {
+    const event = checkInEventOptions.find((item) => item.id === eventId)
+
+    if (!event || event.date !== todayIso) {
+      return
+    }
+
+    if (event.id !== currentTodayCheckInEvent?.id) {
+      return
+    }
+
+    const existingEntry = history.find((entry) => entry.eventId === event.id)
+
+    setSelectedCheckInEventId(event.id)
+    setIsEditingToday(false)
+    setCheckIn((current) =>
+      existingEntry
+        ? checkInFromHistoryEntry(existingEntry, current)
+        : getFreshCheckInDefaults(),
+    )
   }
 
   function startDemoSession(email) {
@@ -619,10 +1045,56 @@ function App() {
   function finishAuthentication(nextSession) {
     setSession(nextSession)
     setIsAppUnlocked(true)
+    setAuthEntryMode('landing')
+  }
+
+  async function updatePrivacyPreference(key, value) {
+    const nextPreferences = {
+      ...privacyPreferences,
+      [key]: value,
+    }
+
+    setPrivacyPreferences(nextPreferences)
+
+    if (!isSupabaseSession) {
+      return
+    }
+
+    try {
+      const savedPreferences = await upsertPrivacyPreferences(nextPreferences)
+      setPrivacyPreferences(savedPreferences)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function clearAllHealthHistory() {
+    if (isSupabaseSession) {
+      try {
+        await Promise.all([
+          clearCheckIns(),
+          clearTrainingCheckouts(),
+          clearPainReports(),
+        ])
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+        return
+      }
+    }
+
+    setHistory([])
+    setCheckouts([])
+    setPainReports([])
   }
 
   function editTodayCheckIn() {
-    const todayEntry = history.find((entry) => entry.date === todayIso)
+    const todayEntry = history.find((entry) =>
+      selectedCheckInEvent?.id
+        ? entry.eventId === selectedCheckInEvent.id
+        : entry.date === todayIso,
+    )
 
     setCheckIn((current) => checkInFromHistoryEntry(todayEntry, current))
     setIsEditingToday(true)
@@ -831,6 +1303,7 @@ function App() {
 
       {isAuthReady && !isAppUnlocked && (
         <AuthGate
+          initialMode={authEntryMode}
           rememberedSession={session}
           onAuthenticated={finishAuthentication}
           onDemoSession={startDemoSession}
@@ -850,6 +1323,13 @@ function App() {
         </div>
         <div className="account-actions">
           <span>{session.user?.email ?? 'Athlete'}</span>
+          <button
+            className={`ghost-close ${activeView === 'Settings' ? 'account-button-active' : ''}`}
+            onClick={() => setActiveView('Settings')}
+            type="button"
+          >
+            Settings
+          </button>
           <button className="ghost-close" onClick={signOut} type="button">
             Sign out
           </button>
@@ -942,13 +1422,19 @@ function App() {
             {activeView === 'Check-in' && (
               <CheckInView
                 checkIn={scheduleDrivenCheckIn}
+                checkouts={checkouts}
+                eventOptions={checkInEventOptions}
                 isSavedToday={isCheckInSavedToday}
-                recommendation={recommendation}
+                isSaving={isSavingCheckIn}
                 nextEvent={nextEvent}
+                selectedEvent={selectedCheckInEvent}
+                selectedEventId={selectedCheckInEvent?.id ?? null}
                 todayEvents={todayEvents}
+                todayIso={todayIso}
                 todayLabel={todayLabel}
                 onSave={saveCheckIn}
                 onEditToday={editTodayCheckIn}
+                onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
               />
             )}
@@ -957,30 +1443,29 @@ function App() {
               <HomeView
                 checkouts={checkouts}
                 history={history}
-                isCheckInSavedToday={isCheckInSavedToday}
+                painReports={painReports}
                 recommendation={recommendation}
+                recommendationStatus="local"
                 schedule={schedule}
-                onGoCheckIn={() => setActiveView('Check-in')}
+                onGoCheckIn={openPreCheckIn}
                 onOpenCheckout={setCheckoutEvent}
               />
             )}
 
             {activeView === 'Schedule' && (
               <ScheduleView
+                associations={associations}
                 checkouts={checkouts}
+                checkIns={history}
                 onAdd={addScheduleItem}
+                onAddAssociation={addAssociation}
+                onRenameAssociation={renameAssociation}
+                onRemoveAssociation={removeAssociation}
+                onOpenCheckIn={openPreCheckIn}
                 onOpenCheckout={setCheckoutEvent}
                 onRemove={removeScheduleItem}
                 onUpdate={updateScheduleItem}
                 schedule={schedule}
-              />
-            )}
-
-            {activeView === 'Statistics' && (
-              <StatisticsView
-                checkouts={checkouts}
-                history={history}
-                painReports={painReports}
               />
             )}
 
@@ -990,7 +1475,20 @@ function App() {
                 history={history}
                 insights={trendInsights}
                 onClear={clearHistory}
-                onOpenCheckout={openCheckoutFromHistory}
+              />
+            )}
+
+            {activeView === 'Settings' && (
+              <AccountPrivacyView
+                checkouts={checkouts}
+                history={history}
+                painReports={painReports}
+                preferences={privacyPreferences}
+                schedule={schedule}
+                session={session}
+                onClearAllHealthHistory={clearAllHealthHistory}
+                onOpenHistory={() => setActiveView('History')}
+                onPrivacyChange={updatePrivacyPreference}
               />
             )}
           </section>
@@ -1006,10 +1504,498 @@ function App() {
           onSave={saveCheckout}
         />
       )}
+
+      {submittedRecommendation && (
+        <div className="modal-backdrop">
+          <section className="event-modal recommendation-modal glass-panel" role="dialog" aria-modal="true">
+            <div className="schedule-header">
+              <div>
+                <p className="eyebrow">Saved check-in</p>
+                <h2>Today's recommendation.</h2>
+              </div>
+              <button className="ghost-close" onClick={() => setSubmittedRecommendation(null)} type="button">
+                Close
+              </button>
+            </div>
+            <RecommendationCard
+              recommendation={submittedRecommendation}
+              recommendationStatus={submittedRecommendationStatus}
+              session={scheduleDrivenCheckIn.session}
+            />
+          </section>
+        </div>
+      )}
+
         </>
+      )}
+
+      <AppFooter onOpenLegal={setActiveLegalModal} />
+
+      {activeLegalModal && (
+        <LegalModal
+          type={activeLegalModal}
+          onClose={() => setActiveLegalModal(null)}
+        />
       )}
     </main>
   )
+}
+
+function AppFooter({ onOpenLegal }) {
+  return (
+    <footer className="app-footer">
+      <div className="footer-break">
+        <span>© 2026 Athlete Reload</span>
+      </div>
+      <nav className="footer-links" aria-label="Legal links">
+        <button className="footer-link" onClick={() => onOpenLegal('privacy')} type="button">
+          Privacy Policy
+        </button>
+        <button className="footer-link" onClick={() => onOpenLegal('terms')} type="button">
+          Terms of Service
+        </button>
+        <button className="footer-link" onClick={() => onOpenLegal('medical')} type="button">
+          Medical Disclaimer
+        </button>
+      </nav>
+      <div className="footer-credit">
+        <span>Developed by Lucas Linder</span>
+        <a href="https://github.com/mr-devlinder" rel="noreferrer" target="_blank">
+          GitHub
+        </a>
+      </div>
+    </footer>
+  )
+}
+
+function LegalModal({ onClose, type }) {
+  const content = legalContentV2[type]
+
+  return (
+    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+      <section
+        className="event-modal history-modal disclaimer-modal glass-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="schedule-header">
+          <div>
+            <p className="eyebrow">Athlete Reload</p>
+            <h2>{content.title}</h2>
+          </div>
+          <button className="ghost-close" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        <div className="disclaimer-content">
+          {content.sections.map((section) => (
+            <section key={section.title}>
+              <h3>{section.title}</h3>
+              {section.body.map((paragraph) => (
+                <p key={paragraph}>{paragraph}</p>
+              ))}
+            </section>
+          ))}
+          <p><strong>Last Updated:</strong> July 28, 2026</p>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+const legalContentV2 = {
+  privacy: {
+    title: 'Privacy policy.',
+    sections: [
+      {
+        title: '1. Scope',
+        body: [
+          'This Privacy Policy explains how Athlete Reload collects, uses, stores, and shares information when you use the app. It applies to information you enter directly, information connected to your signed-in account, and information generated by the app from your use of its features.',
+          'Athlete Reload is intended for training readiness and recovery planning. It is not a medical record system, healthcare provider, or emergency service.',
+        ],
+      },
+      {
+        title: '2. Information We Collect',
+        body: [
+          'We may collect account information such as your email address or authentication identifiers when you sign in.',
+          'We collect the information you choose to enter, including scheduled events, associations, pre-event check-ins, post-training checkouts, soreness, pain map entries, pain triggers, sleep, fatigue, stress, hydration, notes, readiness recommendations, and history records.',
+          'We may collect basic technical information needed to operate the app, such as authentication session data, device or browser information provided by the browser, and service logs created by hosting, database, and function providers.',
+        ],
+      },
+      {
+        title: '3. How We Use Information',
+        body: [
+          'We use your information to provide app features, sync data across signed-in devices, display your schedule and history, generate event-based readiness recommendations, show trends, maintain security, debug errors, and improve app functionality.',
+          'We do not use your information to provide medical diagnosis, treatment, medical clearance, or emergency guidance.',
+        ],
+      },
+      {
+        title: '4. Service Providers and AI Processing',
+        body: [
+          'Athlete Reload uses Supabase for authentication and database storage. Recommendation requests may be processed through a server-side function and sent to Google Gemini to generate training readiness guidance.',
+          'These providers process information only as needed to operate app features. API keys and service secrets are intended to stay server-side and are not stored in the browser.',
+        ],
+      },
+      {
+        title: '5. How Information Is Shared',
+        body: [
+          'We do not sell your personal information. We do not intentionally make your training or pain data public.',
+          'Information may be shared with service providers that help operate the app, when required by law, to protect rights and safety, to investigate abuse or security issues, or with your direction if future sharing features are added.',
+        ],
+      },
+      {
+        title: '6. Data Retention and Deletion',
+        body: [
+          'We keep signed-in data for as long as needed to provide the app or until you delete it, subject to backup, security, legal, or technical retention needs.',
+          'The History screen includes controls to clear saved pre-check-ins, post-checkouts, and pain reports by time range. Future versions may add more account-level controls such as full account deletion, data export, and sharing settings.',
+        ],
+      },
+      {
+        title: '7. Security',
+        body: [
+          'Athlete Reload is designed to separate each signed-in user\'s data with account-based access controls and server-side secrets. No online service can guarantee absolute security.',
+          'You are responsible for keeping access to your email and account secure. Do not enter emergency information that needs immediate professional attention.',
+        ],
+      },
+      {
+        title: '8. Minors and Student Athletes',
+        body: [
+          'Athlete Reload may be used by student athletes. If you are a minor, you should use the app with permission and guidance from a parent or guardian.',
+          'Parents, guardians, coaches, athletic trainers, and healthcare providers should be involved whenever pain, injury, return-to-play, or medical concerns are present.',
+        ],
+      },
+      {
+        title: '9. Privacy Choices',
+        body: [
+          'You can choose not to enter optional information. You can clear certain saved history records from inside the app. You can also stop using the app at any time.',
+          'Browser, device, and authentication settings may provide additional controls over sessions, saved credentials, cookies, and local storage.',
+        ],
+      },
+      {
+        title: '10. Changes to This Policy',
+        body: [
+          'We may update this Privacy Policy as the app changes. Material changes should be reflected by updating the policy text and last-updated date.',
+        ],
+      },
+      {
+        title: '11. Contact',
+        body: [
+          'Questions about this app can be directed to the developer through the GitHub link in the footer.',
+        ],
+      },
+    ],
+  },
+  terms: {
+    title: 'Terms of service.',
+    sections: [
+      {
+        title: '1. Acceptance of Terms',
+        body: [
+          'By accessing or using Athlete Reload, you agree to these Terms of Service. If you do not agree, do not use the app.',
+          'If you use Athlete Reload on behalf of a minor athlete, team, school, club, or other organization, you represent that you have authority and permission to do so.',
+        ],
+      },
+      {
+        title: '2. Purpose of the App',
+        body: [
+          'Athlete Reload is a training readiness, recovery, schedule, and workload planning tool. It is intended to help users organize information and think through training modifications.',
+          'Athlete Reload is not a medical device, healthcare provider, athletic trainer, physician, emergency service, or replacement for professional judgment.',
+        ],
+      },
+      {
+        title: '3. Eligibility and Minors',
+        body: [
+          'If you are a minor, you should use Athlete Reload only with permission from a parent or guardian. A responsible adult should be involved when health, pain, injury, or return-to-play decisions are involved.',
+          'The app should not be used to hide pain, injury, symptoms, or safety concerns from parents, guardians, coaches, athletic trainers, or healthcare providers.',
+        ],
+      },
+      {
+        title: '4. Account Responsibility',
+        body: [
+          'You are responsible for maintaining the confidentiality of your account access and for all activity under your account. Do not share your login credentials with others.',
+          'You agree to provide accurate information where accuracy matters to app output, and you understand that incorrect or incomplete information may produce incorrect or incomplete recommendations.',
+        ],
+      },
+      {
+        title: '5. Acceptable Use',
+        body: [
+          'You agree not to misuse the app, attempt to access another user\'s data, bypass access controls, interfere with service operation, upload malicious content, reverse engineer restricted services, or use the app for unlawful, abusive, or harmful purposes.',
+          'You agree not to rely on the app in emergencies or use it as the sole basis for participation, return-to-play, injury, or healthcare decisions.',
+        ],
+      },
+      {
+        title: '6. User Content and Data',
+        body: [
+          'You retain responsibility for the information you enter into Athlete Reload. By entering information, you authorize the app to store, process, display, and use it to provide app features.',
+          'You should not enter information that you do not have permission to store or information that requires immediate medical, emergency, or professional attention.',
+        ],
+      },
+      {
+        title: '7. AI and Recommendation Output',
+        body: [
+          'Athlete Reload may generate recommendations using rules, user-entered data, and AI services. AI output can be incomplete, incorrect, or inappropriate for your situation.',
+          'You are responsible for reviewing recommendations with common sense and involving a qualified adult, coach, athletic trainer, physician, or emergency services when appropriate.',
+        ],
+      },
+      {
+        title: '8. Medical and Safety Disclaimer',
+        body: [
+          'Athlete Reload does not provide medical advice, diagnosis, treatment, emergency care, or medical clearance. The Medical Disclaimer is incorporated into these Terms by reference.',
+          'Never delay seeking medical attention, ignore symptoms, or continue training because of information shown in the app.',
+        ],
+      },
+      {
+        title: '9. Intellectual Property',
+        body: [
+          'Athlete Reload, including its design, name, interface, code, text, and visual elements, is owned by its creator or licensors except for third-party libraries, services, and assets used under their own terms.',
+          'You may use the app for its intended personal training-readiness purpose. You may not copy, resell, or misrepresent the app as your own product without permission.',
+        ],
+      },
+      {
+        title: '10. Service Changes and Availability',
+        body: [
+          'Athlete Reload may change over time. Features may be added, changed, removed, interrupted, or unavailable while the app is being developed or maintained.',
+          'We do not guarantee that the app will be uninterrupted, error-free, secure, or available at all times.',
+        ],
+      },
+      {
+        title: '11. Disclaimers',
+        body: [
+          'The app is provided "as is" and "as available" without warranties of any kind, express or implied, including warranties of accuracy, fitness for a particular purpose, non-infringement, availability, or reliability.',
+        ],
+      },
+      {
+        title: '12. Limitation of Liability',
+        body: [
+          'To the fullest extent permitted by law, Athlete Reload and its creator are not liable for indirect, incidental, special, consequential, exemplary, or punitive damages, or for injury, loss, training decisions, health decisions, data loss, or reliance on app output.',
+          'Your use of Athlete Reload is at your own risk. Use the app as one informational tool, not as your only source of guidance.',
+        ],
+      },
+      {
+        title: '13. Indemnification',
+        body: [
+          'To the fullest extent permitted by law, you agree to defend, indemnify, and hold harmless Athlete Reload and its creator from claims, damages, losses, liabilities, and expenses arising from your misuse of the app, violation of these Terms, or violation of another person\'s rights.',
+        ],
+      },
+      {
+        title: '14. Changes to These Terms',
+        body: [
+          'These Terms may be updated as Athlete Reload changes. Continued use of the app after updates means you accept the updated Terms.',
+        ],
+      },
+      {
+        title: '15. Contact',
+        body: [
+          'Questions about these Terms can be directed to the developer through the GitHub link in the footer.',
+        ],
+      },
+    ],
+  },
+  medical: {
+    title: 'Medical disclaimer.',
+    sections: [
+      {
+        title: '1. Not Medical Advice',
+        body: [
+          'Athlete Reload is a training readiness, recovery, and workload planning tool. The information provided is for informational purposes only and is not a substitute for professional medical advice, diagnosis, treatment, athletic trainer evaluation, or emergency care.',
+        ],
+      },
+      {
+        title: '2. Consult Qualified Adults and Healthcare Providers',
+        body: [
+          'Always seek guidance from a physician, athletic trainer, physical therapist, coach, parent, guardian, or other qualified professional with questions about pain, injury, participation, return-to-play decisions, training modifications, or health concerns.',
+        ],
+      },
+      {
+        title: '3. Emergency Situations',
+        body: [
+          'Never delay seeking medical help, disregard medical advice, or continue training because of information shown in Athlete Reload. If you think you may have a medical emergency, severe injury, concussion symptoms, numbness, instability, chest pain, trouble breathing, or rapidly worsening symptoms, stop activity and contact emergency services or a qualified adult immediately.',
+        ],
+      },
+      {
+        title: '4. Data Accuracy',
+        body: [
+          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, post-session reports, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
+        ],
+      },
+      {
+        title: '5. Individual Differences',
+        body: [
+          'Every athlete, injury, sport, position, and training environment is different. Patterns, trends, and recommendations should be interpreted with care and discussed with qualified professionals when pain, injury, or return-to-play decisions are involved.',
+        ],
+      },
+      {
+        title: '6. No Provider Relationship',
+        body: [
+          'Using Athlete Reload does not create a physician-patient relationship, athletic trainer-athlete relationship, or any professional medical relationship with Athlete Reload or its creators.',
+        ],
+      },
+      {
+        title: '7. Limitation of Liability',
+        body: [
+          'By using Athlete Reload, you acknowledge that Athlete Reload and its creators are not liable for injury, damage, or loss that may result from use of the app, inability to use the app, or reliance on information shown in the app.',
+        ],
+      },
+      {
+        title: '8. Training Recommendations',
+        body: [
+          'The app may suggest full, controlled, modified, recovery-focused, or no-participation training options. These are general readiness suggestions, not medical clearance. A coach, parent, guardian, athletic trainer, or healthcare provider may decide that a different action is necessary.',
+        ],
+      },
+    ],
+  },
+}
+
+const _legacyLegalContent = {
+  privacy: {
+    title: 'Privacy policy.',
+    sections: [
+      {
+        title: '1. Information Athlete Reload Stores',
+        body: [
+          'Athlete Reload stores the information you choose to enter, including scheduled events, associations, pre-event check-ins, post-training checkouts, pain map entries, readiness recommendations, notes, and account information connected to your sign-in.',
+        ],
+      },
+      {
+        title: '2. How Your Information Is Used',
+        body: [
+          'Your information is used to show your schedule, generate event-based readiness recommendations, track training history, display trends, and sync your data across devices when you are signed in.',
+        ],
+      },
+      {
+        title: '3. Health and Training Data',
+        body: [
+          'Some information you enter may relate to soreness, pain, injury symptoms, sleep, fatigue, stress, hydration, and training participation. Do not enter information you do not want stored in the app.',
+        ],
+      },
+      {
+        title: '4. Third-Party Services',
+        body: [
+          'Athlete Reload uses Supabase for authentication and data storage. Recommendation requests may be sent to Google Gemini through a secure server-side function so the app can generate training guidance. API keys are not stored in the browser.',
+        ],
+      },
+      {
+        title: '5. Data Access and Control',
+        body: [
+          'Your signed-in app data is associated with your account. The History screen includes controls to clear saved check-ins, checkouts, and pain reports by time range.',
+          'Future versions may add more account-level privacy controls such as full account deletion, export, and sharing settings.',
+        ],
+      },
+      {
+        title: '6. Data Accuracy and Security',
+        body: [
+          'Athlete Reload is designed to keep each user’s saved data separate through account-based access controls. No online service can guarantee perfect security, and you should avoid entering emergency or highly sensitive information that needs immediate professional attention.',
+        ],
+      },
+      {
+        title: '7. Contact',
+        body: [
+          'Questions about this app can be directed to the developer through the GitHub link in the footer.',
+        ],
+      },
+    ],
+  },
+  terms: {
+    title: 'Terms of service.',
+    sections: [
+      {
+        title: '1. Acceptance of Terms',
+        body: [
+          'By using Athlete Reload, you agree to use the app responsibly and only for personal training readiness, recovery tracking, and schedule planning.',
+        ],
+      },
+      {
+        title: '2. Appropriate Use',
+        body: [
+          'You agree not to misuse the app, interfere with its services, attempt to access another user’s data, or use the app for unlawful, harmful, or abusive purposes.',
+        ],
+      },
+      {
+        title: '3. Your Responsibility',
+        body: [
+          'You are responsible for the accuracy of the information you enter and for deciding when to involve a parent, guardian, coach, athletic trainer, physician, or emergency services.',
+        ],
+      },
+      {
+        title: '4. No Medical Clearance',
+        body: [
+          'Athlete Reload does not provide medical clearance, diagnosis, treatment, return-to-play approval, or emergency care. Recommendations are general readiness guidance based on user-entered data.',
+        ],
+      },
+      {
+        title: '5. Accounts and Data',
+        body: [
+          'If you sign in, your data may be stored so it can sync across devices. You should keep access to your email/account secure and avoid sharing your login with others.',
+        ],
+      },
+      {
+        title: '6. Changes and Availability',
+        body: [
+          'Athlete Reload may change over time. Features may be added, changed, removed, interrupted, or unavailable while the app is being developed.',
+        ],
+      },
+      {
+        title: '7. Limitation of Liability',
+        body: [
+          'Athlete Reload and its creators are not liable for injury, loss, damages, training decisions, or reliance on app output. Use the app as one informational tool, not as your only source of guidance.',
+        ],
+      },
+    ],
+  },
+  medical: {
+    title: 'Medical disclaimer.',
+    sections: [
+      {
+        title: '1. Not Medical Advice',
+        body: [
+          'Athlete Reload is a training readiness, recovery, and workload planning tool. The information provided is for informational purposes only and is not a substitute for professional medical advice, diagnosis, treatment, athletic trainer evaluation, or emergency care.',
+        ],
+      },
+      {
+        title: '2. Consult Qualified Adults and Healthcare Providers',
+        body: [
+          'Always seek guidance from a physician, athletic trainer, physical therapist, coach, parent, guardian, or other qualified professional with questions about pain, injury, participation, return-to-play decisions, training modifications, or health concerns.',
+        ],
+      },
+      {
+        title: '3. Emergency Situations',
+        body: [
+          'Never delay seeking medical help, disregard medical advice, or continue training because of information shown in Athlete Reload. If you think you may have a medical emergency, severe injury, concussion symptoms, numbness, instability, chest pain, trouble breathing, or rapidly worsening symptoms, stop activity and contact emergency services or a qualified adult immediately.',
+        ],
+      },
+      {
+        title: '4. Data Accuracy',
+        body: [
+          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, post-session reports, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
+        ],
+      },
+      {
+        title: '5. Individual Differences',
+        body: [
+          'Every athlete, injury, sport, position, and training environment is different. Patterns, trends, and recommendations should be interpreted with care and discussed with qualified professionals when pain, injury, or return-to-play decisions are involved.',
+        ],
+      },
+      {
+        title: '6. No Provider Relationship',
+        body: [
+          'Using Athlete Reload does not create a physician-patient relationship, athletic trainer-athlete relationship, or any professional medical relationship with Athlete Reload or its creators.',
+        ],
+      },
+      {
+        title: '7. Limitation of Liability',
+        body: [
+          'By using Athlete Reload, you acknowledge that Athlete Reload and its creators are not liable for injury, damage, or loss that may result from use of the app, inability to use the app, or reliance on information shown in the app.',
+        ],
+      },
+      {
+        title: '8. Training Recommendations',
+        body: [
+          'The app may suggest full, controlled, modified, recovery-focused, or no-participation training options. These are general readiness suggestions, not medical clearance. A coach, parent, guardian, athletic trainer, or healthcare provider may decide that a different action is necessary.',
+        ],
+      },
+    ],
+  },
 }
 
 function NavIcon({ type }) {
@@ -1043,6 +2029,15 @@ function NavIcon({ type }) {
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M5 19V9M12 19V5M19 19v-7" />
         <path d="M3.5 19.5h17" />
+      </svg>
+    )
+  }
+
+  if (type === 'settings') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 8.2a3.8 3.8 0 1 1 0 7.6 3.8 3.8 0 0 1 0-7.6Z" />
+        <path d="m4.8 14.3-.9-1.5.9-1.5 2-.4.8-1.3-.6-2 1.5-.9 1.5.9 1.3-.5.7-1.9h1.8l.7 1.9 1.3.5 1.5-.9 1.5.9-.6 2 .8 1.3 2 .4.9 1.5-.9 1.5-2 .4-.8 1.3.6 2-1.5.9-1.5-.9-1.3.5-.7 1.9H12l-.7-1.9-1.3-.5-1.5.9-1.5-.9.6-2-.8-1.3-2-.4Z" />
       </svg>
     )
   }

@@ -10,28 +10,27 @@ function dateOffset(days) {
 export const todayLabel = format(today, 'EEEE, MMMM d')
 
 export const checkInDefaults = {
-  energy: 6,
-  soreness: 3,
-  pain: 2,
-  painMap: {
-    ...createEmptyPainMap(),
-    'left-hamstring': 20,
-  },
-  fatigue: 4,
-  sleep: 7,
-  stress: 'Medium',
-  yesterdayLoad: 'Hard',
-  hydration: 'Okay',
+  energy: 10,
+  soreness: 0,
+  pain: 0,
+  painMap: createEmptyPainMap(),
+  fatigue: 0,
+  sleep: 10,
+  stress: 'Low',
+  yesterdayLoad: 'Rest',
+  hydration: 'Good',
+  hydrationOz: 101,
   location: 'Hamstring',
-  injuryType: 'Muscle strain',
-  painType: 'Tight / pulling',
-  hurtsWhen: 'Sprinting',
+  injuryType: 'Unknown',
+  painType: 'No pain',
+  hurtsWhen: 'At rest',
   session: 'Team practice',
-  notes: 'Felt tight during acceleration work yesterday.',
+  notes: '',
 }
 
 export const schedule = [
   {
+    association: 'Personal',
     id: 'event-today-practice',
     date: dateOffset(0),
     load: 'Medium',
@@ -41,6 +40,7 @@ export const schedule = [
     type: 'Team practice',
   },
   {
+    association: 'Personal',
     id: 'event-tomorrow-gym',
     date: dateOffset(1),
     load: 'Low',
@@ -50,6 +50,7 @@ export const schedule = [
     type: 'Gym session',
   },
   {
+    association: 'Personal',
     id: 'event-plus-two-practice',
     date: dateOffset(2),
     load: 'High',
@@ -59,6 +60,7 @@ export const schedule = [
     type: 'Team practice',
   },
   {
+    association: 'Personal',
     id: 'event-plus-three-recovery',
     date: dateOffset(3),
     load: 'Low',
@@ -68,6 +70,7 @@ export const schedule = [
     type: 'Recovery',
   },
   {
+    association: 'Personal',
     id: 'event-plus-four-game',
     date: dateOffset(4),
     load: 'High',
@@ -77,6 +80,8 @@ export const schedule = [
     type: 'Game',
   },
 ]
+
+export const associations = []
 
 export const avoidRules = {
   Hamstring: ['No max sprints', 'Reduced acceleration reps', 'Technical only'],

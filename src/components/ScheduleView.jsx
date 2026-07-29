@@ -27,26 +27,32 @@ const eventTypes = [
   'Tournament',
 ]
 
-const loadLevels = ['Low', 'Medium', 'High']
 const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const today = new Date()
 const todayIso = toIsoDate(today)
 
 const emptyEvent = {
+  association: 'Personal',
   date: todayIso,
   load: 'Medium',
   note: '',
   time: '',
-  title: '',
+  title: 'Team practice',
   type: 'Team practice',
   repeat: 'Does not repeat',
   repeatCount: 4,
 }
 
 export function ScheduleView({
+  associations = [],
   checkouts = [],
+  checkIns = [],
   onAdd,
+  onAddAssociation,
+  onRenameAssociation,
+  onRemoveAssociation,
+  onOpenCheckIn,
   onOpenCheckout,
   onRemove,
   onUpdate,
@@ -56,6 +62,7 @@ export function ScheduleView({
   const [selectedDate, setSelectedDate] = useState(todayIso)
   const [modalMode, setModalMode] = useState(null)
   const [draftEvent, setDraftEvent] = useState(emptyEvent)
+  const [isAssociationsOpen, setIsAssociationsOpen] = useState(false)
 
   const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth])
   const selectedEvents = schedule.filter((event) => event.date === selectedDate)
@@ -87,6 +94,8 @@ export function ScheduleView({
   function updateDraft(field, value) {
     setDraftEvent((current) => ({
       ...current,
+      load: field === 'type' ? getDefaultLoadForEvent(value) : current.load,
+      title: field === 'type' ? value : current.title,
       [field]: value,
     }))
   }
@@ -94,7 +103,8 @@ export function ScheduleView({
   async function saveDraft() {
     const event = {
       ...draftEvent,
-      title: draftEvent.title || draftEvent.type,
+      load: getDefaultLoadForEvent(draftEvent.type),
+      title: draftEvent.type,
     }
 
     if (modalMode === 'edit') {
@@ -118,13 +128,22 @@ export function ScheduleView({
           eyebrow="Team training mode"
           title="Training calendar."
         />
-        <button
-          className="secondary-button"
-          onClick={() => openCreateModal()}
-          type="button"
-        >
-          Add event
-        </button>
+        <div className="schedule-actions">
+          <button
+            className="secondary-button"
+            onClick={() => setIsAssociationsOpen(true)}
+            type="button"
+          >
+            View associations
+          </button>
+          <button
+            className="secondary-button"
+            onClick={() => openCreateModal()}
+            type="button"
+          >
+            Add event
+          </button>
+        </div>
       </div>
 
       <div className="calendar-shell">
@@ -179,7 +198,7 @@ export function ScheduleView({
                   <div className="day-events">
                     {events.slice(0, 2).map((event) => (
                       <small className={event.load.toLowerCase()} key={event.id}>
-                        {event.title}
+                        {event.type}
                       </small>
                     ))}
                     {events.length > 2 && <small>+{events.length - 2} more</small>}
@@ -209,16 +228,19 @@ export function ScheduleView({
             <div className="event-list">
               {selectedEvents.map((event) => {
                 const checkout = getCheckoutForEvent(checkouts, event.id)
-                const canCheckout = hasEventStarted(event)
+                const checkIn = getCheckInForEvent(checkIns, event.id)
+                const isToday = event.date === todayIso
+                const canCheckIn = isToday
+                const canCheckout = isToday && hasEventStarted(event)
 
                 return (
                   <article className="event-card" key={event.id}>
                     <span className={`load ${event.load.toLowerCase()}`}>
-                      {event.load}
+                      {event.association || 'Personal'}
                     </span>
-                    <h4>{event.title}</h4>
+                    <h4>{event.type}</h4>
                   <p>
-                    {event.type}
+                    {event.association || 'Personal'}
                     {event.time ? ` at ${formatTimeLabel(event.time)}` : ''}
                   </p>
                     {checkout && (
@@ -226,8 +248,22 @@ export function ScheduleView({
                         Actual: {checkout.actualMinutes} min, {checkout.difficulty}/10 difficulty
                       </p>
                     )}
+                    {checkIn && (
+                      <p>
+                        Pre-check-in: {checkIn.score}/100 readiness
+                      </p>
+                    )}
                     {event.note && <p>{event.note}</p>}
                     <div className="event-actions">
+                      {canCheckIn && (
+                        <button
+                          className="secondary-button compact-action"
+                          onClick={() => onOpenCheckIn(event)}
+                          type="button"
+                        >
+                          {checkIn ? 'View pre-check-in' : 'Pre-check-in'}
+                        </button>
+                      )}
                       {canCheckout && (
                         <button
                           className="secondary-button compact-action"
@@ -262,6 +298,7 @@ export function ScheduleView({
 
       {modalMode && (
         <EventModal
+          associations={associations}
           draftEvent={draftEvent}
           mode={modalMode}
           onClose={closeModal}
@@ -269,14 +306,24 @@ export function ScheduleView({
           onUpdate={updateDraft}
         />
       )}
+
+      {isAssociationsOpen && (
+        <AssociationsModal
+          associations={associations}
+          onAdd={onAddAssociation}
+          onClose={() => setIsAssociationsOpen(false)}
+          onRemove={onRemoveAssociation}
+          onRename={onRenameAssociation}
+        />
+      )}
     </div>
   )
 }
 
-function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
+function EventModal({ associations, draftEvent, mode, onClose, onSave, onUpdate }) {
   return (
     <div className="modal-backdrop">
-      <section className="event-modal glass-panel" role="dialog" aria-modal="true">
+      <section className="event-modal associations-modal glass-panel" role="dialog" aria-modal="true">
         <div className="schedule-header">
           <SectionHeading
             eyebrow={mode === 'edit' ? 'Edit event' : 'New event'}
@@ -289,14 +336,6 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
 
         <div className="modal-form">
           <label className="compact-field">
-            Title
-            <input
-              value={draftEvent.title}
-              onChange={(event) => onUpdate('title', event.target.value)}
-              placeholder="Soccer practice"
-            />
-          </label>
-          <label className="compact-field">
             Date
             <input
               type="date"
@@ -304,26 +343,30 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
               onChange={(event) => onUpdate('date', event.target.value)}
             />
           </label>
-          <label className="compact-field">
-            Time
-            <input
-              type="time"
-              value={toTimeInputValue(draftEvent.time)}
-              onChange={(event) => onUpdate('time', event.target.value)}
-            />
-          </label>
+          <TimePicker
+            value={draftEvent.time}
+            onChange={(value) => onUpdate('time', value)}
+          />
           <Select
             label="Event type"
             value={draftEvent.type}
             options={eventTypes}
             onChange={(value) => onUpdate('type', value)}
           />
-          <Select
-            label="Load"
-            value={draftEvent.load}
-            options={loadLevels}
-            onChange={(value) => onUpdate('load', value)}
-          />
+          <label className="compact-field">
+            Association
+            <select
+              value={draftEvent.association ?? 'Personal'}
+              onChange={(event) => onUpdate('association', event.target.value)}
+            >
+              <option value="Personal">Personal</option>
+              {associations.map((association) => (
+                <option key={association.id} value={association.name}>
+                  {association.name}
+                </option>
+              ))}
+            </select>
+          </label>
           {mode === 'create' && (
             <>
               <Select
@@ -361,6 +404,109 @@ function EventModal({ draftEvent, mode, onClose, onSave, onUpdate }) {
         </button>
       </section>
     </div>
+  )
+}
+
+function AssociationsModal({ associations, onAdd, onClose, onRemove, onRename }) {
+  const [draftName, setDraftName] = useState('')
+
+  async function addDraft() {
+    await onAdd(draftName)
+    setDraftName('')
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <section className="event-modal glass-panel" role="dialog" aria-modal="true">
+        <div className="schedule-header">
+          <SectionHeading eyebrow="Associations" title="Teams and training groups." />
+          <button className="ghost-close" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+
+        <div className="association-list">
+          {associations.length === 0 ? (
+            <p>No custom associations yet. Add your team, school, or club.</p>
+          ) : (
+            associations.map((association) => (
+              <div className="association-row" key={association.id}>
+                <input
+                  aria-label={`${association.name} association name`}
+                  value={association.name}
+                  onChange={(event) => onRename(association.id, event.target.value)}
+                />
+                <button
+                  className="remove-button compact-action"
+                  onClick={() => onRemove(association.id)}
+                  type="button"
+                >
+                  Remove
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="association-add">
+          <input
+            aria-label="New association name"
+            placeholder="Add association"
+            value={draftName}
+            onChange={(event) => setDraftName(event.target.value)}
+          />
+          <button className="secondary-button compact-action" onClick={addDraft} type="button">
+            Add
+          </button>
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function TimePicker({ onChange, value }) {
+  const parts = getTimeParts(value)
+
+  function updateTime(part, nextValue) {
+    onChange(toStoredTime({
+      ...parts,
+      [part]: nextValue,
+    }))
+  }
+
+  return (
+    <fieldset className="compact-field time-picker-field">
+      <legend>Time</legend>
+      <div className="time-picker">
+        <select
+          aria-label="Hour"
+          value={parts.hour}
+          onChange={(event) => updateTime('hour', event.target.value)}
+        >
+          {Array.from({ length: 12 }, (_, index) => String(index + 1)).map((hour) => (
+            <option key={hour} value={hour}>{hour}</option>
+          ))}
+        </select>
+        <span>:</span>
+        <select
+          aria-label="Minute"
+          value={parts.minute}
+          onChange={(event) => updateTime('minute', event.target.value)}
+        >
+          {['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55'].map((minute) => (
+            <option key={minute} value={minute}>{minute}</option>
+          ))}
+        </select>
+        <select
+          aria-label="AM or PM"
+          value={parts.period}
+          onChange={(event) => updateTime('period', event.target.value)}
+        >
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+      </div>
+    </fieldset>
   )
 }
 
@@ -408,6 +554,29 @@ function toTimeInputValue(value) {
   return `${String(parsed.getHours()).padStart(2, '0')}:${String(parsed.getMinutes()).padStart(2, '0')}`
 }
 
+function getTimeParts(value) {
+  const timeValue = toTimeInputValue(value) || '18:00'
+  const [hourText, minuteText] = timeValue.split(':')
+  const hour = Number(hourText)
+  const period = hour >= 12 ? 'PM' : 'AM'
+  const displayHour = String(hour % 12 || 12)
+
+  return {
+    hour: displayHour,
+    minute: minuteText,
+    period,
+  }
+}
+
+function toStoredTime({ hour, minute, period }) {
+  let storedHour = Number(hour)
+
+  if (period === 'PM' && storedHour !== 12) storedHour += 12
+  if (period === 'AM' && storedHour === 12) storedHour = 0
+
+  return `${String(storedHour).padStart(2, '0')}:${minute}`
+}
+
 function formatTimeLabel(value) {
   const timeValue = toTimeInputValue(value)
 
@@ -419,6 +588,17 @@ function formatTimeLabel(value) {
   const displayHour = hour % 12 || 12
 
   return `${displayHour}:${minuteText} ${suffix}`
+}
+
+function getCheckInForEvent(checkIns, eventId) {
+  return checkIns.find((checkIn) => checkIn.eventId === eventId)
+}
+
+function getDefaultLoadForEvent(type) {
+  if (['Game', 'Tournament', 'Conditioning'].includes(type)) return 'High'
+  if (['Recovery', 'Rest day'].includes(type)) return 'Low'
+
+  return 'Medium'
 }
 
 function createRecurringEvents(event) {
@@ -437,10 +617,11 @@ function createRecurringEvents(event) {
     return {
       date: toIsoDate(nextDate),
       id: index === 0 ? event.id : `event-${Date.now()}-${index}`,
-      load: event.load,
+      association: event.association ?? 'Personal',
+      load: getDefaultLoadForEvent(event.type),
       note: event.note,
       time: event.time,
-      title: event.title,
+      title: event.type,
       type: event.type,
     }
   })
