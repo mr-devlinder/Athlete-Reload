@@ -8,6 +8,8 @@ const authDefaults = {
   password: '',
 }
 
+const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
+
 export function AuthGate({
   initialMode = 'landing',
   onAuthenticated,
@@ -28,6 +30,7 @@ export function AuthGate({
   })
   const isSigningUp = mode === 'signup'
   const isResettingPassword = mode === 'reset-password'
+  const canResendVerification = isSigningUp && isValidEmail(authForm.email)
   const passwordStrength = useMemo(
     () => getPasswordStrength(isResettingPassword ? resetForm.password : authForm.password),
     [authForm.password, isResettingPassword, resetForm.password],
@@ -40,7 +43,12 @@ export function AuthGate({
     }))
   }
 
-  function showGenericAuthError() {
+  function showGenericAuthError(error) {
+    if (error?.status === 429 || error?.code === 'over_email_send_rate_limit') {
+      setAuthMessage('Too many confirmation emails were requested. Please wait a little while before trying again.')
+      return
+    }
+
     setAuthMessage('Unable to complete that request. Check your information and try again.')
   }
 
@@ -64,7 +72,7 @@ export function AuthGate({
     setIsSubmitting(false)
 
     if (error) {
-      showGenericAuthError()
+      showGenericAuthError(error)
       return
     }
 
@@ -92,7 +100,7 @@ export function AuthGate({
     setIsSubmitting(false)
 
     if (error) {
-      showGenericAuthError()
+      showGenericAuthError(error)
       return
     }
 
@@ -103,7 +111,7 @@ export function AuthGate({
     const { data, error } = await supabase.auth.mfa.listFactors()
 
     if (error) {
-      showGenericAuthError()
+      showGenericAuthError(error)
       return
     }
 
@@ -126,6 +134,28 @@ export function AuthGate({
       factorId: factor.id,
     })
     setAuthMessage('Enter the six-digit code from your authenticator app.')
+  }
+
+  async function signInWithProvider(provider) {
+    setAuthMessage('')
+
+    if (!hasSupabaseConfig) {
+      setAuthMessage('Social sign-in is available after Supabase is connected.')
+      return
+    }
+
+    setIsSubmitting(true)
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: getAuthRedirectUrl(),
+      },
+    })
+
+    if (error) {
+      setIsSubmitting(false)
+      setAuthMessage('Unable to start social sign-in. Check that this provider is enabled in Supabase.')
+    }
   }
 
   async function verifyMfa(event) {
@@ -230,7 +260,7 @@ export function AuthGate({
     setIsSubmitting(false)
 
     if (error) {
-      showGenericAuthError()
+      showGenericAuthError(error)
       return
     }
 
@@ -450,6 +480,28 @@ export function AuthGate({
           {isSubmitting ? 'Working...' : isSigningUp ? 'Create account' : 'Sign in'}
         </button>
 
+        <div className="social-auth" aria-label="Social sign-in options">
+          <span className="social-auth-divider">or continue with</span>
+          <div className="social-auth-grid">
+            {[
+              ['google', 'Google', `${brandIconBase}google.svg`],
+              ['discord', 'Discord', `${brandIconBase}discord.svg`],
+              ['github', 'GitHub', `${brandIconBase}github.svg`],
+            ].map(([provider, label, icon]) => (
+              <button
+                className="social-auth-button"
+                disabled={isSubmitting}
+                key={provider}
+                onClick={() => signInWithProvider(provider)}
+                type="button"
+              >
+                <img src={icon} alt="" aria-hidden="true" />
+                {isSigningUp ? 'Sign up' : 'Sign in'} with {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <button
           className="auth-switch"
           onClick={() => setMode(isSigningUp ? 'signin' : 'signup')}
@@ -464,7 +516,7 @@ export function AuthGate({
           </button>
         )}
 
-        {isSigningUp && (
+        {canResendVerification && (
           <button className="auth-switch" onClick={resendVerification} type="button">
             Resend verification email
           </button>
@@ -472,6 +524,10 @@ export function AuthGate({
       </form>
     </section>
   )
+}
+
+function isValidEmail(value) {
+  return /^\S+@\S+\.\S+$/.test(value.trim())
 }
 
 function PasswordStrength({ strength }) {

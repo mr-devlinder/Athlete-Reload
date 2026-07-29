@@ -3,6 +3,8 @@ import { format, subDays } from 'date-fns'
 import { LensGlass, SVGFilters } from 'react-glassy'
 import 'react-glassy/styles.css'
 import { AuthGate } from './components/AuthGate'
+import { OnboardingFlow } from './components/OnboardingFlow'
+import { GuidedTour } from './components/GuidedTour'
 import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
@@ -34,9 +36,10 @@ import {
   deleteCheckInsForDate,
   deleteTrainingCheckoutsForEvent,
   loadAthleteData,
+  loadAthleteProfile,
   loadPrivacyPreferences,
-  upsertPrivacyPreferences,
   updateAssociation,
+  upsertAthleteProfile,
   updateTrainingCheckout,
   updateScheduleEvent,
 } from './lib/athleteData'
@@ -74,6 +77,19 @@ const privacyDefaults = {
   localCopy: false,
 }
 
+function getAuthDisplayName(session) {
+  const metadata = session?.user?.user_metadata ?? {}
+  const fullName = [metadata.given_name, metadata.family_name].filter(Boolean).join(' ').trim()
+
+  return [
+    metadata.full_name,
+    metadata.name,
+    fullName,
+    metadata.user_name,
+    metadata.preferred_username,
+  ].map((value) => String(value ?? '').trim()).find(Boolean) ?? ''
+}
+
 function normalizeScheduleItem(item, index) {
   const fallback = new Date()
   fallback.setDate(fallback.getDate() + index)
@@ -92,6 +108,7 @@ function normalizeScheduleItem(item, index) {
     time: item.time ?? '',
     title: item.type ?? item.title ?? 'Training',
     type: item.type ?? 'Team practice',
+    plannedMinutes: Number(item.plannedMinutes ?? 0) || undefined,
   }
 }
 
@@ -370,6 +387,11 @@ function sortScheduleEvents(events) {
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
+  const [athleteProfile, setAthleteProfile] = useState(savedState?.athleteProfile ?? null)
+  const [isProfileReady, setIsProfileReady] = useState(!hasSupabaseConfig)
+  const [onboardingTour, setOnboardingTour] = useState(null)
+  const [onboardingCompleteOpen, setOnboardingCompleteOpen] = useState(false)
+  const [onboardingAssociation, setOnboardingAssociation] = useState('Personal')
   const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
   const [authEntryMode, setAuthEntryMode] = useState('landing')
@@ -568,6 +590,7 @@ function App() {
     }
 
     saveState({
+      athleteProfile,
       checkIn,
       associations,
       checkouts,
@@ -576,7 +599,7 @@ function App() {
       privacyPreferences,
       schedule,
     })
-  }, [associations, checkIn, checkouts, history, isSupabaseSession, painReports, privacyPreferences, schedule])
+  }, [associations, athleteProfile, checkIn, checkouts, history, isSupabaseSession, painReports, privacyPreferences, schedule])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -588,6 +611,23 @@ function App() {
 
     async function loadRemoteData() {
       try {
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+
+        const userWasDeleted = !userData.user && (
+          !userError
+          || userError.status === 401
+          || userError.status === 403
+          || userError.code === 'user_not_found'
+          || userError.code === 'invalid_token'
+        )
+
+        if (userWasDeleted) {
+          await resetDeletedSession()
+          return
+        }
+
+        if (userError) throw userError
+
         const data = await loadAthleteData()
         let preferences = privacyDefaults
 
@@ -605,6 +645,8 @@ function App() {
         setCheckouts(data.checkouts)
         setPainReports(data.painReports)
         setPrivacyPreferences(preferences)
+        setAthleteProfile(await loadAthleteProfile())
+        setIsProfileReady(true)
         setDataStatus('ready')
       } catch (error) {
         if (error?.status === 401 || error?.code === 'PGRST301') {
@@ -629,6 +671,8 @@ function App() {
               setCheckouts(data.checkouts)
               setPainReports(data.painReports)
               setPrivacyPreferences(preferences)
+              setAthleteProfile(await loadAthleteProfile())
+              setIsProfileReady(true)
               setDataStatus('ready')
               return
             } catch (retryError) {
@@ -640,6 +684,7 @@ function App() {
         }
 
         if (isMounted) {
+          setIsProfileReady(true)
           setDataStatus(navigator.onLine ? 'error' : 'offline')
         }
       }
@@ -649,6 +694,49 @@ function App() {
 
     return () => {
       isMounted = false
+    }
+  }, [isSupabaseSession])
+
+  useEffect(() => {
+    if (!isSupabaseSession) {
+      return undefined
+    }
+
+    let isMounted = true
+
+    async function validateCurrentUser() {
+      const { data, error } = await supabase.auth.getUser()
+      const userWasDeleted = !data.user && (
+        !error
+        || error.status === 401
+        || error.status === 403
+        || error.code === 'user_not_found'
+        || error.code === 'invalid_token'
+      )
+
+      if (isMounted && userWasDeleted) {
+        await resetDeletedSession()
+      }
+    }
+
+    const handleFocus = () => {
+      void validateCurrentUser()
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void validateCurrentUser()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    const intervalId = window.setInterval(validateCurrentUser, 30000)
+
+    return () => {
+      isMounted = false
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.clearInterval(intervalId)
     }
   }, [isSupabaseSession])
 
@@ -742,6 +830,7 @@ function App() {
     if (isSupabaseSession) {
       try {
         finalRecommendation = await generateAiRecommendation({
+          athleteProfile,
           checkIn: scheduleDrivenCheckIn,
           checkouts: checkouts.slice(0, 12),
           history: history.slice(0, 10),
@@ -873,6 +962,9 @@ function App() {
       try {
         const savedEvent = await createScheduleEvent(eventToSave)
         setSchedule((current) => [...current, savedEvent])
+        if (onboardingTour === 'schedule') {
+          setOnboardingTour('checkin-nav')
+        }
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -881,6 +973,9 @@ function App() {
     }
 
     setSchedule((current) => [...current, eventToSave])
+    if (onboardingTour === 'schedule') {
+      setOnboardingTour('checkin-nav')
+    }
   }
 
   async function removeScheduleItem(id) {
@@ -1039,6 +1134,7 @@ function App() {
     if (isSupabaseSession) {
       try {
         finalRecommendation = await generateAiRecommendation({
+          athleteProfile,
           checkout,
           checkouts: checkouts.slice(0, 12),
           completedEvent: event,
@@ -1065,16 +1161,25 @@ function App() {
     }
 
     if (isSupabaseSession) {
+      let savedCheckout
+
       try {
-        const savedCheckout = existingCheckout
+        savedCheckout = existingCheckout
           ? await updateTrainingCheckout(existingCheckout.id, event, checkoutWithRecommendation)
           : await createTrainingCheckout(event, checkoutWithRecommendation)
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+        throw error
+      }
 
+      let savedPainReports = []
+      try {
         if (existingCheckout?.id) {
           await deletePainReportsForSource('checkout', existingCheckout.id)
         }
 
-        const savedPainReports = await createPainReports(getPainReportsFromMap(
+        savedPainReports = await createPainReports(getPainReportsFromMap(
           checkout.painMap,
           {
             date: event.date,
@@ -1084,31 +1189,31 @@ function App() {
             triggerMovement: checkout.painChange,
           },
         ))
-
-        setCheckouts((current) => [
-          savedCheckout,
-          ...current.filter((item) => item.id !== savedCheckout.id),
-        ])
-        setPainReports((current) => [
-          ...savedPainReports,
-          ...current.filter((report) => report.sourceId !== savedCheckout.id),
-        ])
-        setCheckoutEvent(null)
-        setSubmittedRecommendation(finalRecommendation)
-        setSubmittedRecommendationStatus(finalRecommendationStatus)
-        setSubmittedRecommendationContext({
-          scoreLabel: 'recovery',
-          session: event.title || event.type,
-          title: 'Post-training recovery plan.',
-        })
-        if (savedCheckout.recommendationNotPersisted) {
-          setDataStatus('offline')
-        }
-        advanceCheckInAfterCheckout(event, savedCheckout)
       } catch (error) {
         console.error(error)
         setDataStatus('error')
       }
+
+      setCheckouts((current) => [
+        savedCheckout,
+        ...current.filter((item) => item.id !== savedCheckout.id),
+      ])
+      setPainReports((current) => [
+        ...savedPainReports,
+        ...current.filter((report) => report.sourceId !== savedCheckout.id),
+      ])
+      setCheckoutEvent(null)
+      setSubmittedRecommendation(finalRecommendation)
+      setSubmittedRecommendationStatus(finalRecommendationStatus)
+      setSubmittedRecommendationContext({
+        scoreLabel: 'recovery',
+        session: event.title || event.type,
+        title: 'Post-training recovery plan.',
+      })
+      if (savedCheckout.recommendationNotPersisted) {
+        setDataStatus('offline')
+      }
+      advanceCheckInAfterCheckout(event, savedCheckout)
       return
     }
 
@@ -1224,31 +1329,112 @@ function App() {
     setIsAppUnlocked(true)
   }
 
+  async function completeOnboarding({ profile, association }) {
+    const profileToSave = {
+      ...profile,
+      onboardingCompleted: false,
+    }
+
+    if (isSupabaseSession) {
+      const savedProfile = await upsertAthleteProfile(profileToSave)
+      setAthleteProfile(savedProfile)
+    } else {
+      setAthleteProfile(profileToSave)
+    }
+
+    setOnboardingAssociation(association || 'Personal')
+    setOnboardingTour('schedule')
+    setActiveView('Schedule')
+  }
+
+  async function createOnboardingAssociation(name) {
+    const trimmedName = name.trim()
+    if (!trimmedName) return null
+
+    await addAssociation(trimmedName)
+    return { name: trimmedName }
+  }
+
+  async function finishOnboardingTour() {
+    setOnboardingTour(null)
+    setOnboardingCompleteOpen(true)
+  }
+
+  async function unlockAfterOnboarding() {
+    const completedProfile = { ...athleteProfile, onboardingCompleted: true }
+
+    if (isSupabaseSession) {
+      const savedProfile = await upsertAthleteProfile(completedProfile)
+      setAthleteProfile(savedProfile)
+    } else {
+      setAthleteProfile(completedProfile)
+    }
+
+    setOnboardingCompleteOpen(false)
+    setActiveView('Home')
+  }
+
+  function advanceOnboardingTour() {
+    if (onboardingTour === 'schedule-review') {
+      setOnboardingTour('checkin-nav')
+    } else if (onboardingTour === 'checkin') {
+      setOnboardingTour('home-nav')
+    } else if (onboardingTour === 'home') {
+      setOnboardingTour('history-nav')
+    } else if (onboardingTour === 'history') {
+      finishOnboardingTour()
+    }
+  }
+
+  function rewindOnboardingTour() {
+    if (onboardingTour === 'checkin-nav') {
+      setActiveView('Schedule')
+      setOnboardingTour('schedule-review')
+    } else if (onboardingTour === 'checkin') {
+      setOnboardingTour('checkin-nav')
+    } else if (onboardingTour === 'home-nav') {
+      setActiveView('Check-in')
+      setOnboardingTour('checkin')
+    } else if (onboardingTour === 'home') {
+      setOnboardingTour('home-nav')
+    } else if (onboardingTour === 'history-nav') {
+      setActiveView('Home')
+      setOnboardingTour('home')
+    } else if (onboardingTour === 'history') {
+      setOnboardingTour('history-nav')
+    }
+  }
+
+  function handleTourNavigation(view) {
+    if (onboardingTour === 'checkin-nav' && view === 'Check-in') {
+      setOnboardingTour('checkin')
+    } else if (onboardingTour === 'home-nav' && view === 'Home') {
+      setOnboardingTour('home')
+    } else if (onboardingTour === 'history-nav' && view === 'History') {
+      setOnboardingTour('history')
+    }
+  }
+
   function finishAuthentication(nextSession) {
     setSession(nextSession)
     setIsAppUnlocked(true)
     setAuthEntryMode('landing')
   }
 
-  async function updatePrivacyPreference(key, value) {
-    const nextPreferences = {
-      ...privacyPreferences,
-      [key]: value,
+  async function updateAthleteProfile(profile) {
+    const nextProfile = {
+      ...athleteProfile,
+      ...profile,
+      onboardingCompleted: true,
     }
 
-    setPrivacyPreferences(nextPreferences)
-
-    if (!isSupabaseSession) {
+    if (isSupabaseSession) {
+      const savedProfile = await upsertAthleteProfile(nextProfile)
+      setAthleteProfile(savedProfile)
       return
     }
 
-    try {
-      const savedPreferences = await upsertPrivacyPreferences(nextPreferences)
-      setPrivacyPreferences(savedPreferences)
-    } catch (error) {
-      console.error(error)
-      setDataStatus('error')
-    }
+    setAthleteProfile(nextProfile)
   }
 
   async function clearAllHealthHistory() {
@@ -1290,6 +1476,19 @@ function App() {
     setSession(null)
     setIsAppUnlocked(false)
     setActiveView('Home')
+  }
+
+  async function resetDeletedSession() {
+    if (supabase) {
+      await supabase.auth.signOut({ scope: 'local' })
+    }
+
+    setSession(null)
+    setIsAppUnlocked(false)
+    setIsProfileReady(false)
+    setAuthEntryMode('landing')
+    setOnboardingTour(null)
+    setOnboardingCompleteOpen(false)
   }
 
   function getNearestTab(pointerX) {
@@ -1347,6 +1546,25 @@ function App() {
     }
   }
 
+  function getTourNavigationTarget() {
+    return {
+      'checkin-nav': 'Check-in',
+      'home-nav': 'Home',
+      'history-nav': 'History',
+    }[onboardingTour]
+  }
+
+  function selectNavigationView(view) {
+    const requiredView = getTourNavigationTarget()
+
+    if (requiredView && view !== requiredView) {
+      return
+    }
+
+    setActiveView(view)
+    handleTourNavigation(view)
+  }
+
   function applyLensPosition(state) {
     const node = lensNodeRef.current
 
@@ -1394,6 +1612,11 @@ function App() {
       return
     }
 
+    const requiredView = getTourNavigationTarget()
+    if (requiredView && lensState.activeLabel !== requiredView) {
+      return
+    }
+
     lensTargetRef.current = lensState
 
     if (lensState.activeLabel !== navLens.activeLabel) {
@@ -1431,7 +1654,7 @@ function App() {
 
   function hideNavLens() {
     if (navLens?.activeLabel) {
-      setActiveView(navLens.activeLabel)
+      selectNavigationView(navLens.activeLabel)
     }
 
     stopLensAnimation()
@@ -1493,7 +1716,20 @@ function App() {
         />
       )}
 
-      {isAuthReady && isAppUnlocked && session && (
+      {isAuthReady && isAppUnlocked && session && !isProfileReady && (
+        <div className="auth-loading glass-panel">Loading your athlete profile...</div>
+      )}
+
+      {isAuthReady && isAppUnlocked && session && isProfileReady && !athleteProfile?.onboardingCompleted && !onboardingTour && !onboardingCompleteOpen && (
+        <OnboardingFlow
+          associations={associations}
+          initialDisplayName={athleteProfile?.displayName || getAuthDisplayName(session)}
+          onComplete={completeOnboarding}
+          onCreateAssociation={createOnboardingAssociation}
+        />
+      )}
+
+      {isAuthReady && isAppUnlocked && session && isProfileReady && (athleteProfile?.onboardingCompleted || onboardingTour || onboardingCompleteOpen) && (
         <>
           <nav className="top-bar glass-panel">
         <div className="brand-lockup">
@@ -1504,7 +1740,9 @@ function App() {
           </div>
         </div>
         <div className="account-actions">
-          <span>{session.user?.email ?? 'Athlete'}</span>
+          <button className="account-name-button" onClick={() => setActiveView('Settings')} type="button">
+            {athleteProfile?.displayName || session.user?.email || 'Athlete'}
+          </button>
           <button
             className={`ghost-close ${activeView === 'Settings' ? 'account-button-active' : ''}`}
             onClick={() => setActiveView('Settings')}
@@ -1573,7 +1811,7 @@ function App() {
             className={visualActiveView === view.label ? 'active' : ''}
             data-view={view.label}
             key={view.label}
-            onClick={() => setActiveView(view.label)}
+            onClick={() => selectNavigationView(view.label)}
             type="button"
           >
             <NavIcon type={view.icon} />
@@ -1648,6 +1886,7 @@ function App() {
                 onOpenCheckout={setCheckoutEvent}
                 onRemove={removeScheduleItem}
                 onUpdate={updateScheduleItem}
+                onboardingAssociation={onboardingAssociation}
                 schedule={schedule}
               />
             )}
@@ -1663,6 +1902,7 @@ function App() {
 
             {activeView === 'Settings' && (
               <AccountPrivacyView
+                athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 history={history}
                 painReports={painReports}
@@ -1671,11 +1911,31 @@ function App() {
                 session={session}
                 onClearAllHealthHistory={clearAllHealthHistory}
                 onOpenHistory={() => setActiveView('History')}
-                onPrivacyChange={updatePrivacyPreference}
+                onProfileSave={updateAthleteProfile}
               />
             )}
           </section>
       </section>
+
+      {onboardingTour && (
+        <GuidedTour
+          onBack={rewindOnboardingTour}
+          onFinish={finishOnboardingTour}
+          onNext={advanceOnboardingTour}
+          phase={onboardingTour}
+        />
+      )}
+
+      {onboardingCompleteOpen && (
+        <div className="modal-backdrop">
+          <section className="event-modal onboarding-complete-modal glass-panel" role="dialog" aria-modal="true">
+            <p className="eyebrow">Setup complete</p>
+            <h2>You’re ready to reload.</h2>
+            <p>Your profile, first event, check-ins, checkouts, Home dashboard, and History are ready to use.</p>
+            <button className="primary-button" onClick={unlockAfterOnboarding} type="button">Open Athlete Reload</button>
+          </section>
+        </div>
+      )}
 
       {checkoutEvent && (
         <CheckoutModal

@@ -2,26 +2,21 @@ import { useEffect, useMemo, useState } from 'react'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 
-const preferenceLabels = {
-  analyticsAllowed: 'Allow anonymous analytics',
-  coachIncludeNotes: 'Include notes in coach summaries',
-  coachIncludePain: 'Include pain details in coach summaries',
-  cloudSync: 'Save data in the cloud on signed-in devices',
-  localCopy: 'Keep a local copy on this device',
-}
-
 export function AccountPrivacyView({
+  athleteProfile,
   checkouts,
   history,
   onClearAllHealthHistory,
   onOpenHistory,
-  onPrivacyChange,
+  onProfileSave,
   painReports,
   preferences,
   schedule,
   session,
 }) {
   const [message, setMessage] = useState('')
+  const [activeSection, setActiveSection] = useState('account')
+  const [profileForm, setProfileForm] = useState(athleteProfile ?? {})
   const [emailForm, setEmailForm] = useState({ email: '', password: '' })
   const [passwordForm, setPasswordForm] = useState({
     confirmPassword: '',
@@ -67,6 +62,23 @@ export function AccountPrivacyView({
       email: session?.user?.email ?? '',
     }))
   }, [session?.user?.email])
+
+  useEffect(() => {
+    setProfileForm(athleteProfile ?? {})
+  }, [athleteProfile])
+
+  async function saveProfile(event) {
+    event.preventDefault()
+    setMessage('')
+
+    try {
+      await onProfileSave(profileForm)
+      setMessage('Athlete profile updated.')
+    } catch (error) {
+      console.error(error)
+      setMessage('Unable to update your athlete profile.')
+    }
+  }
 
   useEffect(() => {
     if (!hasSupabaseConfig || !session?.user?.id) return
@@ -310,8 +322,16 @@ export function AccountPrivacyView({
 
       {message && <div className="settings-message">{message}</div>}
 
-      <div className="settings-grid">
-        <article className="settings-panel">
+      <div className="settings-layout">
+        <aside className="settings-sidebar" aria-label="Settings sections">
+          {[['account', 'Account'], ['security', 'Security'], ['privacy', 'Privacy'], ['data', 'Data']].map(([key, label]) => (
+            <button className={activeSection === key ? 'active' : ''} key={key} onClick={() => setActiveSection(key)} type="button">
+              {label}
+            </button>
+          ))}
+        </aside>
+        <div className="settings-grid">
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
           <h2>Login Security</h2>
           <div className="account-status">
             <span>Email</span>
@@ -328,7 +348,42 @@ export function AccountPrivacyView({
           )}
         </article>
 
-        <article className="settings-panel">
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
+          <h2>Athlete Profile</h2>
+          <form className="settings-form" onSubmit={saveProfile}>
+            <label className="select-field">
+              Name
+              <input value={profileForm.displayName ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, displayName: event.target.value }))} required />
+            </label>
+            <label className="select-field">
+              Sport
+              <input value={profileForm.sport ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, sport: event.target.value }))} />
+            </label>
+            <label className="select-field">
+              Position or specialty
+              <input value={profileForm.position ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, position: event.target.value }))} />
+            </label>
+            <label className="select-field">
+              Training style
+              <select value={profileForm.trainingStyle ?? 'Team and individual'} onChange={(event) => setProfileForm((current) => ({ ...current, trainingStyle: event.target.value }))}>
+                <option>Team and individual</option>
+                <option>Mostly team training</option>
+                <option>Mostly individual</option>
+              </select>
+            </label>
+            <label className="select-field">
+              Dominant side
+              <select value={profileForm.dominantSide ?? 'Right'} onChange={(event) => setProfileForm((current) => ({ ...current, dominantSide: event.target.value }))}>
+                <option>Right</option>
+                <option>Left</option>
+                <option>Both / unsure</option>
+              </select>
+            </label>
+            <button className="primary-button" type="submit">Save profile</button>
+          </form>
+        </article>
+
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
           <h2>Change Email</h2>
           <form className="settings-form" onSubmit={updateEmail}>
             <label className="select-field">
@@ -354,7 +409,7 @@ export function AccountPrivacyView({
           </form>
         </article>
 
-        <article className="settings-panel">
+        <article className="settings-panel" hidden={activeSection !== 'security'}>
           <h2>Change Password</h2>
           <form className="settings-form" onSubmit={updatePassword}>
             <label className="select-field">
@@ -404,7 +459,7 @@ export function AccountPrivacyView({
           </form>
         </article>
 
-        <article className="settings-panel">
+        <article className="settings-panel" hidden={activeSection !== 'security'}>
           <h2>Two-Factor Authentication</h2>
           <p className="settings-copy">
             Optional authenticator-based 2FA works with Apple Passwords, Google Authenticator, Microsoft Authenticator, Authy, and 1Password.
@@ -452,23 +507,7 @@ export function AccountPrivacyView({
           )}
         </article>
 
-        <article className="settings-panel">
-          <h2>Privacy Choices</h2>
-          <div className="settings-toggles">
-            {Object.entries(preferenceLabels).map(([key, label]) => (
-              <label className="setting-toggle" key={key}>
-                <input
-                  checked={Boolean(preferences[key])}
-                  onChange={(event) => onPrivacyChange(key, event.target.checked)}
-                  type="checkbox"
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-        </article>
-
-        <article className="settings-panel">
+        <article className="settings-panel" hidden={activeSection !== 'data' && activeSection !== 'privacy'}>
           <h2>Data Controls</h2>
           <p className="settings-copy">
             Exporting health data requires password verification, or a 2FA code when two-factor authentication is enabled.
@@ -519,15 +558,7 @@ export function AccountPrivacyView({
           </div>
         </article>
 
-        <article className="settings-panel">
-          <h2>Account Limits</h2>
-          <p className="settings-copy">
-            Supabase dashboard settings should also be enabled for email confirmation, leaked-password protection, and auth rate limits. Do not call Athlete Reload HIPAA compliant unless the legal, infrastructure, contractual, and operational requirements have been completed.
-          </p>
-          <p className="settings-copy">
-            Full account deletion and outside health-service connections should be handled by a server function with service-role permissions before release.
-          </p>
-        </article>
+        </div>
       </div>
     </section>
   )

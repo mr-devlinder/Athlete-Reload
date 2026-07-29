@@ -9,6 +9,7 @@ function fromScheduleRow(row) {
     date: row.event_date,
     load: row.load_level,
     note: row.note ?? '',
+    plannedMinutes: Number(row.planned_minutes ?? 0) || undefined,
     time: row.event_time ?? '',
     title: row.event_type,
     type: row.event_type,
@@ -23,6 +24,7 @@ function toScheduleRow(event) {
     event_type: event.type,
     load_level: event.load,
     note: event.note ?? '',
+    planned_minutes: Number(event.plannedMinutes ?? 0) || null,
     title: event.type,
     updated_at: new Date().toISOString(),
   }
@@ -121,7 +123,7 @@ function toCheckoutRow(event, checkout, options = {}) {
     notes: checkout.notes ?? '',
     pain_change: checkout.painChange,
     planned_load: event.load ?? 'Medium',
-    planned_minutes: Number(checkout.plannedMinutes) || estimatePlannedMinutes(event.load),
+    planned_minutes: Number(checkout.plannedMinutes) || Number(event.plannedMinutes) || estimatePlannedMinutes(event.load),
     planned_type: event.type ?? 'Training',
     schedule_event_id: event.id,
     session_date: event.date,
@@ -171,6 +173,29 @@ function fromPrivacyPreferencesRow(row) {
     coachIncludeNotes: row.coach_include_notes,
     coachIncludePain: row.coach_include_pain,
     localCopy: row.local_copy,
+  }
+}
+
+function fromAthleteProfileRow(row) {
+  return {
+    displayName: row.display_name ?? '',
+    dominantSide: row.dominant_side ?? 'Right',
+    onboardingCompleted: Boolean(row.onboarding_completed),
+    position: row.position ?? '',
+    sport: row.sport ?? '',
+    trainingStyle: row.training_style ?? 'Team and individual',
+  }
+}
+
+function toAthleteProfileRow(profile) {
+  return {
+    display_name: profile.displayName ?? '',
+    dominant_side: profile.dominantSide ?? 'Right',
+    onboarding_completed: Boolean(profile.onboardingCompleted),
+    position: profile.position ?? '',
+    sport: profile.sport ?? '',
+    training_style: profile.trainingStyle ?? 'Team and individual',
+    updated_at: new Date().toISOString(),
   }
 }
 
@@ -247,6 +272,30 @@ export async function loadPrivacyPreferences() {
   if (!data) return null
 
   return fromPrivacyPreferencesRow(data)
+}
+
+export async function loadAthleteProfile() {
+  const { data, error } = await supabase
+    .from('athlete_profiles')
+    .select('*')
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  return fromAthleteProfileRow(data)
+}
+
+export async function upsertAthleteProfile(profile) {
+  const { data, error } = await supabase
+    .from('athlete_profiles')
+    .upsert(toAthleteProfileRow(profile), { onConflict: 'user_id' })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromAthleteProfileRow(data)
 }
 
 export async function upsertPrivacyPreferences(preferences) {

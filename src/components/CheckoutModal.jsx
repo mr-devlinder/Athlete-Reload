@@ -11,6 +11,7 @@ const completionLevels = ['Completed full session', 'Modified', 'Stopped early',
 export function CheckoutModal({ checkout, event, onClose, onSave }) {
   const [isEditing, setIsEditing] = useState(!checkout)
   const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [draft, setDraft] = useState(() => getInitialDraft(event, checkout))
 
   useEffect(() => {
@@ -20,6 +21,7 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
   }, [])
 
   function updateDraft(field, value) {
+    setSaveError('')
     setDraft((current) => ({
       ...current,
       [field]: value,
@@ -28,9 +30,13 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
 
   async function saveDraft() {
     setIsSaving(true)
+    setSaveError('')
     try {
       await onSave(event, draft, checkout)
       setIsEditing(false)
+    } catch (error) {
+      console.error(error)
+      setSaveError('We could not save this checkout. Check your connection and try again.')
     } finally {
       setIsSaving(false)
     }
@@ -53,6 +59,7 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
           <CheckoutComparison checkout={checkout} onEdit={() => setIsEditing(true)} />
         ) : (
           <div className="modal-form">
+            {saveError && <p className="form-error" role="alert">{saveError}</p>}
             <label className="compact-field">
               Planned minutes
               <input
@@ -181,13 +188,13 @@ function CheckoutComparison({ checkout, onEdit }) {
 
 function getInitialDraft(event, checkout) {
   return {
-    actualMinutes: checkout?.actualMinutes ?? estimatePlannedMinutes(event.load),
+    actualMinutes: checkout?.actualMinutes ?? event.plannedMinutes ?? estimatePlannedMinutes(event.load),
     completionLevel: checkout?.completionLevel ?? 'Completed full session',
     difficulty: checkout?.difficulty ?? loadToDifficulty(event.load),
     notes: checkout?.notes ?? '',
     painChange: checkout?.painChange ?? 'Same',
     painMap: checkout?.painMap ?? createEmptyPainMap(),
-    plannedMinutes: checkout?.plannedMinutes ?? estimatePlannedMinutes(event.load),
+    plannedMinutes: checkout?.plannedMinutes ?? event.plannedMinutes ?? estimatePlannedMinutes(event.load),
   }
 }
 

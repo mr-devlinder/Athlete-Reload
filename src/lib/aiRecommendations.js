@@ -5,14 +5,29 @@ export async function generateAiRecommendation(payload) {
     throw new Error('Supabase is not configured')
   }
 
-  const { data, error } = await supabase.functions.invoke('generate-recommendation', {
-    body: payload,
-  })
+  let timeoutId
 
-  if (error) throw error
-  if (!data?.recommendation) {
-    throw new Error('AI recommendation response was empty')
+  try {
+    const result = await Promise.race([
+      supabase.functions.invoke('generate-recommendation', {
+        body: payload,
+      }),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Recommendation request timed out'))
+        }, 20000)
+      }),
+    ])
+
+    const { data, error } = result
+
+    if (error) throw error
+    if (!data?.recommendation) {
+      throw new Error('AI recommendation response was empty')
+    }
+
+    return data.recommendation
+  } finally {
+    clearTimeout(timeoutId)
   }
-
-  return data.recommendation
 }

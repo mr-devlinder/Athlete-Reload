@@ -84,6 +84,8 @@ Calibration rules:
 - Avoid/focus should be practical event instructions, not generic wellness filler.
 - The action should include a simple personalized warm-up or preparation plan and a clear point during the event when the athlete should reassess.
 - Base the recommendation on the selected event type and planned intensity. A high-intensity game, gym session, recovery day, and team practice should not get the same advice.
+- Use the athlete profile's sport, position, training style, and dominant side when they are provided. The same pain can affect participation differently by sport and event: shoulder symptoms matter more for volleyball serving or hitting than for a lower-body gym session, while a knee issue matters more for jumping, cutting, and running.
+- Do not assume an athlete must stop all activity because one body area hurts. Explain which movements or demands of this specific event are affected and what can remain controlled if there are no red flags.
 - Use the exact injuryType, painType, and hurtsWhen values in the athlete data. Treat concussion concern, suspected bone stress, numbness, tingling, shooting pain, instability, breathing pain, head/neck symptoms, worsening swelling, and meaningful pain at rest as higher-risk patterns. Low-level tightness, dull ache, overuse soreness, bruises, blisters, cuts/scrapes, or cramps should usually get specific modifications instead of automatic no-training advice.
 
 JSON shape:
@@ -118,6 +120,7 @@ Important behavior:
 - Use the actual session length, difficulty/RPE, completion level, pain before versus pain after, pain map, and notes.
 - Do not make this about deciding tomorrow's participation. Tomorrow's check-in handles that.
 - Use the completed session intensity only to scale recovery care, not to predict readiness.
+- Use the athlete profile's sport, position, training style, and dominant side to make recovery steps relevant to the session, without turning the profile into a diagnosis.
 - If pain worsened, symptoms are new, or the athlete stopped early, give a more cautious recovery plan.
 - If the session was completed normally with stable pain, give practical recovery steps without sounding alarmist.
 - Red flags like head injury symptoms, numbness, severe or worsening pain, swelling, instability, breathing pain, or pain at rest should recommend adult/medical/athletic trainer help.

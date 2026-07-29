@@ -94,7 +94,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
   }
 
   return (
-    <div className="history-view">
+    <div className="history-view" data-tour="history-page">
       <div className="schedule-header">
         <SectionHeading eyebrow="History" title="Patterns are the product." />
         <div className="history-actions">

@@ -31,8 +31,8 @@ export function HomeView({
     .reverse()
 
   return (
-    <div className="home-view">
-      <section className="home-hero">
+    <div className="home-view" data-tour="home-page">
+      <section className="home-hero" data-tour="home-intro">
         <SectionHeading
           eyebrow="Athlete Reload"
           title="Training dashboard."
@@ -382,11 +382,11 @@ function getTodayPlan(schedule, history, checkouts, now) {
 
       if (hasPost) return { ...event, action: null, status: 'Completed', statusTone: 'complete' }
       if (isActiveEvent && eventStarted && hasPre) {
-        return { ...event, action: 'post', status: 'Complete Post Check-In', statusTone: 'warning' }
+        return { ...event, action: 'post', status: 'Complete Checkout', statusTone: 'warning' }
       }
       if (hasPre || !isActiveEvent) return { ...event, action: null, status: 'Not Started', statusTone: 'ready' }
 
-      return { ...event, action: 'pre', status: 'Complete Pre Check-In', statusTone: 'pending' }
+      return { ...event, action: 'pre', status: 'Complete Check-in', statusTone: 'pending' }
     })
 }
 

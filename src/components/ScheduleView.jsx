@@ -56,6 +56,7 @@ export function ScheduleView({
   onOpenCheckout,
   onRemove,
   onUpdate,
+  onboardingAssociation = 'Personal',
   schedule,
 }) {
   const [visibleMonth, setVisibleMonth] = useState(startOfMonth(today))
@@ -76,6 +77,7 @@ export function ScheduleView({
   function openCreateModal(date = selectedDate) {
     setDraftEvent({
       ...emptyEvent,
+      association: onboardingAssociation,
       date,
       id: `event-${Date.now()}`,
     })
@@ -137,6 +139,7 @@ export function ScheduleView({
             View associations
           </button>
           <button
+            data-tour="add-event"
             className="secondary-button"
             onClick={() => openCreateModal()}
             type="button"

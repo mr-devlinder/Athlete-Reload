@@ -30,7 +30,7 @@ export function CheckInView({
 
   if (!selectedEvent) {
     return (
-      <div className="saved-checkin">
+      <div className="saved-checkin" data-tour="check-in-page">
         <EventPicker
           checkouts={checkouts}
           eventOptions={eventOptions}
@@ -46,7 +46,7 @@ export function CheckInView({
 
   if (isSavedToday) {
     return (
-      <div className="saved-checkin">
+      <div className="saved-checkin" data-tour="check-in-page">
         <EventPicker
           checkouts={checkouts}
           eventOptions={eventOptions}
@@ -75,33 +75,35 @@ export function CheckInView({
   }
 
   return (
-    <div className="check-in-grid check-in-grid-single">
+    <div className="check-in-grid check-in-grid-single" data-tour="check-in-page">
       <div className="form-panel">
-        <SectionHeading eyebrow={todayLabel} title="Check-in." />
+        <div className="checkin-tour-intro" data-tour="check-in-intro">
+          <SectionHeading eyebrow={todayLabel} title="Check-in." />
 
-        {eventOptions.length > 0 && (
-          <EventPicker
-            checkouts={checkouts}
-            eventOptions={eventOptions}
-            selectedEventId={selectedEventId}
-            todayIso={todayIso}
-            onSelectEvent={onSelectEvent}
-          />
-        )}
+          {eventOptions.length > 0 && (
+            <EventPicker
+              checkouts={checkouts}
+              eventOptions={eventOptions}
+              selectedEventId={selectedEventId}
+              todayIso={todayIso}
+              onSelectEvent={onSelectEvent}
+            />
+          )}
 
-        <div className="schedule-source">
-          <span>
-            <strong>Yesterday</strong>
-            {checkIn.yesterdayLoad}
-          </span>
-          <span className="today-chip">
-            <strong>Event</strong>
-            {todayScheduleLabel}
-          </span>
-          <span>
-            <strong>Intensity</strong>
-            {selectedEvent?.load ?? nextLabel}
-          </span>
+          <div className="schedule-source">
+            <span>
+              <strong>Yesterday</strong>
+              {checkIn.yesterdayLoad}
+            </span>
+            <span className="today-chip">
+              <strong>Event</strong>
+              {todayScheduleLabel}
+            </span>
+            <span>
+              <strong>Intensity</strong>
+              {selectedEvent?.load ?? nextLabel}
+            </span>
+          </div>
         </div>
 
         <Slider
