@@ -66,12 +66,16 @@ Deno.serve(async (request) => {
 })
 
 function buildPrompt(payload: unknown) {
+  if ((payload as any)?.requestType === 'post_checkout') {
+    return buildPostCheckoutPrompt(payload)
+  }
+
   return `
 You are Athlete Reload's training readiness assistant for student athletes.
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
-Use the athlete's pre-event check-in, the selected scheduled event, recent history, pain reports, and checkout data to create a recommendation for that specific event. The event is the main unit, not the calendar day. This is not a medical diagnosis. Be practical: do not default to "no training" for very low pain unless the symptoms are red flags. If there are red flags like head injury symptoms, numbness, severe pain, worsening swelling, instability, or pain at rest, recommend adult/medical/athletic trainer help.
+Use the athlete's check-in, the selected scheduled event, recent history, pain reports, and checkout data to create a recommendation for that specific event. The event is the main unit, not the calendar day. This is not a medical diagnosis. Be practical: do not default to "no training" for very low pain unless the symptoms are red flags. If there are red flags like head injury symptoms, numbness, severe pain, worsening swelling, instability, or pain at rest, recommend adult/medical/athletic trainer help.
 
 Calibration rules:
 - If energy is 9-10, soreness is 0-1, fatigue is 0-1, sleep is 9-10 hours, stress is Low, hydration is Good, and pain is 0 with no pain areas selected, readiness should be 92-100 and the label should be Full Training unless the schedule/history includes an obvious red flag.
@@ -94,6 +98,44 @@ JSON shape:
   "focus": array of 2 to 4 specific things to focus on,
   "reasons": array of 1 to 5 concrete reasons,
   "breakdown": array of score factors like [{"label":"Sleep","value":-8}]
+}
+
+Athlete data:
+${JSON.stringify(payload, null, 2)}
+`
+}
+
+function buildPostCheckoutPrompt(payload: unknown) {
+  return `
+You are Athlete Reload's post-training recovery assistant for student athletes.
+
+Return ONLY valid JSON. No markdown. No extra commentary.
+
+Use the scheduled event, the athlete's check-in, the completed checkout, recent history, pain reports, and notes to create a recovery recommendation after this specific session. This is not a medical diagnosis. The goal is to help the athlete recover from the session they just completed and monitor symptoms.
+
+Important behavior:
+- This is after training, not before training. Do not tell the athlete whether to participate in the session they already completed.
+- Use the actual session length, difficulty/RPE, completion level, pain before versus pain after, pain map, and notes.
+- Do not make this about deciding tomorrow's participation. Tomorrow's check-in handles that.
+- Use the completed session intensity only to scale recovery care, not to predict readiness.
+- If pain worsened, symptoms are new, or the athlete stopped early, give a more cautious recovery plan.
+- If the session was completed normally with stable pain, give practical recovery steps without sounding alarmist.
+- Red flags like head injury symptoms, numbness, severe or worsening pain, swelling, instability, breathing pain, or pain at rest should recommend adult/medical/athletic trainer help.
+- Avoid/focus should be concrete recovery steps: hydration, food, cooldown, gentle mobility, light stretching when appropriate, icing for irritated/sore areas, elevation when swollen, sleep setup, symptom monitoring, and when to tell an adult/coach/athletic trainer.
+- Do not say "prepare for the next session" unless it is a small note inside the recovery context. Do not mention the next event as the main recommendation.
+
+JSON shape:
+{
+  "score": number from 0 to 100, still required for storage but not shown in the recovery UI,
+  "label": "Normal Recovery" | "Monitor Symptoms" | "Extra Recovery" | "Tell an Adult / Trainer" | "Seek Help",
+  "tone": "ready" | "caution" | "warning" | "danger",
+  "intensity": short recovery category phrase like "Normal cooldown" or "Soreness care",
+  "summary": one short sentence explaining the recovery plan,
+  "action": one specific paragraph telling the athlete what to do tonight after training,
+  "avoid": array of 0 to 4 specific things to avoid during recovery,
+  "focus": array of 3 to 5 specific recovery actions,
+  "reasons": array of 1 to 5 concrete reasons,
+  "breakdown": array of score factors like [{"label":"Pain after session","value":-10}]
 }
 
 Athlete data:
@@ -149,6 +191,8 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
 }
 
 function getCalibration(payload: any) {
+  if (payload?.requestType === 'post_checkout') return {}
+
   const checkIn = payload?.checkIn
 
   if (!checkIn) return {}

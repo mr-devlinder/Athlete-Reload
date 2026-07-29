@@ -39,7 +39,7 @@ export function HomeView({
         />
         <p>
           A live view of readiness, workload, pain patterns, and today&apos;s
-          event flow from your saved check-ins and post-training checkouts.
+          event flow from your saved check-ins and checkouts.
         </p>
       </section>
 
@@ -50,7 +50,7 @@ export function HomeView({
             onClick={() => onOpenCheckout(dueCheckout)}
             type="button"
           >
-            <span>Post-training checkout ready</span>
+            <span>Checkout ready</span>
             <strong>{getEventName(dueCheckout)}</strong>
             <em>Log session</em>
           </button>
@@ -62,7 +62,7 @@ export function HomeView({
             onClick={() => onGoCheckIn(checkInReminder)}
             type="button"
           >
-            <span>Pre-event check-in available</span>
+            <span>Check-in available</span>
             <strong>{getEventName(checkInReminder)}</strong>
             <em>Check in</em>
           </button>
@@ -89,7 +89,7 @@ export function HomeView({
         <DashboardMetric
           label="Average weekly minutes"
           value={workload.averageWeeklyMinutes}
-          detail="From post-training checkouts"
+          detail="From checkouts"
         />
       </section>
 
@@ -182,7 +182,7 @@ export function HomeView({
           </div>
           <h3>Weekly minutes</h3>
           <p>
-            This uses the minutes you log in post-training checkouts. Once you
+            This uses the minutes you log in checkouts. Once you
             have more weeks saved, the average becomes more useful.
           </p>
           <div className="weekly-minutes-card">
@@ -459,7 +459,7 @@ function getRecentPainEntries(history, painReports) {
       dateLabel: formatPainDate(report.date),
       label: getPainLabel(report.bodyPart, report.side),
       score: Math.round(Number(report.severity) / 10),
-      source: report.sourceType === 'post_event' ? 'Post check-in' : 'Pre check-in',
+      source: getPainSourceLabel(report.sourceType),
       sourceId: report.sourceId,
     }))
 
@@ -477,7 +477,7 @@ function getRecentPainEntries(history, painReports) {
             dateLabel: formatPainDate(entry.date),
             label: area.label,
             score: Math.round(severity / 10),
-            source: 'Pre check-in',
+            source: 'Check-in',
             sourceId: entry.id,
           }
         })
@@ -491,7 +491,7 @@ function getRecentPainEntries(history, painReports) {
       dateLabel: formatPainDate(entry.date),
       label: entry.location ?? 'Pain area',
       score: Number(entry.pain),
-      source: 'Pre check-in',
+      source: 'Check-in',
       sourceId: entry.id,
     }]
   })
@@ -598,6 +598,14 @@ function getPainLabel(bodyPart, side) {
   if (bodyPart.toLowerCase().startsWith(side.toLowerCase())) return bodyPart
 
   return `${capitalize(side)} ${bodyPart}`
+}
+
+function getPainSourceLabel(sourceType) {
+  if (['checkout', 'post_event', 'post_check_in'].includes(sourceType)) {
+    return 'Checkout'
+  }
+
+  return 'Check-in'
 }
 
 function formatPainDate(date) {

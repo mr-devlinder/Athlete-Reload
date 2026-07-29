@@ -8,7 +8,7 @@ import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { HomeView } from './components/HomeView'
 import { HistoryView } from './components/HistoryView'
-import { RecommendationCard } from './components/RecommendationCard'
+import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { ScheduleView } from './components/ScheduleView'
 import {
   checkInDefaults,
@@ -32,6 +32,7 @@ import {
   deletePainReportsForSource,
   deleteScheduleEvent,
   deleteCheckInsForDate,
+  deleteTrainingCheckoutsForEvent,
   loadAthleteData,
   loadPrivacyPreferences,
   upsertPrivacyPreferences,
@@ -252,6 +253,85 @@ function getNextTodayEventAfter(schedule, eventId, todayIso, completedEventIds =
   return laterEvents.find((event) => !completedEventIds.has(event.id)) ?? laterEvents[0] ?? null
 }
 
+function getNextScheduledEvent(schedule, event) {
+  const sortedSchedule = sortScheduleEvents(schedule)
+  const currentIndex = sortedSchedule.findIndex((item) => item.id === event.id)
+
+  if (currentIndex < 0) return null
+
+  return sortedSchedule.slice(currentIndex + 1)[0] ?? null
+}
+
+function getHoursBetweenEvents(event, nextEvent) {
+  if (!nextEvent) return null
+
+  const currentDate = getEventDateTime(event)
+  const nextDate = getEventDateTime(nextEvent)
+
+  if (!currentDate || !nextDate) return null
+
+  return Math.max(0, Math.round((nextDate - currentDate) / (1000 * 60 * 60)))
+}
+
+function getEventDateTime(event) {
+  if (!event?.date) return null
+
+  const minutes = getScheduleTimeValue(event.time)
+  const date = new Date(`${event.date}T00:00:00`)
+
+  date.setMinutes(minutes >= 24 * 60 ? 0 : minutes)
+
+  return date
+}
+
+function getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
+  const difficulty = Number(checkout.difficulty)
+  const painWorsened = ['Slightly worse', 'Worse'].includes(checkout.painChange)
+  const stoppedShort = ['Modified', 'Stopped early', 'Missed'].includes(checkout.completionLevel)
+  let score = 86
+
+  if (difficulty >= 8) score -= 12
+  if (painWorsened) score -= checkout.painChange === 'Worse' ? 24 : 12
+  if (stoppedShort) score -= 10
+  if (preCheckIn?.score && preCheckIn.score < 70) score -= 6
+
+  score = Math.max(30, Math.min(96, Math.round(score)))
+
+  return {
+    action: painWorsened
+      ? 'Start with a calm cooldown, then use ice on the irritated area for 10-15 minutes, elevate it if there is swelling, hydrate, eat a normal meal, and tell an adult, coach, or athletic trainer if pain keeps rising or feels sharp/unstable.'
+      : 'Start recovery now: do an easy cooldown, drink water, eat a normal meal, use light stretching or mobility for tight areas, and set up a good night of sleep.',
+    avoid: painWorsened
+      ? ['Extra training tonight', 'Aggressive stretching into pain', 'Ignoring worsening symptoms']
+      : difficulty >= 8
+        ? ['Extra conditioning tonight', 'Skipping cooldown']
+        : [],
+    breakdown: [
+      { label: 'Session difficulty', value: difficulty >= 8 ? -12 : 4 },
+      { label: 'Pain change', value: painWorsened ? -14 : 6 },
+      { label: 'Completion', value: stoppedShort ? -8 : 5 },
+    ],
+    focus: [
+      'Hydrate steadily',
+      'Eat a normal recovery meal',
+      painWorsened ? 'Ice the irritated area' : 'Light stretching or mobility',
+      'Prioritize sleep',
+    ],
+    intensity: painWorsened ? 'Soreness care' : difficulty >= 8 ? 'High-load recovery' : 'Normal cooldown',
+    label: painWorsened ? 'Monitor Symptoms' : stoppedShort ? 'Extra Recovery' : 'Normal Recovery',
+    reasons: [
+      `${checkout.actualMinutes} minutes at ${difficulty}/10 difficulty`,
+      `Pain change: ${checkout.painChange}`,
+      `Completion: ${checkout.completionLevel}`,
+    ],
+    score,
+    summary: painWorsened
+      ? 'Pain increased after the session, so treat recovery and symptom monitoring seriously tonight.'
+      : 'Session response looks stable, so a normal cooldown and recovery routine fits.',
+    tone: score >= 82 ? 'ready' : score >= 68 ? 'caution' : score >= 52 ? 'warning' : 'danger',
+  }
+}
+
 function getScheduleTimeValue(value = '') {
   const trimmed = String(value).trim()
 
@@ -300,6 +380,11 @@ function App() {
   const [checkoutEvent, setCheckoutEvent] = useState(null)
   const [submittedRecommendation, setSubmittedRecommendation] = useState(null)
   const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
+  const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
+    scoreLabel: 'readiness',
+    session: '',
+    title: "Today's recommendation.",
+  })
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
   const [navLens, setNavLens] = useState(null)
@@ -450,6 +535,7 @@ function App() {
     supabase.auth.getSession().then(({ data }) => {
       if (isMounted) {
         setSession(data.session)
+        setIsAppUnlocked(Boolean(data.session))
         setIsAuthReady(true)
       }
     })
@@ -464,6 +550,8 @@ function App() {
       if (!nextSession) {
         setIsAppUnlocked(false)
         setAuthEntryMode('landing')
+      } else if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+        setIsAppUnlocked(true)
       }
       setIsAuthReady(true)
     })
@@ -639,6 +727,11 @@ function App() {
       setIsEditingToday(false)
       setSubmittedRecommendation(existingRecommendation)
       setSubmittedRecommendationStatus(previousEntry.recommendation ? 'ai' : 'local')
+      setSubmittedRecommendationContext({
+        scoreLabel: 'readiness',
+        session: scheduleDrivenCheckIn.session,
+        title: "Today's recommendation.",
+      })
       setIsSavingCheckIn(false)
       return
     }
@@ -744,6 +837,11 @@ function App() {
     setIsEditingToday(false)
     setSubmittedRecommendation(finalRecommendation)
     setSubmittedRecommendationStatus(finalRecommendationStatus)
+    setSubmittedRecommendationContext({
+      scoreLabel: 'readiness',
+      session: scheduleDrivenCheckIn.session,
+      title: "Today's recommendation.",
+    })
     setIsSavingCheckIn(false)
   }
 
@@ -786,13 +884,45 @@ function App() {
   }
 
   async function removeScheduleItem(id) {
+    const relatedCheckIns = history.filter((entry) => entry.eventId === id)
+    const relatedCheckouts = checkouts.filter((checkout) => checkout.eventId === id)
+    const relatedSourceIds = new Set([
+      ...relatedCheckIns.map((entry) => entry.id),
+      ...relatedCheckouts.map((checkout) => checkout.id),
+    ].filter(Boolean))
+
     setSchedule((current) => current.filter((item) => item.id !== id))
+    setHistory((current) => current.filter((entry) => entry.eventId !== id))
+    setCheckouts((current) => current.filter((checkout) => checkout.eventId !== id))
+    setPainReports((current) =>
+      current.filter((report) => !relatedSourceIds.has(report.sourceId)),
+    )
+
+    if (selectedCheckInEventId === id) {
+      setSelectedCheckInEventId(null)
+      setCheckIn(getFreshCheckInDefaults())
+      setIsEditingToday(false)
+    }
+
+    if (checkoutEvent?.id === id) {
+      setCheckoutEvent(null)
+    }
 
     if (!isSupabaseSession) {
       return
     }
 
     try {
+      await Promise.all([
+        ...relatedCheckIns
+          .filter((entry) => entry.id)
+          .map((entry) => deletePainReportsForSource('check_in', entry.id)),
+        ...relatedCheckouts
+          .filter((checkout) => checkout.id)
+          .map((checkout) => deletePainReportsForSource('checkout', checkout.id)),
+      ])
+      await deleteCheckInsForEvent(id)
+      await deleteTrainingCheckoutsForEvent(id)
       await deleteScheduleEvent(id)
     } catch (error) {
       console.error(error)
@@ -900,11 +1030,45 @@ function App() {
   }
 
   async function saveCheckout(event, checkout, existingCheckout) {
+    const preCheckIn = history.find((entry) => entry.eventId === event.id)
+    const nextScheduledEvent = getNextScheduledEvent(schedule, event)
+    const localCheckoutRecommendation = getLocalCheckoutRecommendation(checkout, event, preCheckIn, nextScheduledEvent)
+    let finalRecommendation = existingCheckout?.recommendation ?? localCheckoutRecommendation
+    let finalRecommendationStatus = existingCheckout?.recommendation ? 'ai' : 'local'
+
+    if (isSupabaseSession) {
+      try {
+        finalRecommendation = await generateAiRecommendation({
+          checkout,
+          checkouts: checkouts.slice(0, 12),
+          completedEvent: event,
+          history: history.slice(0, 10),
+          hoursUntilNextEvent: getHoursBetweenEvents(event, nextScheduledEvent),
+          localRecommendation: localCheckoutRecommendation,
+          nextEvent: nextScheduledEvent,
+          painReports: painReports.slice(0, 20),
+          preCheckIn,
+          requestType: 'post_checkout',
+          schedule: schedule.slice(0, 20),
+        })
+        finalRecommendationStatus = 'ai'
+      } catch (error) {
+        console.error(error)
+        finalRecommendation = localCheckoutRecommendation
+        finalRecommendationStatus = 'fallback'
+      }
+    }
+
+    const checkoutWithRecommendation = {
+      ...checkout,
+      recommendation: finalRecommendation,
+    }
+
     if (isSupabaseSession) {
       try {
         const savedCheckout = existingCheckout
-          ? await updateTrainingCheckout(existingCheckout.id, event, checkout)
-          : await createTrainingCheckout(event, checkout)
+          ? await updateTrainingCheckout(existingCheckout.id, event, checkoutWithRecommendation)
+          : await createTrainingCheckout(event, checkoutWithRecommendation)
 
         if (existingCheckout?.id) {
           await deletePainReportsForSource('checkout', existingCheckout.id)
@@ -930,6 +1094,16 @@ function App() {
           ...current.filter((report) => report.sourceId !== savedCheckout.id),
         ])
         setCheckoutEvent(null)
+        setSubmittedRecommendation(finalRecommendation)
+        setSubmittedRecommendationStatus(finalRecommendationStatus)
+        setSubmittedRecommendationContext({
+          scoreLabel: 'recovery',
+          session: event.title || event.type,
+          title: 'Post-training recovery plan.',
+        })
+        if (savedCheckout.recommendationNotPersisted) {
+          setDataStatus('offline')
+        }
         advanceCheckInAfterCheckout(event, savedCheckout)
       } catch (error) {
         console.error(error)
@@ -952,6 +1126,7 @@ function App() {
       plannedLoad: event.load,
       plannedMinutes: Number(checkout.plannedMinutes),
       plannedType: event.type,
+      recommendation: finalRecommendation,
       title: event.title || event.type,
     }
 
@@ -973,6 +1148,13 @@ function App() {
       ...current.filter((report) => report.sourceId !== savedCheckout.id),
     ])
     setCheckoutEvent(null)
+    setSubmittedRecommendation(finalRecommendation)
+    setSubmittedRecommendationStatus(finalRecommendationStatus)
+    setSubmittedRecommendationContext({
+      scoreLabel: 'recovery',
+      session: event.title || event.type,
+      title: 'Post-training recovery plan.',
+    })
     advanceCheckInAfterCheckout(event, savedCheckout)
   }
 
@@ -1434,6 +1616,7 @@ function App() {
                 todayLabel={todayLabel}
                 onSave={saveCheckIn}
                 onEditToday={editTodayCheckIn}
+                onOpenCheckout={setCheckoutEvent}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
               />
@@ -1510,18 +1693,27 @@ function App() {
           <section className="event-modal recommendation-modal glass-panel" role="dialog" aria-modal="true">
             <div className="schedule-header">
               <div>
-                <p className="eyebrow">Saved check-in</p>
-                <h2>Today's recommendation.</h2>
+                <p className="eyebrow">Saved</p>
+                <h2>{submittedRecommendationContext.title}</h2>
               </div>
               <button className="ghost-close" onClick={() => setSubmittedRecommendation(null)} type="button">
                 Close
               </button>
             </div>
-            <RecommendationCard
-              recommendation={submittedRecommendation}
-              recommendationStatus={submittedRecommendationStatus}
-              session={scheduleDrivenCheckIn.session}
-            />
+            {submittedRecommendationContext.scoreLabel === 'recovery' ? (
+              <RecoveryPlanCard
+                recommendation={submittedRecommendation}
+                recommendationStatus={submittedRecommendationStatus}
+                session={submittedRecommendationContext.session}
+              />
+            ) : (
+              <RecommendationCard
+                recommendation={submittedRecommendation}
+                recommendationStatus={submittedRecommendationStatus}
+                scoreLabel={submittedRecommendationContext.scoreLabel}
+                session={submittedRecommendationContext.session}
+              />
+            )}
           </section>
         </div>
       )}
@@ -1619,7 +1811,7 @@ const legalContentV2 = {
         title: '2. Information We Collect',
         body: [
           'We may collect account information such as your email address or authentication identifiers when you sign in.',
-          'We collect the information you choose to enter, including scheduled events, associations, pre-event check-ins, post-training checkouts, soreness, pain map entries, pain triggers, sleep, fatigue, stress, hydration, notes, readiness recommendations, and history records.',
+          'We collect the information you choose to enter, including scheduled events, associations, check-ins, checkouts, soreness, pain map entries, pain triggers, sleep, fatigue, stress, hydration, notes, readiness recommendations, and history records.',
           'We may collect basic technical information needed to operate the app, such as authentication session data, device or browser information provided by the browser, and service logs created by hosting, database, and function providers.',
         ],
       },
@@ -1648,7 +1840,7 @@ const legalContentV2 = {
         title: '6. Data Retention and Deletion',
         body: [
           'We keep signed-in data for as long as needed to provide the app or until you delete it, subject to backup, security, legal, or technical retention needs.',
-          'The History screen includes controls to clear saved pre-check-ins, post-checkouts, and pain reports by time range. Future versions may add more account-level controls such as full account deletion, data export, and sharing settings.',
+          'The History screen includes controls to clear saved check-ins, checkouts, and pain reports by time range. Future versions may add more account-level controls such as full account deletion, data export, and sharing settings.',
         ],
       },
       {
@@ -1816,7 +2008,7 @@ const legalContentV2 = {
       {
         title: '4. Data Accuracy',
         body: [
-          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, post-session reports, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
+          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, checkouts, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
         ],
       },
       {
@@ -1854,7 +2046,7 @@ const _legacyLegalContent = {
       {
         title: '1. Information Athlete Reload Stores',
         body: [
-          'Athlete Reload stores the information you choose to enter, including scheduled events, associations, pre-event check-ins, post-training checkouts, pain map entries, readiness recommendations, notes, and account information connected to your sign-in.',
+          'Athlete Reload stores the information you choose to enter, including scheduled events, associations, check-ins, checkouts, pain map entries, readiness recommendations, notes, and account information connected to your sign-in.',
         ],
       },
       {
@@ -1967,7 +2159,7 @@ const _legacyLegalContent = {
       {
         title: '4. Data Accuracy',
         body: [
-          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, post-session reports, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
+          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, checkouts, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
         ],
       },
       {

@@ -250,7 +250,7 @@ export function ScheduleView({
                     )}
                     {checkIn && (
                       <p>
-                        Pre-check-in: {checkIn.score}/100 readiness
+                        Check-in: {checkIn.score}/100 readiness
                       </p>
                     )}
                     {event.note && <p>{event.note}</p>}
@@ -261,7 +261,7 @@ export function ScheduleView({
                           onClick={() => onOpenCheckIn(event)}
                           type="button"
                         >
-                          {checkIn ? 'View pre-check-in' : 'Pre-check-in'}
+                          {checkIn ? 'View check-in' : 'Check-in'}
                         </button>
                       )}
                       {canCheckout && (

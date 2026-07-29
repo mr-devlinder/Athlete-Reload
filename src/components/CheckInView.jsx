@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { BodyPainMap } from './BodyPainMap'
 import { Select, Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
+import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
 
 export function CheckInView({
   checkIn,
@@ -17,12 +18,15 @@ export function CheckInView({
   todayLabel,
   onSave,
   onEditToday,
+  onOpenCheckout,
   onSelectEvent,
   onUpdate,
 }) {
   const todayScheduleLabel = selectedEvent?.title ?? todayEvents[0]?.title ?? checkIn.session
   const nextLabel = nextEvent ? nextEvent.title : 'No upcoming events'
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
+  const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
+  const canPostCheckIn = selectedEvent && hasEventStarted(selectedEvent) && !selectedCheckout
 
   if (!selectedEvent) {
     return (
@@ -35,7 +39,7 @@ export function CheckInView({
           onSelectEvent={onSelectEvent}
         />
         <SectionHeading eyebrow={todayLabel} title="No event check-in available." />
-        <p>Pre-check-ins are only available for events scheduled today.</p>
+        <p>Check-ins are only available for events scheduled today.</p>
       </div>
     )
   }
@@ -50,10 +54,21 @@ export function CheckInView({
           todayIso={todayIso}
           onSelectEvent={onSelectEvent}
         />
-        <SectionHeading eyebrow={selectedEventLabel} title="Pre-check-in saved." />
-        <p>Come back after this event to log what actually happened.</p>
+        <SectionHeading eyebrow={selectedEventLabel} title="Check-in saved." />
+        <p>
+          {canPostCheckIn
+            ? 'This event has started. Log what actually happened when you are ready.'
+            : selectedCheckout
+              ? 'Checkout complete for this event.'
+              : 'Come back after this event to log what actually happened.'}
+        </p>
+        {canPostCheckIn && (
+          <button className="primary-button compact-action" onClick={() => onOpenCheckout(selectedEvent)} type="button">
+            Complete Checkout
+          </button>
+        )}
         <button className="ghost-close" onClick={onEditToday} type="button">
-          Edit this pre-check-in
+          Edit this check-in
         </button>
       </div>
     )
@@ -62,7 +77,7 @@ export function CheckInView({
   return (
     <div className="check-in-grid check-in-grid-single">
       <div className="form-panel">
-        <SectionHeading eyebrow={todayLabel} title="Pre-event check-in." />
+        <SectionHeading eyebrow={todayLabel} title="Check-in." />
 
         {eventOptions.length > 0 && (
           <EventPicker
@@ -272,7 +287,7 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
               </span>
               <span className="event-picker-title">{event.title || event.type}</span>
               <span className="event-picker-meta">{event.association || 'Personal'}</span>
-              {isLockedByCheckout && <span className="event-picker-lock">Post-checkout required</span>}
+              {isLockedByCheckout && <span className="event-picker-lock">Checkout required</span>}
             </button>
           )
         })}

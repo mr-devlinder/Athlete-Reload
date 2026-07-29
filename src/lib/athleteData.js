@@ -108,12 +108,13 @@ function fromCheckoutRow(row) {
     plannedLoad: row.planned_load,
     plannedMinutes: row.planned_minutes ?? estimatePlannedMinutes(row.planned_load),
     plannedType: row.planned_type,
+    recommendation: row.recommendation_json,
     title: row.session_title,
   }
 }
 
-function toCheckoutRow(event, checkout) {
-  return {
+function toCheckoutRow(event, checkout, options = {}) {
+  const row = {
     actual_minutes: Number(checkout.actualMinutes),
     completion_level: checkout.completionLevel,
     difficulty: Number(checkout.difficulty),
@@ -127,6 +128,12 @@ function toCheckoutRow(event, checkout) {
     session_title: event.type || 'Training',
     updated_at: new Date().toISOString(),
   }
+
+  if (options.includeRecommendation !== false) {
+    row.recommendation_json = checkout.recommendation ?? null
+  }
+
+  return row
 }
 
 function fromPainReportRow(row) {
@@ -372,6 +379,17 @@ export async function clearTrainingCheckouts(cutoffDate) {
   if (error) throw error
 }
 
+export async function deleteTrainingCheckoutsForEvent(eventId) {
+  if (!eventId) return
+
+  const { error } = await supabase
+    .from('training_checkouts')
+    .delete()
+    .eq('schedule_event_id', eventId)
+
+  if (error) throw error
+}
+
 export async function clearPainReports(cutoffDate) {
   let query = supabase.from('pain_reports').delete()
 
@@ -385,11 +403,19 @@ export async function clearPainReports(cutoffDate) {
 }
 
 export async function createTrainingCheckout(event, checkout) {
-  const { data, error } = await supabase
-    .from('training_checkouts')
-    .insert(toCheckoutRow(event, checkout))
-    .select('*')
-    .single()
+  const { data, error } = await insertTrainingCheckout(event, checkout, true)
+
+  if (isMissingRecommendationColumn(error) && checkout.recommendation) {
+    const retry = await insertTrainingCheckout(event, checkout, false)
+
+    if (retry.error) throw retry.error
+
+    return {
+      ...fromCheckoutRow(retry.data),
+      recommendation: checkout.recommendation,
+      recommendationNotPersisted: true,
+    }
+  }
 
   if (error) throw error
 
@@ -397,16 +423,48 @@ export async function createTrainingCheckout(event, checkout) {
 }
 
 export async function updateTrainingCheckout(id, event, checkout) {
-  const { data, error } = await supabase
-    .from('training_checkouts')
-    .update(toCheckoutRow(event, checkout))
-    .eq('id', id)
-    .select('*')
-    .single()
+  const { data, error } = await updateTrainingCheckoutRow(id, event, checkout, true)
+
+  if (isMissingRecommendationColumn(error) && checkout.recommendation) {
+    const retry = await updateTrainingCheckoutRow(id, event, checkout, false)
+
+    if (retry.error) throw retry.error
+
+    return {
+      ...fromCheckoutRow(retry.data),
+      recommendation: checkout.recommendation,
+      recommendationNotPersisted: true,
+    }
+  }
 
   if (error) throw error
 
   return fromCheckoutRow(data)
+}
+
+function insertTrainingCheckout(event, checkout, includeRecommendation) {
+  return supabase
+    .from('training_checkouts')
+    .insert(toCheckoutRow(event, checkout, { includeRecommendation }))
+    .select('*')
+    .single()
+}
+
+function updateTrainingCheckoutRow(id, event, checkout, includeRecommendation) {
+  return supabase
+    .from('training_checkouts')
+    .update(toCheckoutRow(event, checkout, { includeRecommendation }))
+    .eq('id', id)
+    .select('*')
+    .single()
+}
+
+function isMissingRecommendationColumn(error) {
+  if (!error) return false
+
+  return String(error.message ?? error.details ?? '')
+    .toLowerCase()
+    .includes('recommendation_json')
 }
 
 export async function createPainReports(reports) {

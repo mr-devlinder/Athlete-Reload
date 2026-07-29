@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { format, parseISO, startOfWeek } from 'date-fns'
-import { RecommendationCard } from './RecommendationCard'
+import { format, parseISO, startOfMonth, startOfWeek, startOfYear } from 'date-fns'
+import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
 
@@ -23,9 +23,11 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
-  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set())
+  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey()]))
+  const [expandedMonths, setExpandedMonths] = useState(() => new Set([getCurrentMonthKey()]))
+  const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
-  const weeks = getHistoryWeeks(history, checkouts)
+  const archive = getHistoryArchive(history, checkouts)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -63,6 +65,34 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
     })
   }
 
+  function toggleMonth(monthKey) {
+    setExpandedMonths((current) => {
+      const next = new Set(current)
+
+      if (next.has(monthKey)) {
+        next.delete(monthKey)
+      } else {
+        next.add(monthKey)
+      }
+
+      return next
+    })
+  }
+
+  function toggleYear(yearKey) {
+    setExpandedYears((current) => {
+      const next = new Set(current)
+
+      if (next.has(yearKey)) {
+        next.delete(yearKey)
+      } else {
+        next.add(yearKey)
+      }
+
+      return next
+    })
+  }
+
   return (
     <div className="history-view">
       <div className="schedule-header">
@@ -88,35 +118,63 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
       </div>
 
       <div className="history-list">
-        {weeks.length === 0 ? (
+        {archive.length === 0 ? (
           <article className="history-row empty-history">
             <p>No saved check-ins yet.</p>
           </article>
         ) : (
-          weeks.map((week) => (
-            <section className="history-week" key={week.key}>
-              <div className="history-week-header">
-                <button className="history-week-toggle" onClick={() => toggleWeek(week.key)} type="button">
-                  <span>{expandedWeeks.has(week.key) ? 'Hide' : 'Show'}</span>
-                  <strong>Week of {week.label}</strong>
-                  <em>{week.items.length} item{week.items.length === 1 ? '' : 's'}</em>
-                </button>
-                <button
-                  className="secondary-button compact-action"
-                  onClick={() => setSelectedWeek(week)}
-                  type="button"
-                >
-                  Weekly report
-                </button>
-              </div>
+          archive.map((year) => (
+            <section className="history-archive-group" key={year.key}>
+              <button className="history-archive-toggle" onClick={() => toggleYear(year.key)} type="button">
+                <span>{expandedYears.has(year.key) ? 'Hide' : 'Show'}</span>
+                <strong>{year.label}</strong>
+                <em>{year.itemCount} item{year.itemCount === 1 ? '' : 's'}</em>
+              </button>
 
-              {expandedWeeks.has(week.key) && (
-                <div className="history-week-items">
-                  <HistoryGroup
-                    checkouts={week.items.filter((item) => item.kind === 'checkout')}
-                    checkIns={week.items.filter((item) => item.kind === 'check-in')}
-                    onSelectEntry={setSelectedEntry}
-                  />
+              {expandedYears.has(year.key) && (
+                <div className="history-archive-content">
+                  {year.months.map((month) => (
+                    <section className="history-archive-group history-month-group" key={month.key}>
+                      <button className="history-archive-toggle month-toggle" onClick={() => toggleMonth(month.key)} type="button">
+                        <span>{expandedMonths.has(month.key) ? 'Hide' : 'Show'}</span>
+                        <strong>{month.label}</strong>
+                        <em>{month.itemCount} item{month.itemCount === 1 ? '' : 's'}</em>
+                      </button>
+
+                      {expandedMonths.has(month.key) && (
+                        <div className="history-archive-content">
+                          {month.weeks.map((week) => (
+                            <section className="history-week" key={week.key}>
+                              <div className="history-week-header">
+                                <button className="history-week-toggle" onClick={() => toggleWeek(week.key)} type="button">
+                                  <span>{expandedWeeks.has(week.key) ? 'Hide' : 'Show'}</span>
+                                  <strong>Week of {week.label}</strong>
+                                  <em>{week.items.length} item{week.items.length === 1 ? '' : 's'}</em>
+                                </button>
+                                <button
+                                  className="secondary-button compact-action"
+                                  onClick={() => setSelectedWeek(week)}
+                                  type="button"
+                                >
+                                  Weekly report
+                                </button>
+                              </div>
+
+                              {expandedWeeks.has(week.key) && (
+                                <div className="history-week-items">
+                                  <HistoryGroup
+                                    checkouts={week.items.filter((item) => item.kind === 'checkout')}
+                                    checkIns={week.items.filter((item) => item.kind === 'check-in')}
+                                    onSelectEntry={setSelectedEntry}
+                                  />
+                                </div>
+                              )}
+                            </section>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  ))}
                 </div>
               )}
             </section>
@@ -155,9 +213,9 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
   return (
     <>
       <div className="history-subsection">
-        <p className="eyebrow">Pre-check-ins</p>
+        <p className="eyebrow">Check-ins</p>
         {checkIns.length === 0 ? (
-          <p>No pre-check-ins this week.</p>
+          <p>No check-ins this week.</p>
         ) : (
           checkIns.map((item) => (
             <button
@@ -182,9 +240,9 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
       </div>
 
       <div className="history-subsection">
-        <p className="eyebrow">Post-checkouts</p>
+        <p className="eyebrow">Checkouts</p>
         {checkouts.length === 0 ? (
-          <p>No post-checkouts this week.</p>
+          <p>No checkouts this week.</p>
         ) : (
           checkouts.map((item) => (
             <button
@@ -237,8 +295,8 @@ function WeeklyReportModal({ week, onClose }) {
 
         <div className="history-detail-grid">
           <span><strong>Readiness</strong>{averageReadiness}/100 average</span>
-          <span><strong>Pre-check-ins</strong>{checkIns.length}</span>
-          <span><strong>Post-checkouts</strong>{checkouts.length}</span>
+          <span><strong>Check-ins</strong>{checkIns.length}</span>
+          <span><strong>Checkouts</strong>{checkouts.length}</span>
           <span><strong>Sleep</strong>{averageSleep}h average</span>
           <span><strong>Fatigue</strong>{averageFatigue}/10 average</span>
           <span><strong>Workload</strong>{workload || 'No checkouts'}</span>
@@ -305,7 +363,7 @@ function HistoryModal({ entry, onClose }) {
         <div className="schedule-header">
           <SectionHeading
             eyebrow={formatHistoryDate(entry)}
-            title="Pre-check-in details."
+            title="Check-in details."
           />
           <button className="ghost-close" onClick={onClose} type="button">
             Close
@@ -328,7 +386,7 @@ function HistoryModal({ entry, onClose }) {
             </div>
             <div>
               <strong>{entry.eventTitle ?? entry.session}</strong>
-              <p>Saved pre-event check-in.</p>
+              <p>Saved check-in.</p>
             </div>
           </div>
         )}
@@ -405,7 +463,7 @@ function CheckoutHistoryModal({ entry, onClose }) {
         <div className="schedule-header">
           <SectionHeading
             eyebrow={formatCheckoutDate(entry)}
-            title="Post-checkout details."
+            title="Checkout details."
           />
           <button className="ghost-close" onClick={onClose} type="button">
             Close
@@ -434,6 +492,14 @@ function CheckoutHistoryModal({ entry, onClose }) {
             </span>
           ))}
         </div>
+
+        {entry.recommendation && (
+          <RecoveryPlanCard
+            recommendation={entry.recommendation}
+            recommendationStatus="ai"
+            session={entry.title}
+          />
+        )}
 
         {entry.notes && (
           <div className="history-note">
@@ -550,32 +616,81 @@ function getCutoffDate(days) {
   ].join('-')
 }
 
-function getHistoryWeeks(history, checkouts) {
-  const grouped = new Map()
+function getHistoryArchive(history, checkouts) {
+  const years = new Map()
   const items = [
     ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
     ...checkouts.map((entry) => ({ date: entry.date, entry, kind: 'checkout' })),
   ].filter((item) => item.date)
 
   items.forEach((item) => {
-    const weekStart = startOfWeek(parseISO(item.date))
-    const key = format(weekStart, 'yyyy-MM-dd')
-    const current = grouped.get(key) ?? {
+    const itemDate = parseISO(item.date)
+    const yearStart = startOfYear(itemDate)
+    const monthStart = startOfMonth(itemDate)
+    const weekStart = startOfWeek(itemDate)
+    const yearKey = format(yearStart, 'yyyy')
+    const monthKey = format(monthStart, 'yyyy-MM')
+    const weekKey = format(weekStart, 'yyyy-MM-dd')
+    const year = years.get(yearKey) ?? {
+      itemCount: 0,
+      key: yearKey,
+      label: format(yearStart, 'yyyy'),
+      months: new Map(),
+    }
+    const month = year.months.get(monthKey) ?? {
+      itemCount: 0,
+      key: monthKey,
+      label: format(monthStart, 'MMMM yyyy'),
+      weeks: new Map(),
+    }
+    const week = month.weeks.get(weekKey) ?? {
       items: [],
-      key,
+      key: weekKey,
       label: format(weekStart, 'MMM d'),
     }
 
-    current.items.push(item)
-    grouped.set(key, current)
+    week.items.push(item)
+    month.weeks.set(weekKey, week)
+    month.itemCount += 1
+    year.months.set(monthKey, month)
+    year.itemCount += 1
+    years.set(yearKey, year)
   })
 
-  return [...grouped.values()]
-    .map((week) => ({
-      ...week,
-      items: week.items.sort((first, second) => second.date.localeCompare(first.date)),
+  return [...years.values()]
+    .map((year) => ({
+      ...year,
+      months: [...year.months.values()]
+        .map((month) => ({
+          ...month,
+          weeks: [...month.weeks.values()]
+            .map((week) => ({
+              ...week,
+              items: week.items.sort((first, second) => getHistoryItemSortValue(second).localeCompare(getHistoryItemSortValue(first))),
+            }))
+            .sort((first, second) => second.key.localeCompare(first.key)),
+        }))
+        .sort((first, second) => second.key.localeCompare(first.key)),
     }))
     .sort((first, second) => second.key.localeCompare(first.key))
+}
+
+function getHistoryItemSortValue(item) {
+  const time = item.entry.eventTime ?? item.entry.time ?? ''
+
+  return `${item.date} ${time}`
+}
+
+function getCurrentWeekKey() {
+  return format(startOfWeek(new Date()), 'yyyy-MM-dd')
+}
+
+function getCurrentMonthKey() {
+  return format(startOfMonth(new Date()), 'yyyy-MM')
+}
+
+function getCurrentYearKey() {
+  return format(startOfYear(new Date()), 'yyyy')
 }
 
 function average(values, digits = 0) {

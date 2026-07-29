@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { BodyPainMap } from './BodyPainMap'
+import { RecoveryPlanCard } from './RecommendationCard'
 import { createEmptyPainMap } from '../data/bodyPainMap'
 import { estimatePlannedMinutes } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
@@ -9,6 +10,7 @@ const completionLevels = ['Completed full session', 'Modified', 'Stopped early',
 
 export function CheckoutModal({ checkout, event, onClose, onSave }) {
   const [isEditing, setIsEditing] = useState(!checkout)
+  const [isSaving, setIsSaving] = useState(false)
   const [draft, setDraft] = useState(() => getInitialDraft(event, checkout))
 
   useEffect(() => {
@@ -24,9 +26,14 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
     }))
   }
 
-  function saveDraft() {
-    onSave(event, draft, checkout)
-    setIsEditing(false)
+  async function saveDraft() {
+    setIsSaving(true)
+    try {
+      await onSave(event, draft, checkout)
+      setIsEditing(false)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -34,7 +41,7 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
       <section className="event-modal checkout-modal glass-panel" role="dialog" aria-modal="true">
         <div className="schedule-header">
           <SectionHeading
-            eyebrow={checkout && !isEditing ? 'Planned vs actual' : 'Post-training checkout'}
+            eyebrow={checkout && !isEditing ? 'Planned vs actual' : 'Checkout'}
             title={event.title || event.type}
           />
           <button className="ghost-close" onClick={onClose} type="button">
@@ -112,8 +119,8 @@ export function CheckoutModal({ checkout, event, onClose, onSave }) {
               />
             </div>
 
-            <button className="primary-button modal-notes" onClick={saveDraft} type="button">
-              Save checkout
+            <button className="primary-button modal-notes" disabled={isSaving} onClick={saveDraft} type="button">
+              {isSaving ? 'Generating recovery plan...' : 'Save checkout'}
             </button>
           </div>
         )}
@@ -156,6 +163,14 @@ function CheckoutComparison({ checkout, onEdit }) {
       </div>
 
       {checkout.notes && <p className="checkout-note">{checkout.notes}</p>}
+
+      {checkout.recommendation && (
+        <RecoveryPlanCard
+          recommendation={checkout.recommendation}
+          recommendationStatus="ai"
+          session={checkout.title}
+        />
+      )}
 
       <button className="secondary-button compact-action" onClick={onEdit} type="button">
         Edit checkout
