@@ -10,10 +10,8 @@ export function CheckInView({
   eventOptions = [],
   isSavedToday,
   isSaving,
-  nextEvent,
   selectedEvent,
   selectedEventId,
-  todayEvents = [],
   todayIso,
   todayLabel,
   onSave,
@@ -21,9 +19,8 @@ export function CheckInView({
   onOpenCheckout,
   onSelectEvent,
   onUpdate,
+  isFirstEventToday,
 }) {
-  const todayScheduleLabel = selectedEvent?.title ?? todayEvents[0]?.title ?? checkIn.session
-  const nextLabel = nextEvent ? nextEvent.title : 'No upcoming events'
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
   const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
   const canPostCheckIn = selectedEvent && hasEventStarted(selectedEvent) && !selectedCheckout
@@ -90,71 +87,139 @@ export function CheckInView({
             />
           )}
 
-          <div className="schedule-source">
-            <span>
-              <strong>Yesterday</strong>
-              {checkIn.yesterdayLoad}
-            </span>
-            <span className="today-chip">
-              <strong>Event</strong>
-              {todayScheduleLabel}
-            </span>
-            <span>
-              <strong>Intensity</strong>
-              {selectedEvent?.load ?? nextLabel}
-            </span>
-          </div>
         </div>
 
         <Slider
+          description="How much energy you have available right now."
           label="Energy"
-          max={10}
+          max={5}
           value={checkIn.energy}
-          unit="/10"
+          unit="/5"
           onChange={(value) => onUpdate('energy', value)}
         />
         <Slider
-          label="Soreness"
-          max={10}
+          description="Overall muscle discomfort or tenderness, even before activity."
+          label="Muscle soreness"
+          min={1}
+          max={5}
           value={checkIn.soreness}
-          unit="/10"
+          unit="/5"
           onChange={(value) => onUpdate('soreness', value)}
         />
         <Slider
-          label="Fatigue"
-          max={10}
+          description="How worn down your whole body feels."
+          label="General fatigue"
+          min={1}
+          max={5}
           value={checkIn.fatigue}
-          unit="/10"
+          unit="/5"
           onChange={(value) => onUpdate('fatigue', value)}
         />
         <Slider
-          label="Sleep"
-          min={3}
-          max={10}
-          value={checkIn.sleep}
-          unit="h"
-          onChange={(value) => onUpdate('sleep', value)}
+          description="Whether your legs feel unusually heavy or slow."
+          label="Leg heaviness"
+          min={1}
+          max={5}
+          value={checkIn.legHeaviness ?? 1}
+          unit="/5"
+          onChange={(value) => onUpdate('legHeaviness', value)}
         />
+        {isFirstEventToday && (
+          <>
+            <Slider
+              description="Total hours you slept last night."
+              label="Sleep"
+              min={3}
+              max={10}
+              maxLabel="10h+"
+              value={checkIn.sleep}
+              unit="h"
+              onChange={(value) => onUpdate('sleep', value)}
+            />
+            <Select
+              description="How restful and restorative your sleep felt."
+              label="Sleep quality"
+              value={String(checkIn.sleepQuality ?? 5)}
+              options={['1', '2', '3', '4', '5']}
+              onChange={(value) => onUpdate('sleepQuality', Number(value))}
+            />
+          </>
+        )}
         <div className="select-row">
           <Select
+            description="How much pressure or worry you feel today."
             label="Stress"
             value={checkIn.stress}
-            options={['Low', 'Medium', 'High']}
+            options={['1 - Low', '2', '3', '4', '5 - High']}
             onChange={(value) => onUpdate('stress', value)}
           />
           <HydrationInput
             value={checkIn.hydrationOz ?? 0}
-            status={checkIn.hydration}
             onChange={(value) => onUpdate('hydrationOz', value)}
           />
         </div>
+        <div className="select-row">
+          <Select
+            description="Any symptoms that may affect training today."
+            label="Illness symptoms"
+            value={checkIn.illnessSymptoms ?? 'None'}
+            options={['None', 'Mild', 'Significant']}
+            onChange={(value) => onUpdate('illnessSymptoms', value)}
+          />
+        </div>
+        <Slider
+          description="How hard you expect this event to feel from your perspective."
+          label="Expected difficulty"
+          max={10}
+          min={1}
+          value={checkIn.expectedDifficulty ?? 5}
+          unit="/10"
+          onChange={(value) => onUpdate('expectedDifficulty', value)}
+        />
+        <fieldset className="recovery-actions-field">
+          <legend>Recovery actions completed</legend>
+          <p className="field-description">Select anything you did after your last session.</p>
+          <div className="recovery-action-options">
+            {[
+              ['Meal', 'Ate a recovery meal or snack.'],
+              ['Hydration', 'Replaced fluids after training.'],
+              ['Stretching or mobility', 'Did gentle mobility work.'],
+              ['Cooldown', 'Completed an easy cooldown.'],
+              ['Rest day', 'Took the day off from training.'],
+            ].map(([action, description]) => {
+              const checked = (checkIn.recoveryActions ?? []).includes(action)
 
-        <BodyPainMap
+              return (
+                <label className={checked ? 'recovery-action checked' : 'recovery-action'} key={action}>
+                  <input
+                    checked={checked}
+                    type="checkbox"
+                    onChange={(event) => {
+                      const actions = new Set(checkIn.recoveryActions ?? [])
+                      if (event.target.checked) actions.add(action)
+                      else actions.delete(action)
+                      onUpdate('recoveryActions', Array.from(actions))
+                    }}
+                  />
+                  <span className="recovery-action-copy">
+                    <strong>{action}</strong>
+                    <small>{description}</small>
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        </fieldset>
+
+          <BodyPainMap
+          affectedMovement={checkIn.affectedMovement}
           hurtsWhen={checkIn.hurtsWhen}
           injuryType={checkIn.injuryType}
           painType={checkIn.painType}
+          painTrend={checkIn.painTrend}
+          details={checkIn.painDetails}
           value={checkIn.painMap}
-          onDetailChange={onUpdate}
+          onDetailsChange={(value) => onUpdate('painDetails', value)}
           onChange={(value) => onUpdate('painMap', value)}
         />
 
@@ -266,8 +331,9 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
         {visibleEvents.map(({ event, index }) => {
           const isToday = event.date === todayIso
           const isSelected = event.id === selectedEventId
-          const isLockedByCheckout = isToday && event.id !== activeTodayEventId
-          const isDisabled = !isToday || isLockedByCheckout
+          const isCompleted = completedEventIds.has(event.id)
+          const isLockedByCheckout = isToday && !isCompleted && event.id !== activeTodayEventId
+          const isDisabled = !isToday || isLockedByCheckout || isCompleted
 
           return (
             <button
@@ -334,37 +400,37 @@ function formatEventTime(value) {
   return `${displayHour}:${minute} ${suffix}`
 }
 
-const hydrationOptions = [0, 16, 24, 32, 40, 64, 80, 101]
 const dailyHydrationTargetOz = 101.4
 
-function HydrationInput({ onChange, status, value }) {
+function HydrationInput({ onChange, value }) {
   const progress = Math.max(0, Math.min(100, (Number(value) / dailyHydrationTargetOz) * 100))
 
   return (
-    <label className="hydration-field">
-      <span>Hydration</span>
+    <div className="hydration-field">
+      <span>Today's hydration</span>
       <div className="hydration-inline">
         <div className="hydration-control">
-          <input
-            list="hydration-options"
-            min="0"
-            step="1"
-            type="number"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-          />
+          <div className="hydration-stepper">
+            <button aria-label="Increase hydration by 1 fluid ounce" onClick={() => onChange(Number(value || 0) + 1)} type="button">▲</button>
+            <span>{value}</span>
+            <button aria-label="Decrease hydration by 1 fluid ounce" disabled={Number(value || 0) <= 0} onClick={() => onChange(Math.max(0, Number(value || 0) - 1))} type="button">▼</button>
+          </div>
           <em>fl oz</em>
-          <datalist id="hydration-options">
-            {hydrationOptions.map((option) => (
-              <option key={option} value={option} />
-            ))}
-          </datalist>
         </div>
         <div className="water-jug">
           <span style={{ height: `${progress}%` }} />
         </div>
       </div>
-      <small>{status} toward 3L target</small>
-    </label>
+      <div className="hydration-quick-actions" aria-label="Add to today's hydration">
+        {[16, 32, 64].map((amount) => (
+          <button key={amount} onClick={() => onChange(Number(value || 0) + amount)} type="button">+{amount}</button>
+        ))}
+      </div>
+      <div className="hydration-quick-actions hydration-minus-actions" aria-label="Reduce today's hydration">
+        {[16, 32, 64].map((amount) => (
+          <button key={amount} disabled={Number(value || 0) < amount} onClick={() => onChange(Math.max(0, Number(value || 0) - amount))} type="button">−{amount}</button>
+        ))}
+      </div>
+    </div>
   )
 }

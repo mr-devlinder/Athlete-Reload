@@ -15,7 +15,9 @@ export function HomeView({
   const recentHistory = getEntriesSince(history, 6)
   const previousHistory = getEntriesBetween(history, 13, 7)
   const dueCheckout = schedule.find(
-    (event) => hasEventStarted(event) && !getCheckoutForEvent(checkouts, event.id),
+    (event) => hasEventStarted(event)
+      && history.some((entry) => entry.eventId === event.id && entry.checkInType !== 'post_event')
+      && !getCheckoutForEvent(checkouts, event.id),
   )
   const checkInReminder = getCheckInReminder(schedule, history, now)
   const nextEvent = getNextEvent(schedule, now)

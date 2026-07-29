@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   addDays,
   addMonths,
@@ -14,7 +14,7 @@ import {
 } from 'date-fns'
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
-import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
+import { getCheckoutForEvent } from '../utils/events'
 
 const eventTypes = [
   'Rest day',
@@ -35,8 +35,12 @@ const todayIso = toIsoDate(today)
 const emptyEvent = {
   association: 'Personal',
   date: todayIso,
+  expectedDuration: 60,
+  environment: 'Outdoor',
   load: 'Medium',
+  location: '',
   note: '',
+  surface: 'Grass',
   time: '',
   title: 'Team practice',
   type: 'Team practice',
@@ -52,11 +56,10 @@ export function ScheduleView({
   onAddAssociation,
   onRenameAssociation,
   onRemoveAssociation,
-  onOpenCheckIn,
-  onOpenCheckout,
   onRemove,
   onUpdate,
   onboardingAssociation = 'Personal',
+  isOnboardingEventCreation = false,
   schedule,
 }) {
   const [visibleMonth, setVisibleMonth] = useState(startOfMonth(today))
@@ -106,6 +109,7 @@ export function ScheduleView({
     const event = {
       ...draftEvent,
       load: getDefaultLoadForEvent(draftEvent.type),
+      plannedMinutes: Number(draftEvent.expectedDuration ?? 60),
       title: draftEvent.type,
     }
 
@@ -232,9 +236,6 @@ export function ScheduleView({
               {selectedEvents.map((event) => {
                 const checkout = getCheckoutForEvent(checkouts, event.id)
                 const checkIn = getCheckInForEvent(checkIns, event.id)
-                const isToday = event.date === todayIso
-                const canCheckIn = isToday
-                const canCheckout = isToday && hasEventStarted(event)
 
                 return (
                   <article className="event-card" key={event.id}>
@@ -258,24 +259,6 @@ export function ScheduleView({
                     )}
                     {event.note && <p>{event.note}</p>}
                     <div className="event-actions">
-                      {canCheckIn && (
-                        <button
-                          className="secondary-button compact-action"
-                          onClick={() => onOpenCheckIn(event)}
-                          type="button"
-                        >
-                          {checkIn ? 'View check-in' : 'Check-in'}
-                        </button>
-                      )}
-                      {canCheckout && (
-                        <button
-                          className="secondary-button compact-action"
-                          onClick={() => onOpenCheckout(event)}
-                          type="button"
-                        >
-                          {checkout ? 'View checkout' : 'Log checkout'}
-                        </button>
-                      )}
                       <button
                         className="secondary-button compact-action"
                         onClick={() => openEditModal(event)}
@@ -304,6 +287,7 @@ export function ScheduleView({
           associations={associations}
           draftEvent={draftEvent}
           mode={modalMode}
+          isOnboardingEventCreation={isOnboardingEventCreation && modalMode === 'create'}
           onClose={closeModal}
           onSave={saveDraft}
           onUpdate={updateDraft}
@@ -323,10 +307,28 @@ export function ScheduleView({
   )
 }
 
-function EventModal({ associations, draftEvent, mode, onClose, onSave, onUpdate }) {
+function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode, onClose, onSave, onUpdate }) {
+  useEffect(() => {
+    document.body.classList.add('modal-open')
+
+    return () => document.body.classList.remove('modal-open')
+  }, [])
+
   return (
-    <div className="modal-backdrop">
-      <section className="event-modal associations-modal glass-panel" role="dialog" aria-modal="true">
+    <div
+      className={`modal-backdrop${isOnboardingEventCreation ? ' onboarding-event-backdrop' : ''}`}
+      style={isOnboardingEventCreation
+        ? { alignItems: 'start', paddingTop: 'var(--guided-tour-form-top, 140px)' }
+        : undefined}
+    >
+      <section
+        className="event-modal associations-modal glass-panel"
+        role="dialog"
+        aria-modal="true"
+        style={isOnboardingEventCreation
+          ? { maxHeight: 'calc(100dvh - var(--guided-tour-form-top, 140px))' }
+          : undefined}
+      >
         <div className="schedule-header">
           <SectionHeading
             eyebrow={mode === 'edit' ? 'Edit event' : 'New event'}
@@ -357,6 +359,16 @@ function EventModal({ associations, draftEvent, mode, onClose, onSave, onUpdate 
             onChange={(value) => onUpdate('type', value)}
           />
           <label className="compact-field">
+            Expected duration (minutes)
+            <input
+              min="15"
+              step="15"
+              type="number"
+              value={draftEvent.expectedDuration ?? 60}
+              onChange={(event) => onUpdate('expectedDuration', event.target.value)}
+            />
+          </label>
+          <label className="compact-field">
             Association
             <select
               value={draftEvent.association ?? 'Personal'}
@@ -369,6 +381,26 @@ function EventModal({ associations, draftEvent, mode, onClose, onSave, onUpdate 
                 </option>
               ))}
             </select>
+          </label>
+          <Select
+            label="Surface"
+            value={draftEvent.surface ?? 'Grass'}
+            options={['Grass', 'Turf', 'Court', 'Track', 'Gym', 'Other']}
+            onChange={(value) => onUpdate('surface', value)}
+          />
+          <Select
+            label="Environment"
+            value={draftEvent.environment ?? 'Outdoor'}
+            options={['Outdoor', 'Indoor']}
+            onChange={(value) => onUpdate('environment', value)}
+          />
+          <label className="compact-field">
+            U.S. city
+            <input
+              value={draftEvent.location ?? ''}
+              placeholder="Fresno, CA"
+              onChange={(event) => onUpdate('location', event.target.value)}
+            />
           </label>
           {mode === 'create' && (
             <>

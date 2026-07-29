@@ -262,6 +262,16 @@ function getFreshCheckInDefaults() {
   }
 }
 
+function getSharedSleepContext(history, date) {
+  const firstCheckIn = history
+    .filter((entry) => (entry.checkInType ?? 'pre_event') === 'pre_event' && entry.date === date)
+    .sort((a, b) => String(a.eventTime ?? '').localeCompare(String(b.eventTime ?? '')))[0]
+
+  return firstCheckIn
+    ? { sleep: firstCheckIn.sleep, sleepQuality: firstCheckIn.sleepQuality }
+    : {}
+}
+
 function getNextTodayEventAfter(schedule, eventId, todayIso, completedEventIds = new Set()) {
   const todaySchedule = sortScheduleEvents(schedule.filter((event) => event.date === todayIso))
   const currentIndex = todaySchedule.findIndex((event) => event.id === eventId)
@@ -1280,7 +1290,7 @@ function App() {
       setCheckIn((current) =>
         existingEntry
           ? checkInFromHistoryEntry(existingEntry, current)
-          : getFreshCheckInDefaults(),
+          : { ...getFreshCheckInDefaults(), ...getSharedSleepContext(history, todayIso) },
       )
     }
   }
@@ -1312,7 +1322,7 @@ function App() {
     setCheckIn((current) =>
       existingEntry
         ? checkInFromHistoryEntry(existingEntry, current)
-        : getFreshCheckInDefaults(),
+        : { ...getFreshCheckInDefaults(), ...getSharedSleepContext(history, todayIso) },
     )
   }
 
@@ -1357,10 +1367,14 @@ function App() {
 
   async function finishOnboardingTour() {
     setOnboardingTour(null)
-    setOnboardingCompleteOpen(true)
+    await completeOnboardingSetup()
   }
 
   async function unlockAfterOnboarding() {
+    await completeOnboardingSetup()
+  }
+
+  async function completeOnboardingSetup() {
     const completedProfile = { ...athleteProfile, onboardingCompleted: true }
 
     if (isSupabaseSession) {
@@ -1372,6 +1386,7 @@ function App() {
 
     setOnboardingCompleteOpen(false)
     setActiveView('Home')
+    requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
   }
 
   function advanceOnboardingTour() {
@@ -1757,7 +1772,7 @@ function App() {
       </nav>
 
       <div
-        className="nav-tabs"
+        className={`nav-tabs${onboardingTour && !onboardingTour.endsWith('-nav') ? ' tour-hidden-mobile' : ''}`}
         aria-label="Primary views"
         onPointerCancel={hideNavLens}
         onPointerDown={showNavLens}
@@ -1767,6 +1782,9 @@ function App() {
         onTouchMove={moveTouchLens}
         onTouchStart={showTouchLens}
         ref={navRef}
+        style={onboardingTour && !onboardingTour.endsWith('-nav')
+          ? { pointerEvents: 'none', visibility: 'hidden' }
+          : undefined}
       >
         {navLens && (
           <div
@@ -1857,6 +1875,7 @@ function App() {
                 onOpenCheckout={setCheckoutEvent}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
+                isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
               />
             )}
 
@@ -1887,6 +1906,7 @@ function App() {
                 onRemove={removeScheduleItem}
                 onUpdate={updateScheduleItem}
                 onboardingAssociation={onboardingAssociation}
+                isOnboardingEventCreation={onboardingTour === 'schedule'}
                 schedule={schedule}
               />
             )}

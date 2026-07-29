@@ -77,6 +77,29 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
   const wasFormOpen = useRef(false)
 
   useEffect(() => {
+    document.body.classList.add('guided-tour-active')
+
+    return () => {
+      document.body.classList.remove('guided-tour-active', 'guided-tour-event-form')
+    }
+  }, [])
+
+  useEffect(() => {
+    document.body.classList.toggle('guided-tour-event-form', isFormOpen)
+
+    return () => document.body.classList.remove('guided-tour-event-form')
+  }, [isFormOpen])
+
+  useEffect(() => {
+    if (!isFormOpen) return undefined
+
+    const topOffset = Math.ceil(calloutHeight || 140)
+    document.body.style.setProperty('--guided-tour-form-top', `${topOffset}px`)
+
+    return () => document.body.style.removeProperty('--guided-tour-form-top')
+  }, [calloutHeight, isFormOpen])
+
+  useEffect(() => {
     let frameId = null
     let observer = null
     let mutationObserver = null
@@ -196,15 +219,15 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
           width: `${targetRect.width}px`,
         }}
       />
-      <section className={`guided-tour ${isFormOpen ? 'guided-tour-form-callout' : ''}`} ref={calloutRef} role="dialog" aria-label="Athlete Reload guided walkthrough" style={getCalloutStyle(bubbleRect ?? targetRect, isFormOpen, calloutHeight)}>
+      <section className={`guided-tour ${isFormOpen ? 'guided-tour-form-callout' : ''}`} ref={calloutRef} role="dialog" aria-label="Athlete Reload guided walkthrough" style={getCalloutStyle(bubbleRect ?? targetRect, isFormOpen, calloutHeight, phase)}>
         <span className="guided-tour-arrow" aria-hidden="true">{isFormOpen ? '↓' : '↑'}</span>
         <p className="eyebrow">{isFormOpen ? 'Create your first event' : step.eyebrow}</p>
         <h2>{isFormOpen ? 'Fill out the event form' : step.title}</h2>
-        <p>{isFormOpen ? 'Choose the date, time, event type, association, and planned minutes. Intensity is set automatically. Press Create event when you are done.' : step.body}</p>
+        <p>{isFormOpen ? 'Complete the event details, then tap Create event.' : step.body}</p>
         {step.requiresReadThrough && !hasReadThrough && <p className="guided-tour-progress">Scroll through the Check-in page to continue.</p>}
         <div className="guided-tour-actions">
           {!isFormOpen && phase !== 'schedule' && <button className="auth-switch" onClick={onBack} type="button">Back</button>}
-          <button className="ghost-close" onClick={onFinish} type="button">Skip tour</button>
+          {!isFormOpen && <button className="ghost-close" onClick={onFinish} type="button">Skip tour</button>}
           {!isFormOpen && !step.awaitingClick && <button className="primary-button compact-action" disabled={!canAdvance} onClick={onNext} type="button">{phase === 'history' ? 'Finish tour' : 'Next'}</button>}
         </div>
       </section>
@@ -244,16 +267,28 @@ function getBlockers(rect) {
   ]
 }
 
-function getCalloutStyle(rect, isFormOpen, calloutHeight) {
-  const width = Math.min(360, window.innerWidth - 28)
+function getCalloutStyle(rect, isFormOpen, calloutHeight, phase) {
+  const isMobile = window.matchMedia('(max-width: 1060px)').matches
+  const width = Math.min(isMobile ? 320 : 360, window.innerWidth - 28)
   const maxLeft = Math.max(14, window.innerWidth - width - 14)
-  const safeHeight = Math.min(calloutHeight || 260, window.innerHeight - 28)
+  const safeHeight = Math.min(calloutHeight || (isMobile ? 208 : 260), window.innerHeight - 28)
   const clampTop = (top) => Math.min(
     Math.max(14, top),
     Math.max(14, window.innerHeight - safeHeight - 14),
   )
 
+  if (isMobile && tourSteps[phase]?.navigationStep) {
+    const left = Math.min(Math.max(14, rect.left + (rect.width - width) / 2), maxLeft)
+    const top = clampTop(rect.top - safeHeight - 34)
+
+    return { left: `${left}px`, top: `${top}px`, width: `${width}px` }
+  }
+
   if (isFormOpen) {
+    if (isMobile) {
+      return { left: '14px', top: '14px', width: `${width}px` }
+    }
+
     const leftOfForm = rect.left - width - 24
     const rightOfForm = rect.right + 24
     const left = leftOfForm >= 14

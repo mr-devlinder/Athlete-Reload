@@ -5,11 +5,15 @@ import { estimatePlannedMinutes } from '../utils/events'
 function fromScheduleRow(row) {
   return {
     association: row.association ?? 'Personal',
+    environment: row.environment ?? 'Outdoor',
+    expectedDuration: Number(row.expected_duration ?? row.planned_minutes ?? 60),
     id: row.id,
     date: row.event_date,
     load: row.load_level,
+    location: row.location ?? '',
     note: row.note ?? '',
     plannedMinutes: Number(row.planned_minutes ?? 0) || undefined,
+    surface: row.surface ?? 'Grass',
     time: row.event_time ?? '',
     title: row.event_type,
     type: row.event_type,
@@ -19,12 +23,16 @@ function fromScheduleRow(row) {
 function toScheduleRow(event) {
   return {
     association: event.association ?? 'Personal',
+    environment: event.environment ?? 'Outdoor',
+    expected_duration: Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
     event_date: event.date,
     event_time: event.time ?? '',
     event_type: event.type,
     load_level: event.load,
+    location: event.location ?? '',
     note: event.note ?? '',
     planned_minutes: Number(event.plannedMinutes ?? 0) || null,
+    surface: event.surface ?? 'Grass',
     title: event.type,
     updated_at: new Date().toISOString(),
   }
@@ -39,6 +47,7 @@ function fromAssociationRow(row) {
 
 function fromCheckInRow(row) {
   return {
+    affectedMovement: row.affected_movement ?? 'None',
     checkInType: row.check_in_type ?? 'pre_event',
     createdAt: row.created_at,
     date: row.check_in_date,
@@ -48,6 +57,8 @@ function fromCheckInRow(row) {
     eventTime: row.event_time ?? '',
     eventTitle: row.session_title ?? row.session_type,
     fatigue: row.fatigue,
+    illnessSymptoms: row.illness_symptoms ?? 'None',
+    legHeaviness: row.leg_heaviness ?? 1,
     hurtsWhen: row.hurts_when,
     hydration: row.hydration,
     hydrationOz: row.hydration_oz ?? 0,
@@ -56,43 +67,56 @@ function fromCheckInRow(row) {
     location: row.pain_location,
     note: row.notes,
     pain: row.pain,
+    painDetails: row.pain_details ?? {},
+    painTrend: row.pain_trend ?? 'New',
     painType: row.pain_type,
     plannedIntensity: row.planned_intensity ?? row.session_type,
     recommendation: row.recommendation_json,
+    recoveryActions: row.recovery_actions ?? [],
     score: row.score,
     session: row.session_type,
     sleep: Number(row.sleep),
+    sleepQuality: row.sleep_quality ?? 5,
     soreness: row.soreness,
     stress: row.stress,
     yesterdayLoad: row.yesterday_load,
+    expectedDifficulty: row.expected_difficulty ?? 5,
   }
 }
 
 function toCheckInRow(checkIn, recommendation) {
   return {
+    affected_movement: checkIn.affectedMovement ?? 'None',
     check_in_date: checkIn.eventDate ?? format(new Date(), 'yyyy-MM-dd'),
     check_in_type: checkIn.checkInType ?? 'pre_event',
     energy: checkIn.energy,
     event_time: checkIn.eventTime ?? '',
     fatigue: checkIn.fatigue,
+    illness_symptoms: checkIn.illnessSymptoms ?? 'None',
+    leg_heaviness: Number(checkIn.legHeaviness ?? 1),
     hurts_when: checkIn.hurtsWhen,
     hydration: checkIn.hydration,
     hydration_oz: Number(checkIn.hydrationOz ?? 0),
     injury_type: checkIn.injuryType,
     notes: checkIn.notes ?? '',
     pain: checkIn.pain,
+    pain_details: checkIn.painDetails ?? {},
+    pain_trend: checkIn.painTrend ?? 'New',
     pain_location: checkIn.location,
     pain_type: checkIn.painType,
     planned_intensity: checkIn.plannedIntensity ?? checkIn.session,
     recommendation_json: recommendation,
+    recovery_actions: checkIn.recoveryActions ?? [],
     schedule_event_id: checkIn.eventId ?? null,
     score: recommendation.score,
     session_title: checkIn.eventTitle ?? checkIn.session,
     session_type: checkIn.session,
     sleep: checkIn.sleep,
+    sleep_quality: Number(checkIn.sleepQuality ?? 5),
     soreness: checkIn.soreness,
     stress: checkIn.stress,
     yesterday_load: checkIn.yesterdayLoad,
+    expected_difficulty: Number(checkIn.expectedDifficulty ?? 5),
   }
 }
 

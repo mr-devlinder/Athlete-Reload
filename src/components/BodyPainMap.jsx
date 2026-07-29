@@ -3,11 +3,14 @@ import Body from 'react-muscle-highlighter'
 import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 
 export function BodyPainMap({
+  affectedMovement,
+  details = {},
   hurtsWhen,
   injuryType,
   onChange,
-  onDetailChange,
+  onDetailsChange,
   painType,
+  painTrend,
   value,
 }) {
   const painMap = value ?? createEmptyPainMap()
@@ -25,6 +28,10 @@ export function BodyPainMap({
       ...painMap,
       [areaId]: severity,
     })
+  }
+
+  function updateDetail(field, nextValue) {
+    onDetailsChange?.({ ...details, [activeArea.id]: { ...(details[activeArea.id] ?? {}), [field]: nextValue } })
   }
 
   function goNext() {
@@ -156,8 +163,8 @@ export function BodyPainMap({
               <label className="compact-field">
                 Injury type
                 <select
-                  value={injuryType}
-                  onChange={(event) => onDetailChange('injuryType', event.target.value)}
+                  value={details[activeArea.id]?.injuryType ?? injuryType}
+                  onChange={(event) => updateDetail('injuryType', event.target.value)}
                 >
                   {injuryTypeOptions.map((option) => (
                     <option key={option}>{option}</option>
@@ -167,8 +174,8 @@ export function BodyPainMap({
               <label className="compact-field">
                 Pain type
                 <select
-                  value={painType}
-                  onChange={(event) => onDetailChange('painType', event.target.value)}
+                  value={details[activeArea.id]?.painType ?? painType}
+                  onChange={(event) => updateDetail('painType', event.target.value)}
                 >
                   {painTypeOptions.map((option) => (
                     <option key={option}>{option}</option>
@@ -176,14 +183,26 @@ export function BodyPainMap({
                 </select>
               </label>
               <label className="compact-field">
-                Hurts when
+                When it occurs
                 <select
-                  value={hurtsWhen}
-                  onChange={(event) => onDetailChange('hurtsWhen', event.target.value)}
+                  value={details[activeArea.id]?.hurtsWhen ?? hurtsWhen}
+                  onChange={(event) => updateDetail('hurtsWhen', event.target.value)}
                 >
                   {hurtsWhenOptions.map((option) => (
                     <option key={option}>{option}</option>
                   ))}
+                </select>
+              </label>
+              <label className="compact-field">
+                Change since last session
+                <select value={details[activeArea.id]?.painTrend ?? painTrend ?? 'New'} onChange={(event) => updateDetail('painTrend', event.target.value)}>
+                  <option>New</option><option>Improving</option><option>Unchanged</option><option>Worsening</option>
+                </select>
+              </label>
+              <label className="compact-field">
+                Affected movement
+                <select value={details[activeArea.id]?.affectedMovement ?? affectedMovement ?? 'None'} onChange={(event) => updateDetail('affectedMovement', event.target.value)}>
+                  <option>None</option><option>Running</option><option>Jumping</option><option>Cutting</option><option>Kicking</option><option>Throwing</option><option>Other sport movement</option>
                 </select>
               </label>
             </div>
