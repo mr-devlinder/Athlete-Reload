@@ -2491,6 +2491,52 @@ textarea {
   line-height: 1.45;
 }
 
+.saved-routine-library {
+  display: grid;
+  gap: 9px;
+  margin-top: 16px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(23, 23, 23, 0.08);
+}
+
+.saved-routine-library > strong {
+  color: #565d67;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.saved-routine-library > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.saved-routine-library button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(47, 140, 255, 0.17);
+  border-radius: 999px;
+  padding: 8px 11px;
+  background: rgba(238, 247, 255, 0.58);
+  color: #2b3747;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.saved-routine-library em {
+  color: #226fc9;
+  font-style: normal;
+}
+
+.favorite-active {
+  border-color: rgba(243, 180, 63, 0.42);
+  background: rgba(255, 246, 217, 0.7);
+  color: #8e620a;
+}
+
 .recovery-do-now,
 .recovery-timeline-panel,
 .recovery-routine-panel,
@@ -2524,6 +2570,109 @@ textarea {
   margin-top: 8px;
   color: #527062;
 }
+
+.routine-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 23, 23, 0.08);
+}
+
+.routine-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #26b97e, #2f8cff);
+  transition: width 240ms ease;
+}
+
+.routine-preview {
+  border: 1px solid rgba(23, 23, 23, 0.08);
+  border-radius: 14px;
+  padding: 11px 13px;
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.routine-preview summary {
+  color: #315f96;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.routine-preview ol {
+  display: grid;
+  gap: 9px;
+  margin: 12px 0 0;
+  padding-left: 21px;
+}
+
+.routine-preview li {
+  padding-left: 2px;
+  color: #3f4650;
+  font-size: 13px;
+}
+
+.routine-preview li strong,
+.routine-preview li span,
+.routine-preview li em {
+  display: block;
+}
+
+.routine-preview li span,
+.routine-preview li em {
+  margin-top: 2px;
+  color: #737a84;
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.routine-hurt-modal {
+  display: grid;
+  gap: 14px;
+  max-width: 460px;
+}
+
+.routine-hurt-modal h2 {
+  margin: -6px 0 0;
+  color: #262a30;
+}
+
+.routine-hurt-actions {
+  display: flex;
+  justify-content: end;
+  gap: 9px;
+}
+
+.signal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.signal-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #656c76;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.signal-legend span::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  content: '';
+}
+
+.signal-legend .readiness { color: #26a66f; }
+.signal-legend .sleep { color: #2f8cff; }
+.signal-legend .fatigue { color: #d39316; }
+.signal-legend .soreness { color: #d95d54; }
 
 .recovery-saved-message {
   margin: 0;
@@ -2890,6 +3039,40 @@ button.event-status:hover {
     0 14px 32px rgba(31, 35, 45, 0.07);
 }
 
+.checkout-comparison-heading h3 {
+  margin: 4px 0 14px;
+  color: #20242a;
+  font-size: 20px;
+}
+
+.pain-change-summary {
+  margin-top: 14px;
+  border: 1px solid rgba(47, 140, 255, 0.14);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(238, 247, 255, 0.48);
+}
+
+.pain-change-summary strong {
+  color: #1e5eab;
+  font-size: 13px;
+}
+
+.pain-change-summary ul,
+.pain-change-summary p {
+  margin: 8px 0 0;
+  color: #505965;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.pain-change-summary ul {
+  display: grid;
+  gap: 5px;
+  padding-left: 18px;
+}
+
 .stat-card strong {
   display: block;
   margin-top: 8px;
@@ -2929,6 +3112,409 @@ button.event-status:hover {
 .panel-heading strong {
   color: #226fc9;
   font-size: 20px;
+}
+
+.daily-wellness-panel {
+  display: grid;
+  align-content: start;
+}
+
+.wellness-hydration-controls {
+  display: grid;
+  grid-template-columns: repeat(3, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+  margin-top: 16px;
+}
+
+.wellness-hydration-controls > button {
+  min-height: 38px;
+  border: 1px solid rgba(47, 140, 255, 0.17);
+  border-radius: 10px;
+  background: rgba(47, 140, 255, 0.08);
+  color: #226fc9;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wellness-hydration-controls label {
+  display: grid;
+  gap: 5px;
+  color: #6d737d;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.wellness-hydration-controls input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(23, 23, 23, 0.1);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.7);
+  color: #22252b;
+  font: inherit;
+  font-weight: 800;
+}
+
+.wellness-nutrition-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.wellness-nutrition-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(23, 23, 23, 0.08);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.54);
+  color: #4f5660;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wellness-nutrition-options input {
+  width: 14px;
+  height: 14px;
+  accent-color: #226fc9;
+}
+
+.daily-fuel-context {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-height: 116px;
+  padding: 14px;
+  border: 1px solid rgba(47, 140, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(236, 246, 255, 0.58);
+}
+
+.daily-fuel-context > span {
+  color: #6d737d;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.daily-fuel-context strong {
+  color: #20242b;
+  font-size: 17px;
+}
+
+.daily-fuel-context small {
+  color: #626a75;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.daily-fuel-context .daily-fuel-context-note {
+  margin-top: 4px;
+  color: #226fc9;
+}
+
+.history-recovery-progress {
+  width: min(190px, 100%);
+  height: 5px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(38, 46, 56, 0.1);
+}
+
+.history-recovery-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #3f8b63;
+  transition: width 180ms ease;
+}
+
+.week-calendar {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(26, 31, 38, 0.08);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(128px, 1fr));
+  gap: 9px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.week-day {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 245px;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(26, 31, 38, 0.08);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.64);
+}
+
+.week-day.selected {
+  border-color: rgba(47, 140, 255, 0.46);
+  box-shadow: 0 0 0 2px rgba(47, 140, 255, 0.09);
+}
+
+.week-day-heading, .week-add-event, .week-event {
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.week-day-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0;
+  background: transparent;
+  color: #303641;
+}
+
+.week-day-heading span { font-size: 12px; font-weight: 800; color: #747b85; }
+.week-day-heading strong { font-size: 22px; }
+
+.week-day-events { display: grid; align-content: start; gap: 7px; }
+.week-day-events > small { color: #9299a3; font-size: 12px; }
+
+.week-event {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 9px;
+  border-radius: 9px;
+  text-align: left;
+  background: rgba(47, 140, 255, 0.09);
+  color: #29313d;
+}
+
+.week-event.high { background: rgba(229, 135, 75, 0.15); }
+.week-event.low { background: rgba(75, 162, 121, 0.13); }
+.week-event strong { font-size: 11px; }
+.week-event span { font-size: 12px; font-weight: 850; }
+.week-event em { overflow: hidden; color: #6a727d; font-size: 11px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+
+.week-add-event {
+  justify-self: start;
+  padding: 0;
+  background: transparent;
+  color: #226fc9;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.tournament-summary-list { display: grid; gap: 10px; margin: 0 0 18px; }
+.tournament-summary { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 18px; padding: 15px 16px; border: 1px solid rgba(180, 116, 46, 0.2); border-radius: 14px; background: rgba(255, 249, 239, 0.7); }
+.tournament-summary strong, .tournament-summary span { display: block; }
+.tournament-summary strong { color: #342b22; font-size: 16px; }
+.tournament-summary span { margin-top: 3px; color: #7b6d5b; font-size: 12px; font-weight: 750; }
+.tournament-summary-metrics { display: flex; gap: 12px; }
+.tournament-summary-metrics span { margin: 0; white-space: nowrap; }
+.tournament-summary-metrics b { color: #8a561e; }
+.tournament-modal { width: min(1180px, calc(100vw - 30px)); max-height: min(90vh, 900px); overflow: auto; }
+.tournament-modal .city-suggestions { background: #ffffff; border-color: rgba(31, 39, 48, 0.18); box-shadow: 0 18px 34px rgba(20, 27, 36, 0.22); }
+.tournament-games-header { display: flex; align-items: end; justify-content: space-between; gap: 16px; margin-top: 22px; }
+.tournament-games-header p { margin: 0; color: #68707b; font-size: 13px; }
+.tournament-games-list { display: grid; gap: 10px; margin: 13px 0 18px; }
+.tournament-game-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 14px; padding: 18px; border: 1px solid rgba(23, 23, 23, 0.08); border-radius: 12px; background: rgba(255, 255, 255, 0.54); }
+.tournament-game-fields > strong { grid-column: 1 / -1; padding: 0; color: #535b65; font-size: 12px; }
+.tournament-game-fields label { display: grid; gap: 5px; color: #626a75; font-size: 11px; font-weight: 850; }
+.tournament-game-fields input, .tournament-game-fields select { width: 100%; min-height: 36px; border: 1px solid rgba(23, 23, 23, 0.1); border-radius: 9px; padding: 0 8px; background: #fff; color: #252931; font: inherit; font-size: 12px; }
+.pain-share-button, .pain-issue-notes > .text-button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(47, 140, 255, 0.22);
+  border-radius: 9px;
+  background: rgba(47, 140, 255, 0.08);
+  color: #226fc9;
+  font-size: 12px;
+  font-weight: 850;
+}
+.pain-share-button { flex-basis: 100%; justify-self: start; }
+.pain-share-modal { width: min(520px, calc(100vw - 30px)); }
+.pain-share-modal > p:not(.eyebrow) { color: #66707d; line-height: 1.55; }
+.share-confirmation { display: flex; align-items: start; gap: 9px; margin: 18px 0; color: #49515b; font-size: 13px; font-weight: 700; line-height: 1.42; }
+.share-confirmation input { width: 16px; height: 16px; margin-top: 1px; accent-color: #226fc9; }
+.share-audit-list, .share-audit-recent { display: grid; gap: 7px; min-width: 220px; }
+.share-audit-scroll { display: grid; gap: 7px; max-height: 172px; margin-top: 8px; padding: 8px 4px 8px 0; overflow-y: auto; border-top: 1px solid rgba(23, 23, 23, 0.08); }
+.share-audit-row { display: flex; align-items: start; justify-content: space-between; gap: 10px; color: #5e6874; font-size: 12px; }
+.share-audit-row strong { color: #323940; text-transform: capitalize; }
+.share-audit-row small { display: block; margin-top: 2px; color: #89909a; }
+.share-audit-actions { position: relative; }
+.share-audit-more { min-width: 28px; min-height: 27px; border: 1px solid rgba(23, 23, 23, 0.09); border-radius: 8px; background: rgba(255, 255, 255, 0.58); color: #5d6570; font: inherit; font-weight: 900; cursor: pointer; }
+.share-audit-menu { position: absolute; z-index: 4; top: calc(100% + 4px); right: 0; padding: 5px; border: 1px solid rgba(23, 23, 23, 0.12); border-radius: 8px; background: #fff; box-shadow: 0 10px 22px rgba(24, 31, 39, 0.14); }
+.share-audit-menu button { border: 0; background: transparent; color: #c03b3b; font: inherit; font-size: 12px; font-weight: 850; cursor: pointer; }
+.settings-toggle { display: inline-flex; align-items: center; gap: 9px; margin-top: 8px; color: #3f4751; font-size: 13px; font-weight: 800; cursor: pointer; }
+.settings-toggle input { width: 17px; height: 17px; accent-color: #226fc9; }
+.onboarding-body-context { display: grid; gap: 10px; margin-top: 4px; }
+.onboarding-body-context .field-help { margin: 0; }
+@media (max-width: 900px) { .tournament-summary { grid-template-columns: 1fr; gap: 10px; } .tournament-game-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); } .tournament-game-fields > strong { grid-column: 1 / -1; padding: 0; } }
+
+.pain-issue-list {
+  display: grid;
+  gap: 10px;
+}
+
+.pain-issue-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(23, 23, 23, 0.07);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.48);
+}
+
+.pain-issue-row strong {
+  color: #25282e;
+  font-size: 14px;
+}
+
+.pain-issue-row p,
+.pain-issue-row small {
+  display: block;
+  margin-top: 4px;
+  color: #626a75;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.pain-issue-controls {
+  display: grid;
+  gap: 7px;
+  min-width: 105px;
+}
+
+.pain-issue-controls select {
+  width: 100%;
+  border: 1px solid rgba(23, 23, 23, 0.1);
+  border-radius: 9px;
+  padding: 7px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #404650;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.pain-issue-notes {
+  flex-basis: 100%;
+}
+
+.pain-issue-notes > div {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.pain-issue-notes label {
+  display: grid;
+  gap: 4px;
+  color: #626a75;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.pain-issue-notes textarea {
+  min-height: 52px;
+  resize: vertical;
+  border: 1px solid rgba(23, 23, 23, 0.09);
+  border-radius: 9px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.64);
+  color: #30343b;
+  font: inherit;
+  font-size: 12px;
+}
+
+.schedule-view-switch {
+  display: inline-flex;
+  margin: 14px 0;
+  border: 1px solid rgba(23, 23, 23, 0.08);
+  border-radius: 12px;
+  padding: 3px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.schedule-view-switch button {
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 14px;
+  background: transparent;
+  color: #69717c;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.schedule-view-switch button.active {
+  background: rgba(47, 140, 255, 0.14);
+  color: #1d65b8;
+}
+
+.schedule-list-view {
+  display: grid;
+  gap: 9px;
+}
+
+.schedule-list-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr) auto auto;
+  gap: 16px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  border-radius: 16px;
+  padding: 13px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.schedule-list-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.schedule-list-row strong { color: #292d34; font-size: 14px; }
+.schedule-list-row span, .schedule-list-row em { color: #68707b; font-size: 12px; font-style: normal; font-weight: 750; }
+
+.baseline-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.baseline-values span {
+  border: 1px solid rgba(23, 23, 23, 0.07);
+  border-radius: 12px;
+  padding: 9px;
+  background: rgba(255, 255, 255, 0.48);
+  color: #656c76;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.baseline-values span strong {
+  color: #1e65b8;
+}
+
+.baseline-values p {
+  flex-basis: 100%;
 }
 
 .breakdown-list,
@@ -3753,6 +4339,16 @@ button.event-status:hover {
   color: #16845a;
 }
 
+.day-events small.tournament, .event-card .load.tournament {
+  background: rgba(234, 184, 49, 0.22);
+  color: #8b6500;
+}
+
+.tournament-day-card {
+  border-color: rgba(208, 159, 21, 0.24);
+  background: rgba(255, 250, 224, 0.62);
+}
+
 .day-detail h3 {
   margin: 8px 0 14px;
   color: #171717;
@@ -3784,6 +4380,32 @@ button.event-status:hover {
   margin: 0;
   color: #60656f;
   font-size: 14px;
+}
+
+.day-events .tournament-calendar-chip {
+  width: 100%;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: rgba(235, 184, 52, 0.24);
+  color: #825f00;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.day-events .tournament-calendar-chip:hover,
+.day-events .tournament-calendar-chip:focus-visible {
+  background: rgba(235, 184, 52, 0.4);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .event-actions {

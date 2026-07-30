@@ -7,6 +7,7 @@ import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
 export function CheckInView({
   checkIn,
   checkouts = [],
+  dailyWellness,
   eventOptions = [],
   isSavedToday,
   isSaving,
@@ -154,10 +155,7 @@ export function CheckInView({
             options={['1 - Low', '2', '3', '4', '5 - High']}
             onChange={(value) => onUpdate('stress', value)}
           />
-          <HydrationInput
-            value={checkIn.hydrationOz ?? 0}
-            onChange={(value) => onUpdate('hydrationOz', value)}
-          />
+          <DailyFuelContext dailyWellness={dailyWellness} />
         </div>
         <div className="select-row">
           <Select
@@ -255,7 +253,7 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
     return future >= 0 ? future : 0
   }, [eventOptions, selectedEventId, todayIso])
   const activeTodayEventId = useMemo(
-    () => eventOptions.find((event) => event.date === todayIso && !completedEventIds.has(event.id))?.id ?? null,
+    () => eventOptions.find((event) => event.date === todayIso && !completedEventIds.has(event.id) && isInsideCheckInWindow(event))?.id ?? null,
     [completedEventIds, eventOptions, todayIso],
   )
   const visibleEvents = useMemo(() => {
@@ -328,7 +326,8 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
           const isSelected = event.id === selectedEventId
           const isCompleted = completedEventIds.has(event.id)
           const isLockedByCheckout = isToday && !isCompleted && event.id !== activeTodayEventId
-          const isDisabled = !isToday || isLockedByCheckout || isCompleted
+          const isOutsideCheckInWindow = isToday && !isCompleted && !isInsideCheckInWindow(event)
+          const isDisabled = !isToday || isLockedByCheckout || isOutsideCheckInWindow || isCompleted
 
           return (
             <button
@@ -337,6 +336,7 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
                 index === centerIndex ? 'centered' : '',
                 isDisabled ? 'disabled' : '',
                 isLockedByCheckout ? 'locked' : '',
+                isOutsideCheckInWindow ? 'locked' : '',
                 Math.abs(index - centerIndex) >= 2 ? 'edge' : '',
               ].filter(Boolean).join(' ')}
               disabled={isDisabled}
@@ -351,6 +351,7 @@ function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, 
               <span className="event-picker-title">{event.title || event.type}</span>
               <span className="event-picker-meta">{event.association || 'Personal'}</span>
               {isLockedByCheckout && <span className="event-picker-lock">Checkout required</span>}
+              {isOutsideCheckInWindow && !isLockedByCheckout && <span className="event-picker-lock">Available 3 hours before</span>}
             </button>
           )
         })}
@@ -395,37 +396,24 @@ function formatEventTime(value) {
   return `${displayHour}:${minute} ${suffix}`
 }
 
-const dailyHydrationTargetOz = 101.4
+function isInsideCheckInWindow(event) {
+  if (!event?.date || !event?.time) return false
+  const eventStart = new Date(`${event.date}T${event.time}`).getTime()
+  const now = Date.now()
 
-function HydrationInput({ onChange, value }) {
-  const progress = Math.max(0, Math.min(100, (Number(value) / dailyHydrationTargetOz) * 100))
+  return eventStart >= now && eventStart - now <= 3 * 60 * 60 * 1000
+}
+
+function DailyFuelContext({ dailyWellness }) {
+  const hydrationOz = Number(dailyWellness?.hydrationOz ?? 0)
+  const meals = dailyWellness?.nutritionEntries ?? []
 
   return (
-    <div className="hydration-field">
-      <span>Today's hydration</span>
-      <div className="hydration-inline">
-        <div className="hydration-control">
-          <div className="hydration-stepper">
-            <button aria-label="Increase hydration by 1 fluid ounce" onClick={() => onChange(Number(value || 0) + 1)} type="button">▲</button>
-            <span>{value}</span>
-            <button aria-label="Decrease hydration by 1 fluid ounce" disabled={Number(value || 0) <= 0} onClick={() => onChange(Math.max(0, Number(value || 0) - 1))} type="button">▼</button>
-          </div>
-          <em>fl oz</em>
-        </div>
-        <div className="water-jug">
-          <span style={{ height: `${progress}%` }} />
-        </div>
-      </div>
-      <div className="hydration-quick-actions" aria-label="Add to today's hydration">
-        {[16, 32, 64].map((amount) => (
-          <button key={amount} onClick={() => onChange(Number(value || 0) + amount)} type="button">+{amount}</button>
-        ))}
-      </div>
-      <div className="hydration-quick-actions hydration-minus-actions" aria-label="Reduce today's hydration">
-        {[16, 32, 64].map((amount) => (
-          <button key={amount} disabled={Number(value || 0) < amount} onClick={() => onChange(Math.max(0, Number(value || 0) - amount))} type="button">−{amount}</button>
-        ))}
-      </div>
+    <div className="daily-fuel-context">
+      <span>Today's fuel</span>
+      <strong>{hydrationOz} fl oz logged</strong>
+      <small>{meals.length ? `${meals.join(', ')} marked today` : 'No meals marked yet'}</small>
+      <small className="daily-fuel-context-note">Update hydration and meals on Home.</small>
     </div>
   )
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { SectionHeading } from './SectionHeading'
+import { getPositionOptions, sportOptions } from '../data/sportProfiles'
 
 export function AthleteProfileModal({ profile, onClose, onSave }) {
   const [draft, setDraft] = useState(profile ?? {})
@@ -43,11 +44,18 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
           </label>
           <label className="select-field">
             Sport
-            <input value={draft.sport ?? ''} onChange={(event) => setDraft((current) => ({ ...current, sport: event.target.value }))} />
+            <select value={draft.sport ?? ''} onChange={(event) => setDraft((current) => ({ ...current, sport: event.target.value, position: '' }))}>
+              <option value="">Choose a sport or activity</option>
+              {sportOptions.map((sport) => <option key={sport}>{sport}</option>)}
+            </select>
           </label>
           <label className="select-field">
             Position or specialty
-            <input value={draft.position ?? ''} onChange={(event) => setDraft((current) => ({ ...current, position: event.target.value }))} />
+            <select value={draft.position ?? ''} onChange={(event) => setDraft((current) => ({ ...current, position: event.target.value }))}>
+              <option value="">{draft.sport ? 'Select a position or specialty' : 'Choose a sport first'}</option>
+              {getPositionOptions(draft.sport).map((position) => <option key={position}>{position}</option>)}
+              <option value="Other">Other / not listed</option>
+            </select>
           </label>
           <label className="select-field">
             Training style
@@ -64,6 +72,26 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
               <option>Left</option>
               <option>Both / unsure</option>
             </select>
+          </label>
+          <div className="onboarding-two-col">
+            <label className="select-field">
+              Gender (optional)
+              <select value={draft.genderIdentity ?? ''} onChange={(event) => setDraft((current) => ({ ...current, genderIdentity: event.target.value }))}>
+                <option value="">Prefer not to say</option>
+                <option>Female</option>
+                <option>Male</option>
+                <option>Nonbinary</option>
+                <option>Self-described</option>
+              </select>
+            </label>
+            <label className="select-field">
+              Height in inches (optional)
+              <input inputMode="decimal" min="0" type="number" value={draft.heightInches ?? ''} onChange={(event) => setDraft((current) => ({ ...current, heightInches: event.target.value }))} />
+            </label>
+          </div>
+          <label className="select-field">
+            Weight in pounds (optional)
+            <input inputMode="decimal" min="0" type="number" value={draft.weightLbs ?? ''} onChange={(event) => setDraft((current) => ({ ...current, weightLbs: event.target.value }))} />
           </label>
           <button className="primary-button" disabled={isSaving} type="submit">{isSaving ? 'Saving...' : 'Save profile'}</button>
         </form>

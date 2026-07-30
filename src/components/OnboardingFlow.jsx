@@ -1,17 +1,6 @@
 import { useState } from 'react'
 import { SectionHeading } from './SectionHeading'
-
-const sportOptions = [
-  'Basketball',
-  'Baseball',
-  'Football',
-  'Soccer',
-  'Swimming',
-  'Track and field',
-  'Volleyball',
-  'Wrestling',
-  'Other',
-]
+import { getPositionOptions, sportOptions } from '../data/sportProfiles'
 
 export function OnboardingFlow({ associations = [], initialDisplayName = '', onComplete, onCreateAssociation }) {
   const [step, setStep] = useState('profile')
@@ -23,6 +12,9 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     position: '',
     trainingStyle: 'Team and individual',
     dominantSide: 'Right',
+    genderIdentity: '',
+    heightInches: '',
+    weightLbs: '',
   })
   const [association, setAssociation] = useState('Personal')
   const [newAssociation, setNewAssociation] = useState('')
@@ -30,7 +22,11 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   const usesAccountDisplayName = Boolean(initialDisplayName.trim())
 
   function updateProfile(field, value) {
-    setProfile((current) => ({ ...current, [field]: value }))
+    setProfile((current) => ({
+      ...current,
+      [field]: value,
+      ...(field === 'sport' ? { position: '' } : {}),
+    }))
   }
 
   function continueFromProfile(eventSubmit) {
@@ -95,11 +91,14 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
           </label>
           <label className="select-field">
             Position or event specialty
-            <input
+            <select
               value={profile.position}
               onChange={(event) => updateProfile('position', event.target.value)}
-              placeholder="Setter, midfielder, sprinter, etc."
-            />
+            >
+              <option value="">{profile.sport ? 'Select a position or specialty' : 'Choose a sport first'}</option>
+              {getPositionOptions(profile.sport).map((position) => <option key={position}>{position}</option>)}
+              <option value="Other">Other / not listed</option>
+            </select>
           </label>
           <div className="onboarding-two-col">
             <label className="select-field">
@@ -117,6 +116,29 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
                 <option>Left</option>
                 <option>Both / unsure</option>
               </select>
+            </label>
+          </div>
+          <div className="onboarding-body-context">
+            <p className="field-help">Optional body context helps keep sport and fueling guidance realistic. It is not used to judge your body or make a medical decision.</p>
+            <div className="onboarding-two-col">
+              <label className="select-field">
+                Gender
+                <select value={profile.genderIdentity} onChange={(event) => updateProfile('genderIdentity', event.target.value)}>
+                  <option value="">Prefer not to say</option>
+                  <option>Female</option>
+                  <option>Male</option>
+                  <option>Nonbinary</option>
+                  <option>Another identity</option>
+                </select>
+              </label>
+              <label className="select-field">
+                Height (inches)
+                <input inputMode="decimal" min="0" type="number" value={profile.heightInches} onChange={(event) => updateProfile('heightInches', event.target.value)} />
+              </label>
+            </div>
+            <label className="select-field">
+              Weight (lb)
+              <input inputMode="decimal" min="0" type="number" value={profile.weightLbs} onChange={(event) => updateProfile('weightLbs', event.target.value)} />
             </label>
           </div>
           <button className="primary-button" type="submit">Continue</button>

@@ -338,7 +338,7 @@ function getSeverity(pain) {
 }
 
 function isContactSession(session) {
-  return ['Team practice', 'Game day', 'Tournament'].includes(session)
+  return ['Team practice', 'Game', 'Game day', 'Tournament'].includes(session)
 }
 
 function getReasons(checkIn) {
@@ -346,16 +346,16 @@ function getReasons(checkIn) {
   const reasons = []
 
   if (checkIn.sleep < 7) reasons.push('low sleep')
-  if (checkIn.energy <= 4) reasons.push('low energy')
-  if (checkIn.soreness >= 6) reasons.push('high soreness')
-  if (checkIn.fatigue >= 7) reasons.push('high fatigue')
-  if (checkIn.stress === 'High') reasons.push('high stress')
+  if (Number(checkIn.energy) <= 2) reasons.push('low energy')
+  if (Number(checkIn.soreness) >= 4) reasons.push('high soreness')
+  if (Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
+  if (String(checkIn.stress).includes('High')) reasons.push('high stress')
   if (['Hard', 'Game'].includes(checkIn.yesterdayLoad)) {
     reasons.push(`a ${checkIn.yesterdayLoad.toLowerCase()} session yesterday`)
   }
   if (checkIn.hydration === 'Poor') reasons.push('poor hydration or nutrition')
   if (pain > 0) {
-    reasons.push(`${pain}/10 ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()}`)
+    reasons.push(`${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()} symptoms`)
   }
 
   return reasons
@@ -534,7 +534,7 @@ function getPersonalAction(checkIn, status, redFlag) {
   const training = trainingProfiles[checkIn.session] ?? trainingProfiles['Team practice']
 
   if (redFlag || status.label === 'Stop and Check In') {
-    return `This combination needs an adult, coach, athletic trainer, or medical check before training: ${pain}/10 ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()} during ${checkIn.hurtsWhen.toLowerCase()}.`
+    return `This combination needs an adult, coach, athletic trainer, or medical check before training: ${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()} symptoms during ${checkIn.hurtsWhen.toLowerCase()}.`
   }
 
   if (pain === 0) {

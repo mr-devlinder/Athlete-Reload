@@ -1,16 +1,24 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
+import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
+import { getBaselineComparison, getPersonalBaseline } from '../utils/baselines'
+import { PainShareModal } from './PainShareModal'
 
 export function HomeView({
   checkouts,
+  dailyWellness,
   history,
+  painIssues = [],
   painReports = [],
   schedule,
   onGoCheckIn,
   onOpenCheckout,
+  onSavePainIssue,
+  onSharePainIssue,
+  onUpdateWellness,
 }) {
   const now = new Date()
   const recentHistory = getEntriesSince(history, 6)
@@ -32,6 +40,8 @@ export function HomeView({
     .filter((entry) => entry.date)
     .slice(0, 14)
     .reverse()
+  const baseline = getPersonalBaseline(history, nextEvent)
+  const weeklySignals = getWeeklySignals(history)
 
   return (
     <div className="home-view" data-tour="home-page">
@@ -91,6 +101,7 @@ export function HomeView({
       </section>
 
       <section className="home-panels dashboard-main">
+        <DailyWellnessCard wellness={dailyWellness} onUpdate={onUpdateWellness} />
         <article className="home-panel today-flow-panel">
           <div className="panel-heading">
             <span>Today</span>
@@ -158,6 +169,46 @@ export function HomeView({
       </section>
 
       <section className="home-panels">
+        <article className="home-panel weekly-signals-panel">
+          <div className="panel-heading">
+            <span>Weekly signals</span>
+            <strong>Last 7 days</strong>
+          </div>
+          <h3>Readiness, sleep, fatigue, and soreness</h3>
+          {weeklySignals.length < 4 ? (
+            <p>Keep checking in. This view begins after four entries so a single day never looks like a trend.</p>
+          ) : (
+            <ResponsiveContainer height={180} width="100%">
+              <AreaChart accessibilityLayer={false} data={weeklySignals} margin={{ bottom: 2, left: -20, right: 6, top: 8 }}>
+                <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.12)" strokeDasharray="3 5" vertical={false} />
+                <XAxis axisLine={false} dataKey="date" tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false} />
+                <YAxis axisLine={false} domain={[0, 100]} hide />
+                <Area dataKey="readiness" fill="rgba(38, 185, 126, 0.12)" fillOpacity={1} stroke="#26b97e" strokeWidth={2.4} type="monotone" />
+                <Area dataKey="sleep" fill="transparent" stroke="#2f8cff" strokeWidth={2} type="monotone" />
+                <Area dataKey="fatigue" fill="transparent" stroke="#f3b43f" strokeDasharray="5 4" strokeWidth={2} type="monotone" />
+                <Area dataKey="soreness" fill="transparent" stroke="#ff6f61" strokeDasharray="2 4" strokeWidth={2} type="monotone" />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+          <div className="signal-legend"><span className="readiness">Readiness</span><span className="sleep">Sleep</span><span className="fatigue">Fatigue</span><span className="soreness">Soreness</span></div>
+        </article>
+        <article className="home-panel baseline-panel">
+          <div className="panel-heading">
+            <span>Personal baseline</span>
+            <strong>{baseline.confidence}</strong>
+          </div>
+          <h3>{baseline.confidence === 'Not ready' ? 'Learning your normal.' : `${baseline.eventType} context`}</h3>
+          {baseline.confidence === 'Not ready' ? (
+            <p>{Math.max(0, 7 - baseline.sampleSize)} more saved check-in{baseline.sampleSize === 6 ? '' : 's'} needed before comparisons appear.</p>
+          ) : (
+            <div className="baseline-values">
+              <span><strong>{baseline.values.readiness}</strong> readiness</span>
+              <span><strong>{baseline.values.sleep}h</strong> sleep</span>
+              <span><strong>{baseline.values.fatigue}/5</strong> fatigue</span>
+              {getBaselineComparison(history[0] ?? {}, baseline).slice(0, 1).map((comparison) => <p key={comparison}>{comparison}</p>)}
+            </div>
+          )}
+        </article>
         <article className="home-panel">
           <div className="panel-heading">
             <span>Readiness</span>
@@ -197,6 +248,8 @@ export function HomeView({
             </span>
           </div>
         </article>
+
+        <PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} />
       </section>
 
       <section className="home-panels">
@@ -228,6 +281,197 @@ export function HomeView({
         </article>
       </section>
     </div>
+  )
+}
+
+function getWeeklySignals(history) {
+  const latestByDate = new Map()
+
+  history.forEach((entry) => {
+    if (!entry.date || latestByDate.has(entry.date)) return
+    latestByDate.set(entry.date, entry)
+  })
+
+  return [...latestByDate.values()]
+    .sort((first, second) => first.date.localeCompare(second.date))
+    .slice(-7)
+    .map((entry) => ({
+      date: format(parseISO(entry.date), 'M/d'),
+      fatigue: Number(entry.fatigue ?? 0) * 20,
+      readiness: Number(entry.score ?? 0),
+      sleep: Math.min(100, (Number(entry.sleep ?? 0) / 10) * 100),
+      soreness: Number(entry.soreness ?? 0) * 20,
+    }))
+}
+
+function PainIssuesCard({ issues, painReports, onSaveIssue, onShareIssue }) {
+  const reportGroups = getPainIssueSummaries(painReports)
+  const [shareTarget, setShareTarget] = useState(null)
+
+  return (
+    <article className="home-panel pain-issues-panel">
+      <div className="panel-heading">
+        <span>Pain reports</span>
+        <strong>{reportGroups.length ? `${reportGroups.length} area${reportGroups.length === 1 ? '' : 's'}` : 'Clear'}</strong>
+      </div>
+      <h3>Track active issues</h3>
+      {reportGroups.length === 0 ? (
+        <p>No reported pain areas to track right now.</p>
+      ) : (
+        <div className="pain-issue-list">
+          {reportGroups.slice(0, 4).map((summary) => {
+            const issue = issues.find((item) => item.bodyPart === summary.bodyPart && item.side === summary.side)
+            const draft = issue ?? {
+              bodyPart: summary.bodyPart,
+              firstReportedDate: summary.firstReportedDate,
+              side: summary.side,
+              status: 'active',
+            }
+
+            return (
+              <article className="pain-issue-row" key={summary.key}>
+                <div>
+                  <strong>{summary.label}</strong>
+                  <p>Now {summary.currentSeverity}/10 · Peak {summary.peakSeverity}/10 · First reported {summary.firstReportedDate}</p>
+                  {summary.trigger && <small>Trigger: {summary.trigger}</small>}
+                </div>
+                <div className="pain-issue-controls">
+                  <select value={draft.status} onChange={(event) => onSaveIssue?.({ ...draft, status: event.target.value })}>
+                    <option value="active">Active</option>
+                    <option value="monitoring">Monitoring</option>
+                    <option value="evaluated">Evaluated</option>
+                    <option value="resolved">Resolved</option>
+                  </select>
+                  {!issue && <button className="secondary-button compact-action" onClick={() => onSaveIssue?.(draft)} type="button">Track</button>}
+                </div>
+                {issue && <PainIssueNotes issue={issue} onSave={onSaveIssue} />}
+                <button className="text-button pain-share-button" onClick={() => setShareTarget({ issue, summary })} type="button">Create shareable report</button>
+              </article>
+            )
+          })}
+        </div>
+      )}
+      {shareTarget && <PainShareModal issue={shareTarget.issue} summary={shareTarget.summary} onClose={() => setShareTarget(null)} onConfirm={onShareIssue} />}
+    </article>
+  )
+}
+
+function PainIssueNotes({ issue, onSave }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [draft, setDraft] = useState(issue)
+
+  function saveNotes() {
+    onSave?.({ ...draft, id: issue.id })
+    setIsOpen(false)
+  }
+
+  return (
+    <div className="pain-issue-notes">
+      <button className="text-button" onClick={() => setIsOpen((current) => !current)} type="button">{isOpen ? 'Hide notes' : 'Add notes'}</button>
+      {isOpen && (
+        <div>
+          <label>Athlete notes<textarea value={draft.athleteNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, athleteNotes: event.target.value }))} /></label>
+          <label>Trainer notes<textarea value={draft.trainerNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, trainerNotes: event.target.value }))} /></label>
+          <label>Clinician notes<textarea value={draft.clinicianNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, clinicianNotes: event.target.value }))} /></label>
+          <button className="secondary-button compact-action" onClick={saveNotes} type="button">Save notes</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function getPainIssueSummaries(painReports) {
+  const summaries = new Map()
+
+  for (const report of painReports) {
+    if (Number(report.severity) <= 0) continue
+    const key = `${report.bodyPart}:${report.side ?? 'center'}`
+    const current = summaries.get(key)
+    const label = formatPainAreaLabel(report)
+    const severity = Math.round(Number(report.severity) / 10)
+
+    if (!current) {
+      summaries.set(key, {
+        bodyPart: report.bodyPart,
+        currentSeverity: severity,
+        firstReportedDate: report.date,
+        key,
+        label,
+        latestDate: report.date,
+        peakSeverity: severity,
+        side: report.side ?? 'center',
+        trigger: report.triggerMovement,
+      })
+      continue
+    }
+
+    current.firstReportedDate = current.firstReportedDate < report.date ? current.firstReportedDate : report.date
+    current.peakSeverity = Math.max(current.peakSeverity, severity)
+    if (report.date >= current.latestDate) {
+      current.currentSeverity = severity
+      current.latestDate = report.date
+      current.trigger = report.triggerMovement
+    }
+  }
+
+  return [...summaries.values()].sort((first, second) => second.latestDate.localeCompare(first.latestDate))
+}
+
+function formatPainAreaLabel(report) {
+  const side = report.side && report.side !== 'center' && !String(report.bodyPart).toLowerCase().startsWith(report.side.toLowerCase())
+    ? `${report.side} `
+    : ''
+  return `${side}${report.bodyPart}`.replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+const nutritionOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Post-training meal']
+
+function DailyWellnessCard({ wellness, onUpdate }) {
+  const hydrationOz = Math.max(0, Number(wellness?.hydrationOz ?? 0))
+  const nutritionEntries = wellness?.nutritionEntries ?? []
+
+  function setHydration(value) {
+    onUpdate?.({
+      ...wellness,
+      hydrationOz: Math.max(0, Number(value) || 0),
+      nutritionEntries,
+    })
+  }
+
+  function toggleNutrition(entry) {
+    const nextEntries = nutritionEntries.includes(entry)
+      ? nutritionEntries.filter((item) => item !== entry)
+      : [...nutritionEntries, entry]
+
+    onUpdate?.({ ...wellness, hydrationOz, nutritionEntries: nextEntries })
+  }
+
+  return (
+    <article className="home-panel daily-wellness-panel">
+      <div className="panel-heading">
+        <span>Today&apos;s fuel</span>
+        <strong>{hydrationOz} fl oz</strong>
+      </div>
+      <h3>Hydration and nutrition</h3>
+      <p>Keep this current throughout the day so event recommendations have the right context.</p>
+      <div className="wellness-hydration-controls">
+        <button onClick={() => setHydration(hydrationOz - 16)} type="button">-16</button>
+        <button onClick={() => setHydration(hydrationOz + 16)} type="button">+16</button>
+        <button onClick={() => setHydration(hydrationOz + 32)} type="button">+32</button>
+        <label>
+          <span>Fluid ounces</span>
+          <input defaultValue={hydrationOz} min="0" onBlur={(event) => setHydration(event.target.value)} type="number" />
+        </label>
+      </div>
+      <div className="wellness-nutrition-options">
+        {nutritionOptions.map((entry) => (
+          <label key={entry}>
+            <input checked={nutritionEntries.includes(entry)} onChange={() => toggleNutrition(entry)} type="checkbox" />
+            <span>{entry}</span>
+          </label>
+        ))}
+      </div>
+    </article>
   )
 }
 

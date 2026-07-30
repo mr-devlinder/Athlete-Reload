@@ -5,13 +5,18 @@ import { format, parseISO } from 'date-fns'
 const equipmentOptions = ['Exercise mat', 'Foam roller', 'Resistance band', 'Massage ball', 'Stationary bike', 'Pool', 'Compression equipment']
 
 const fallbackRoutine = [
-  { area: 'Whole body', durationSeconds: 120, instruction: 'Walk easily and let your breathing settle.', name: 'Easy walk', side: 'Both sides', type: 'Cooldown' },
-  { area: 'Ankles', reps: 10, instruction: 'Make slow circles through a comfortable range.', name: 'Ankle circles', side: 'Each side', type: 'Mobility' },
-  { area: 'Hips', reps: 6, instruction: 'Move smoothly without forcing the end range.', name: 'Hip rotations', side: 'Each side', type: 'Mobility' },
-  { area: 'Lower body', durationSeconds: 20, instruction: 'Feel mild tension only. Stop if the feeling becomes sharp.', name: 'Comfortable calf stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Spine', reps: 8, instruction: 'Move slowly through a comfortable range and do not force your back.', name: 'Cat-cow', side: 'Both sides', type: 'Mobility' },
+  { area: 'Upper back', reps: 8, instruction: 'Rotate from the upper back while keeping the movement easy and controlled.', name: 'Open-book thoracic rotation', side: 'Each side', type: 'Mobility' },
+  { area: 'Shoulders', reps: 10, instruction: 'Make smooth circles without pinching or sharp pain in the shoulder.', name: 'Shoulder circles', side: 'Both sides', type: 'Mobility' },
+  { area: 'Chest', durationSeconds: 30, instruction: 'Feel a mild opening through the chest, never sharp pain in the shoulder.', name: 'Doorway chest stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Hips', reps: 10, instruction: 'Switch sides under control and stay in a comfortable range.', name: '90/90 hip switches', side: 'Both sides', type: 'Mobility' },
+  { area: 'Adductors', reps: 8, instruction: 'Keep the motion gentle and stop before discomfort becomes sharp.', name: 'Adductor rock-back', side: 'Each side', type: 'Mobility' },
+  { area: 'Hip flexors', durationSeconds: 30, instruction: 'Keep ribs stacked over hips and feel a gentle stretch at the front of the hip.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Hamstrings', durationSeconds: 30, instruction: 'Use a light, comfortable stretch only. Do not push into pain.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Calves', durationSeconds: 30, instruction: 'Keep the heel down and feel gentle tension through the calf.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
 ]
 
-export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, generationStatus = 'idle', nextEvent, onGeneratePlan, onSaveRecoveryPlan, onUpdateRecoveryStep, schedule = [] }) {
+export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', nextEvent, onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, onUpdateRecoveryStep, savedRoutines = [], schedule = [] }) {
   const latestCheckout = useMemo(
     () => [...checkouts].sort((first, second) => getDateValue(second) - getDateValue(first))[0] ?? null,
     [checkouts],
@@ -31,7 +36,10 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [routineIndex, setRoutineIndex] = useState(0)
   const [secondsLeft, setSecondsLeft] = useState(0)
   const [routinePaused, setRoutinePaused] = useState(false)
+  const [completedRoutineExercises, setCompletedRoutineExercises] = useState(() => new Set())
   const [routineFeedback, setRoutineFeedback] = useState(null)
+  const [hurtReport, setHurtReport] = useState(null)
+  const [excludedExercises, setExcludedExercises] = useState([])
   const [routineComplete, setRoutineComplete] = useState(false)
   const [feedback, setFeedback] = useState({ completion: '', feeling: '', tightness: '', pain: '' })
   const [isSavingPlan, setIsSavingPlan] = useState(false)
@@ -42,6 +50,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const routine = buildRoutine(
     plan?.routine?.exercises?.length ? plan.routine.exercises : fallbackRoutine,
     getTimeAvailableMinutes(timeAvailable),
+    excludedExercises,
   )
   const currentExercise = routine[routineIndex]
   const isPainAware = Boolean(plan?.routine?.painAware || plan?.painAware)
@@ -110,10 +119,15 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     setSecondsLeft(Number(currentExercise?.durationSeconds ?? 0))
   }
 
-  function advanceExercise() {
+  function advanceExercise(completion = 'complete') {
+    if (completion === 'complete' && currentExercise) {
+      setCompletedRoutineExercises((current) => new Set([...current, `${currentExercise.name}-${currentExercise.side ?? ''}`]))
+    }
+
     if (routineIndex >= routine.length - 1) {
       setRoutineStarted(false)
       setRoutineComplete(true)
+      if (isReplayingSavedRoutine) onCompleteSavedRoutine?.({ completedAt: new Date().toISOString(), exerciseCount: routine.length })
       return
     }
 
@@ -122,6 +136,33 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     setRoutinePaused(false)
     setSecondsLeft(Number(nextExercise?.durationSeconds ?? 0))
     setRoutineStarted(false)
+  }
+
+  function reportExercisePain() {
+    setRoutinePaused(true)
+    setHurtReport({ area: currentExercise?.area ?? '', sameIssue: '', severity: '', type: '' })
+  }
+
+  async function handleHurtReport(action) {
+    const exerciseName = currentExercise?.name
+    const report = {
+      ...hurtReport,
+      checkoutId: latestCheckout?.id ?? null,
+      exercise: exerciseName,
+    }
+    await onReportRoutinePain?.(report)
+    setHurtReport(null)
+
+    if (action === 'end') {
+      setRoutineStarted(false)
+      setRoutineComplete(true)
+    } else {
+      setExcludedExercises((current) => [...new Set([...current, getExerciseFamily(exerciseName)])])
+      setRoutineIndex((current) => Math.max(0, Math.min(current, routine.length - 2)))
+      setRoutineStarted(false)
+      setRoutinePaused(false)
+      setSecondsLeft(0)
+    }
   }
 
   function setStepStatus(stepId, status) {
@@ -155,6 +196,8 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     setSkippedSteps(new Set())
     setRoutineFeedback(null)
     setRoutineComplete(false)
+    setCompletedRoutineExercises(new Set())
+    setExcludedExercises([])
     setRoutineIndex(0)
     setRoutineStarted(false)
     setEquipmentTouched(true)
@@ -173,6 +216,10 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     const saved = await onSaveRecoveryPlan?.({
       ...plan,
       stepStatuses,
+      routineProgress: {
+        completed: completedRoutineExercises.size,
+        total: routine.length,
+      },
       ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
     })
     setIsSavingPlan(false)
@@ -272,6 +319,19 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
             </div>
             {generationStatus === 'error' && <p className="recovery-error">The recovery plan could not be generated. Check your connection and try again.</p>}
           </div>
+          {savedRoutines.some((routine) => routine.isFavorite) && (
+            <div className="saved-routine-library">
+              <strong>Favorite routines</strong>
+              <div>
+                {savedRoutines.filter((routine) => routine.isFavorite).map((routine) => (
+                  <button key={routine.id} onClick={() => onReplaySavedRoutine?.(routine)} type="button">
+                    <span>{routine.title}</span>
+                    <em>Replay</em>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       ) : (
         <section className="recovery-empty glass-panel">
@@ -353,6 +413,20 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
             </div>
             <p className="routine-intro">{plan.routine?.summary ?? 'Use this as an optional way to relax and maintain comfortable mobility, not as a guaranteed repair.'}</p>
             {isPainAware && <div className="pain-aware-callout">Your reported symptoms changed this routine. Do not stretch a painful area through discomfort.</div>}
+            {!routineComplete && (
+              <details className="routine-preview">
+                <summary>View routine plan ({routine.length} exercises)</summary>
+                <ol>
+                  {routine.map((exercise, index) => (
+                    <li key={`${exercise.name}-${exercise.side}-${index}`}>
+                      <strong>{exercise.name}</strong>
+                      <span>{exercise.side ?? 'Both sides'} · {exercise.area ?? 'Comfortable range'} · {exercise.durationSeconds ? `${exercise.durationSeconds}s` : `${exercise.reps ?? 6} reps`}</span>
+                      {exercise.why && <em>{exercise.why}</em>}
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
             {routineComplete ? (
               <div className="recovery-routine-complete">
                 <p className="eyebrow">Routine complete</p>
@@ -365,6 +439,9 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <span>Exercise {routineIndex + 1} of {routine.length}</span>
                 <strong>{currentExercise?.type ?? 'Mobility'}</strong>
               </div>
+              <div className="routine-progress" aria-label={`${routineIndex + 1} of ${routine.length} exercises complete`}>
+                <span style={{ width: `${((routineIndex + 1) / Math.max(1, routine.length)) * 100}%` }} />
+              </div>
               <h3>{currentExercise?.name}</h3>
               <p className="routine-side">{currentExercise?.side ?? 'Both sides'} · {currentExercise?.area ?? 'Comfortable range'}</p>
               <p>{currentExercise?.instruction}</p>
@@ -372,15 +449,17 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               {currentExercise?.avoid && <small>Do not feel: {currentExercise.avoid}</small>}
               {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
               <div className="routine-player-actions">
-                {!routineStarted ? (
-                  <button className="primary-button" onClick={startExercise} type="button">Start exercise</button>
-                ) : currentExercise?.durationSeconds && secondsLeft === 0 ? (
-                  <button className="primary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Next exercise'}</button>
-                ) : (
+                  {!routineStarted ? (
+                    <button className="primary-button" onClick={startExercise} type="button">Start exercise</button>
+                  ) : currentExercise?.durationSeconds && secondsLeft === 0 ? (
+                    <button className="primary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Next exercise'}</button>
+                  ) : !currentExercise?.durationSeconds ? (
+                    <button className="primary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Complete and continue'}</button>
+                  ) : (
                   <button className="secondary-button" onClick={() => setRoutinePaused((current) => !current)} type="button">{routinePaused ? 'Resume' : 'Pause'}</button>
                 )}
-                <button className="secondary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Skip'}</button>
-                <button className="text-button danger-text" onClick={() => setRoutineFeedback('pain')} type="button">This hurts</button>
+                <button className="secondary-button" onClick={() => advanceExercise('skipped')} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Skip'}</button>
+                <button className="text-button danger-text" onClick={reportExercisePain} type="button">This hurts</button>
               </div>
               {routineFeedback === 'pain' && <div className="routine-feedback"><strong>Stop the movement.</strong><p>Tell us what changed so a gentler substitute can be used.</p><div className="feedback-actions"><button onClick={() => setRoutineFeedback('substitute')} type="button">Use a gentler substitute</button><button onClick={() => setRoutineFeedback('end')} type="button">End this routine section</button></div></div>}
               {routineFeedback === 'substitute' && <div className="routine-feedback"><strong>Skip this movement for now.</strong><p>Do not test the painful movement again right now. Continue only with comfortable, pain-free options.</p></div>}
@@ -395,12 +474,28 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <label>Pain<select value={feedback.pain} onChange={(event) => setFeedback({ ...feedback, pain: event.target.value })}><option value="">0–10</option>{Array.from({ length: 11 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
               </div>
               {feedback.feeling === 'Worse' && <p className="recovery-error">Feeling temporarily looser is not proof that an injury has healed. Stop and tell a qualified adult if symptoms worsen.</p>}
-              <button className="primary-button" disabled={isSavingPlan} onClick={saveRecoveryPlan} type="button">{isSavingPlan ? 'Saving recovery plan...' : 'Save recovery plan'}</button>
-              {generatedPlanSaved && <p className="recovery-saved-message">Saved to your Recovery history.</p>}
+              {!isReplayingSavedRoutine && <button className="primary-button" disabled={isSavingPlan} onClick={saveRecoveryPlan} type="button">{isSavingPlan ? 'Saving recovery plan...' : 'Save recovery plan'}</button>}
+              {isReplayingSavedRoutine && <p className="recovery-saved-message">Completed a favorite routine. This replay will not create a new recovery plan.</p>}
+              {!isReplayingSavedRoutine && generatedPlanSaved && <p className="recovery-saved-message">Saved to your Recovery history.</p>}
             </div>}
           </section>
 
         </>
+      )}
+      {hurtReport && createPortal(
+        <div className="modal-backdrop" onClick={() => setHurtReport(null)}>
+          <section className="event-modal routine-hurt-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            <p className="eyebrow">Stop this movement</p>
+            <h2>Tell us what changed.</h2>
+            <label className="compact-field">Where does it hurt?<input value={hurtReport.area} onChange={(event) => setHurtReport((current) => ({ ...current, area: event.target.value }))} /></label>
+            <label className="compact-field">What does it feel like?<select value={hurtReport.type} onChange={(event) => setHurtReport((current) => ({ ...current, type: event.target.value }))}><option value="">Choose</option><option>Sharp</option><option>Aching</option><option>Pulling</option><option>Unstable</option><option>Numb or tingling</option></select></label>
+            <label className="compact-field">Pain level<select value={hurtReport.severity} onChange={(event) => setHurtReport((current) => ({ ...current, severity: event.target.value }))}><option value="">Choose</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}/10</option>)}</select></label>
+            <label className="compact-field">Was this a previously reported issue?<select value={hurtReport.sameIssue} onChange={(event) => setHurtReport((current) => ({ ...current, sameIssue: event.target.value }))}><option value="">Choose</option><option>Yes</option><option>No</option><option>Not sure</option></select></label>
+            <p className="recovery-error">Do not push through sharp, worsening, unstable, numb, or tingling symptoms.</p>
+            <div className="routine-hurt-actions"><button className="secondary-button" onClick={() => handleHurtReport('skip')} type="button">Skip this movement</button><button className="remove-button" onClick={() => handleHurtReport('end')} type="button">End routine</button></div>
+          </section>
+        </div>,
+        document.body,
       )}
     </div>
   )
@@ -442,11 +537,12 @@ function getTimeAvailableMinutes(value) {
   return Number.isFinite(minutes) ? Math.max(10, Math.min(30, minutes)) : 15
 }
 
-function buildRoutine(routine, availableMinutes) {
+function buildRoutine(routine, availableMinutes, excludedExercises = []) {
+  const excluded = new Set(excludedExercises)
   const individualSteps = routine.flatMap((exercise) => {
     const side = String(exercise.side ?? '').toLowerCase()
 
-    if (!/each side|left and right|right and left/.test(side)) return [exercise]
+    if (!/each side|left and right|right and left/.test(side)) return excluded.has(getExerciseFamily(exercise.name)) ? [] : [exercise]
 
     return ['Left', 'Right'].map((currentSide) => ({
       ...exercise,
@@ -454,25 +550,65 @@ function buildRoutine(routine, availableMinutes) {
         ? exercise.name
         : `${exercise.name} - ${currentSide}`,
       side: `${currentSide} side`,
-    }))
+    })).filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
   })
 
-  return constrainRoutine(individualSteps, availableMinutes)
+  const alternatives = fallbackRoutine.filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)) && !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
+  return constrainRoutine(individualSteps, availableMinutes, alternatives)
 }
 
-function constrainRoutine(routine, availableMinutes) {
-  const maxSeconds = availableMinutes * 60
+function getExerciseFamily(name = '') {
+  return String(name).replace(/\s*-\s*(left|right)$/i, '').trim().toLowerCase()
+}
+
+function constrainRoutine(routine, availableMinutes, alternatives = []) {
+  const targetSeconds = availableMinutes * 60
   let totalSeconds = 0
   const constrained = []
 
-  for (const exercise of routine) {
+  for (const exercise of [...routine, ...alternatives]) {
     const duration = Number(exercise.durationSeconds ?? 45)
-    if (constrained.length > 0 && totalSeconds + duration > maxSeconds) break
-    constrained.push(exercise)
-    totalSeconds += duration
+    const remaining = targetSeconds - totalSeconds
+
+    if (remaining <= 0) break
+
+    if (duration <= remaining) {
+      constrained.push(exercise)
+      totalSeconds += duration
+      continue
+    }
+
+    if (remaining >= 20 && exercise.durationSeconds) {
+      constrained.push({ ...exercise, durationSeconds: remaining })
+      totalSeconds += remaining
+    }
   }
 
-  return constrained.length > 0 ? constrained : routine.slice(0, 1)
+  // AI routines normally supply a complete sequence. This only fills a short
+  // fallback with familiar movements so the selected time remains honest.
+  let fallbackIndex = 0
+  while (totalSeconds < targetSeconds && alternatives.length > 0) {
+    const exercise = alternatives[fallbackIndex % alternatives.length]
+    const remaining = targetSeconds - totalSeconds
+    const duration = Number(exercise.durationSeconds ?? 45)
+    const fillDuration = Math.min(duration, remaining)
+
+    if (fillDuration < 20) {
+      const last = constrained.at(-1)
+      if (last?.durationSeconds) last.durationSeconds += fillDuration
+      break
+    }
+
+    constrained.push({
+      ...exercise,
+      durationSeconds: fillDuration,
+      name: fallbackIndex < alternatives.length ? exercise.name : `${exercise.name} - Repeat`,
+    })
+    totalSeconds += fillDuration
+    fallbackIndex += 1
+  }
+
+  return constrained.length > 0 ? constrained : alternatives.slice(0, 1)
 }
 
 function formatSeconds(value) {

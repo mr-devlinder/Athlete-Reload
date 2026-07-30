@@ -107,8 +107,12 @@ Calibration rules:
 - Always return 2-4 concrete items in each of preparation, during, and recovery. Those three arrays power the visible event-plan cards, so do not leave them empty.
 - Do not use numeric pain cutoffs or phrases such as "exceeds 3/10" in the recommendation. Describe meaningful changes plainly, such as sharp pain, worsening symptoms, altered movement, or inability to perform the motion normally.
 - Use the event type, sport, association, duration, intensity, surface, environment, and every selected pain area together. Tailor each modification to the athlete's sport and the actual event demands: upper-body symptoms may affect overhead work, throwing, catching, lifting, bracing, or contact; lower-body symptoms may affect sprinting, jumping, cutting, kicking, landing, or lifting; trunk symptoms may affect rotation, bracing, and contact. Head or neck symptoms require the red-flag rules.
+- When event.tournament is present, account for the tournament date range and its scheduled games. A short turnaround to the next match should favor practical recovery, symptom monitoring, and avoiding unnecessary extra work; do not treat a tournament game like an isolated event.
 - Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, illness symptoms, sleep quality, recovery actions, and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, and saved recoveryPlan action statuses or feedback as the prior-session context. Notice when an athlete repeatedly cannot complete an important recovery action, but do not shame them; make the next plan practical and prioritize the most important missing action.
 - Treat hydrationOz as the athlete's cumulative fluid total so far today, measured at the time of this event. Compare it with the event start time: an early-morning event should not be judged as if the athlete had the whole day to hydrate, while an evening event reasonably has a higher expected total. Never penalize an early event simply because the daily total is not yet high.
+- When dailyWellness is present, use its cumulative hydration and completed nutrition entries as the athlete's live day context. Mention missing meal or hydration follow-through only as a practical preparation priority, never as a diagnosis and never with rigid calorie, body-weight, or fluid prescriptions.
+- Use the athlete profile's sport, position, training style, dominant side, and optional body context to tailor activity choices. Do not use optional height, weight, or gender data to judge body size, health, or worth; use it only as limited context alongside the sport, event, symptoms, and the athlete's own history.
+- When baseline is present and its confidence is Building or Established, use it as one balanced context signal. Explain meaningful differences from the athlete's usual pattern without treating one unusual value as proof of injury or using baseline data to overrule red-flag symptoms.
 - Base the recommendation on the selected event type and planned intensity. A high-intensity game, gym session, recovery day, and team practice should not get the same advice.
 - Use the athlete profile's sport, position, training style, and dominant side when they are provided. The same pain can affect participation differently by sport and event: shoulder symptoms matter more for volleyball serving or hitting than for a lower-body gym session, while a knee issue matters more for jumping, cutting, and running.
 - Do not assume an athlete must stop all activity because one body area hurts. Explain which movements or demands of this specific event are affected and what can remain controlled if there are no red flags.
@@ -222,7 +226,7 @@ JSON shape:
   "action": "one short paragraph describing the priority tonight",
   "recoverySteps": [{"title":"Drink fluids","why":"Why this matters","when":"Right now"}],
   "timeline": [{"title":"Right now","items":["..."]},{"title":"Within two hours","items":["..."]},{"title":"Tonight","items":["..."]},{"title":"Tomorrow morning","items":["..."]}],
-  "routine": {"title":"sport-aware routine title","summary":"optional comfortable routine explanation","durationMinutes":10,"painAware":true,"exercises":[{"name":"Easy walk","type":"Cooldown","area":"Whole body","side":"Both sides","durationSeconds":120,"instruction":"...","feel":"easy breathing","avoid":"sharp pain"}]},
+  "routine": {"title":"sport-aware routine title","summary":"optional comfortable routine explanation","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","durationSeconds":30,"instruction":"...","why":"short reason this movement fits this session","feel":"...","avoid":"..."}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -355,6 +359,7 @@ function normalizeRoutine(value: any, payload?: any) {
         : 0,
       side: stringOrFallback(exercise?.side, 'Both sides'),
       type: stringOrFallback(exercise?.type, 'Mobility'),
+      why: stringOrFallback(exercise?.why, 'This fits the recovery plan for the session you completed.'),
     }))
     : []
 

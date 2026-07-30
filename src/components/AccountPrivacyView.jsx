@@ -10,12 +10,16 @@ export function AccountPrivacyView({
   history,
   onAccountDeleted,
   onClearAllHealthHistory,
+  onDeleteShareAuditLog,
+  onUpdateReminderPreference,
   painReports,
   preferences,
   schedule,
   session,
+  shareAuditLogs = [],
 }) {
   const [message, setMessage] = useState('')
+  const [openShareAuditAction, setOpenShareAuditAction] = useState(null)
   const [activeSection, setActiveSection] = useState('account')
   const [identities, setIdentities] = useState([])
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false)
@@ -459,6 +463,15 @@ export function AccountPrivacyView({
         </article>
 
         <article className="settings-panel" hidden={activeSection !== 'account'}>
+          <h2>Event reminders</h2>
+          <p className="settings-copy">When Athlete Reload is open, you can receive browser reminders to check in before an event and complete checkout after it starts. Your browser may still need its own notification permission.</p>
+          <label className="settings-toggle">
+            <input checked={Boolean(preferences.remindersEnabled)} onChange={(event) => onUpdateReminderPreference?.(event.target.checked)} type="checkbox" />
+            <span>Enable event reminders</span>
+          </label>
+        </article>
+
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
           <h2>Connected accounts</h2>
           <p className="settings-copy">These are the sign-in providers already connected to this account.</p>
           <div className="connection-list">
@@ -652,6 +665,20 @@ export function AccountPrivacyView({
             </div>
             <button className="remove-button compact-action" onClick={() => setIsClearHistoryModalOpen(true)} type="button">Clear health history</button>
           </div>
+          <div className="data-control-section">
+            <div>
+              <h3>Shared report activity</h3>
+              <p className="settings-copy">A record of printable reports created from this account.</p>
+            </div>
+            {shareAuditLogs.length === 0 ? <span className="settings-copy">No reports shared yet.</span> : (
+              <div className="share-audit-list">
+                <div className="share-audit-recent">
+                  {shareAuditLogs.slice(0, 3).map((entry) => <ShareAuditRow entry={entry} key={entry.id} onDelete={onDeleteShareAuditLog} onToggle={setOpenShareAuditAction} openId={openShareAuditAction} />)}
+                </div>
+                {shareAuditLogs.length > 3 && <div className="share-audit-scroll" aria-label="Earlier shared reports">{shareAuditLogs.slice(3).map((entry) => <ShareAuditRow entry={entry} key={entry.id} onDelete={onDeleteShareAuditLog} onToggle={setOpenShareAuditAction} openId={openShareAuditAction} />)}</div>}
+              </div>
+            )}
+          </div>
           <div className="data-control-section danger-data-section">
             <div>
               <h3>Delete account</h3>
@@ -724,6 +751,20 @@ export function AccountPrivacyView({
         </div>
       )}
     </section>
+  )
+}
+
+function ShareAuditRow({ entry, onDelete, onToggle, openId }) {
+  const isOpen = openId === entry.id
+
+  return (
+    <div className="share-audit-row">
+      <div><strong>{entry.reportType.replaceAll('_', ' ')}</strong>{entry.recipientLabel ? ` · ${entry.recipientLabel}` : ''}<small>{new Date(entry.createdAt).toLocaleDateString()}</small></div>
+      <div className="share-audit-actions">
+        <button aria-expanded={isOpen} aria-label="Shared report actions" className="share-audit-more" onClick={() => onToggle(isOpen ? null : entry.id)} type="button">...</button>
+        {isOpen && <div className="share-audit-menu"><button onClick={() => { onToggle(null); onDelete?.(entry.id) }} type="button">Delete</button></div>}
+      </div>
+    </div>
   )
 }
 

@@ -27,30 +27,43 @@ import {
   clearPainReports,
   clearTrainingCheckouts,
   createAssociation,
+  createPainIssue,
+  createRecoveryRoutineCompletion,
+  createSavedRecoveryRoutine,
   createCheckIn,
   createPainReports,
   createScheduleEvent,
+  createShareAuditLog,
+  createTournament,
   createTrainingCheckout,
   deleteAssociation,
   deleteCheckIn,
   deleteCheckInsForEvent,
   deletePainReportsForSource,
   deleteScheduleEvent,
+  deleteShareAuditLog,
   deleteCheckInsForDate,
   deleteTrainingCheckout,
   deleteTrainingCheckoutsForEvent,
+  deleteTournament,
   loadAthleteData,
   loadAthleteProfile,
   loadPrivacyPreferences,
   updateAssociation,
+  updatePainIssue,
+  updateSavedRecoveryRoutine,
+  upsertPrivacyPreferences,
+  upsertDailyWellness,
   upsertAthleteProfile,
   updateTrainingCheckout,
   updateScheduleEvent,
+  updateTournament,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { getPainReportsFromMap, getPrimaryPainArea } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
+import { getPersonalBaseline } from './utils/baselines'
 import { loadSavedState, saveState } from './utils/storage'
 import './App.css'
 
@@ -83,6 +96,7 @@ const privacyDefaults = {
   coachIncludeNotes: false,
   coachIncludePain: false,
   localCopy: false,
+  remindersEnabled: false,
 }
 
 function getAuthDisplayName(session) {
@@ -474,6 +488,34 @@ function sortScheduleEvents(events) {
   })
 }
 
+function isInsideCheckInWindow(event) {
+  if (!event?.date || !event?.time) return false
+  const eventStart = new Date(`${event.date}T${event.time}`).getTime()
+  const now = Date.now()
+
+  return eventStart >= now && eventStart - now <= 3 * 60 * 60 * 1000
+}
+
+function attachTournamentContext(event, tournaments, schedule) {
+  if (!event?.tournamentId) return event
+
+  const tournament = tournaments.find((item) => item.id === event.tournamentId)
+  if (!tournament) return event
+
+  return {
+    ...event,
+    tournament: {
+      ...tournament,
+      games: sortScheduleEvents(schedule.filter((item) => item.tournamentId === tournament.id)).map((game) => ({
+        date: game.date,
+        expectedDuration: game.expectedDuration,
+        opponent: game.opponent,
+        time: game.time,
+      })),
+    },
+  }
+}
+
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
@@ -509,10 +551,18 @@ function App() {
   const lensNodeRef = useRef(null)
   const lensTargetRef = useRef(null)
   const navRef = useRef(null)
+  const sentReminderKeysRef = useRef(new Set())
   const [checkIn, setCheckIn] = useState(() => normalizeCheckInScales(savedState?.checkIn ?? checkInDefaults))
   const [history, setHistory] = useState(savedState?.history ?? [])
   const [checkouts, setCheckouts] = useState(savedState?.checkouts ?? [])
   const [painReports, setPainReports] = useState(savedState?.painReports ?? [])
+  const [painIssues, setPainIssues] = useState(savedState?.painIssues ?? [])
+  const [savedRoutines, setSavedRoutines] = useState(savedState?.savedRoutines ?? [])
+  const [shareAuditLogs, setShareAuditLogs] = useState(savedState?.shareAuditLogs ?? [])
+  const [tournaments, setTournaments] = useState(savedState?.tournaments ?? [])
+  const [isReplayingSavedRoutine, setIsReplayingSavedRoutine] = useState(false)
+  const [replayingRoutineId, setReplayingRoutineId] = useState(null)
+  const [dailyWellness, setDailyWellness] = useState(() => savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationOz: 0, nutritionEntries: [] }))
   const [privacyPreferences, setPrivacyPreferences] = useState(
     savedState?.privacyPreferences ?? privacyDefaults,
   )
@@ -532,7 +582,10 @@ function App() {
     [checkouts],
   )
   const currentTodayCheckInEvent = useMemo(
-    () => todayEvents.find((event) => !completedCheckoutEventIds.has(event.id)) ?? null,
+    () => {
+      const nextRequiredEvent = todayEvents.find((event) => !completedCheckoutEventIds.has(event.id))
+      return nextRequiredEvent && isInsideCheckInWindow(nextRequiredEvent) ? nextRequiredEvent : null
+    },
     [completedCheckoutEventIds, todayEvents],
   )
   const nextEvent = useMemo(
@@ -648,6 +701,54 @@ function App() {
   )
 
   useEffect(() => {
+    if (!privacyPreferences.remindersEnabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return undefined
+
+    function notifyDueActions() {
+      const now = new Date()
+      const nowTime = now.getTime()
+      const today = getTodayIso()
+
+      schedule.forEach((event) => {
+        if (event.date !== today) return
+
+        const eventTime = new Date(`${event.date}T${event.time || '23:59'}`).getTime()
+        const checkIn = history.find((entry) => entry.eventId === event.id)
+        const checkout = checkouts.find((entry) => entry.eventId === event.id)
+        const key = eventTime > nowTime ? `checkin-${event.id}` : `checkout-${event.id}`
+
+        if (sentReminderKeysRef.current.has(key)) return
+
+        if (eventTime > nowTime && eventTime - nowTime <= 3 * 60 * 60 * 1000 && !checkIn) {
+          new Notification('Athlete Reload', { body: `Check in before ${event.type}.`, tag: key })
+          sentReminderKeysRef.current.add(key)
+        }
+
+        if (eventTime <= nowTime && checkIn && !checkout) {
+          new Notification('Athlete Reload', { body: `Log your ${event.type} checkout when you are ready.`, tag: key })
+          sentReminderKeysRef.current.add(key)
+        }
+      })
+
+      checkouts.forEach((checkout) => {
+        if (checkout.date !== today || checkout.recommendation?.recoveryPlan) return
+
+        const key = `recovery-${checkout.id}`
+        if (sentReminderKeysRef.current.has(key)) return
+
+        new Notification('Athlete Reload', {
+          body: `Build a recovery plan from your ${checkout.title ?? 'completed session'} checkout.`,
+          tag: key,
+        })
+        sentReminderKeysRef.current.add(key)
+      })
+    }
+
+    notifyDueActions()
+    const interval = window.setInterval(notifyDueActions, 60_000)
+    return () => window.clearInterval(interval)
+  }, [checkouts, history, privacyPreferences.remindersEnabled, schedule])
+
+  useEffect(() => {
     if (!supabase) {
       return undefined
     }
@@ -696,10 +797,15 @@ function App() {
       checkouts,
       history,
       painReports,
+      painIssues,
+      savedRoutines,
+      shareAuditLogs,
+      tournaments,
+      dailyWellness,
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, history, isSupabaseSession, painReports, privacyPreferences, schedule])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, painIssues, painReports, privacyPreferences, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -744,6 +850,11 @@ function App() {
         setHistory(data.history)
         setCheckouts(data.checkouts)
         setPainReports(data.painReports)
+        setPainIssues(data.painIssues)
+        setSavedRoutines(data.savedRoutines)
+        setShareAuditLogs(data.shareAuditLogs)
+        setTournaments(data.tournaments)
+        setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
         setPrivacyPreferences(preferences)
         setAthleteProfile(await loadAthleteProfile())
         setIsProfileReady(true)
@@ -770,6 +881,11 @@ function App() {
               setHistory(data.history)
               setCheckouts(data.checkouts)
               setPainReports(data.painReports)
+              setPainIssues(data.painIssues)
+              setSavedRoutines(data.savedRoutines)
+              setShareAuditLogs(data.shareAuditLogs)
+              setTournaments(data.tournaments)
+              setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
               setPrivacyPreferences(preferences)
               setAthleteProfile(await loadAthleteProfile())
               setIsProfileReady(true)
@@ -781,6 +897,44 @@ function App() {
           }
         } else {
           console.error(error)
+        }
+
+        // A restored browser session can briefly be ahead of the first data request.
+        // Give a cold browser session a few quiet attempts before surfacing a sync warning.
+        if (isMounted && navigator.onLine) {
+          for (const delay of [650, 1400, 2600]) {
+            try {
+              await new Promise((resolve) => window.setTimeout(resolve, delay))
+              const data = await loadAthleteData()
+              let preferences = privacyDefaults
+
+              try {
+                preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
+              } catch (preferencesError) {
+                console.warn(preferencesError)
+              }
+
+              if (!isMounted) return
+
+              setSchedule(data.schedule)
+              setAssociations(data.associations)
+              setHistory(data.history)
+              setCheckouts(data.checkouts)
+              setPainReports(data.painReports)
+              setPainIssues(data.painIssues)
+              setSavedRoutines(data.savedRoutines)
+              setShareAuditLogs(data.shareAuditLogs)
+              setTournaments(data.tournaments)
+              setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+              setPrivacyPreferences(preferences)
+              setAthleteProfile(await loadAthleteProfile())
+              setIsProfileReady(true)
+              setDataStatus('ready')
+              return
+            } catch (retryError) {
+              console.warn('Supabase data retry failed.', retryError)
+            }
+          }
         }
 
         if (isMounted) {
@@ -795,7 +949,7 @@ function App() {
     return () => {
       isMounted = false
     }
-  }, [isSupabaseSession])
+  }, [isSupabaseSession, todayIso])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -941,8 +1095,10 @@ function App() {
 
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
+          baseline: getPersonalBaseline(history, selectedCheckInEvent),
           checkIn: withoutNotes(scheduleDrivenCheckIn),
-          event: selectedCheckInEvent,
+          dailyWellness,
+          event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
           previousCheckout: withoutNotes(previousCheckout),
         })
         finalRecommendationStatus = 'ai'
@@ -995,7 +1151,7 @@ function App() {
             savedEntry.eventId
               ? entry.eventId !== savedEntry.eventId
               : entry.date !== savedEntry.date,
-          ).slice(0, 19),
+          ),
         ])
         setPainReports((current) => [...savedPainReports, ...current])
       } catch (error) {
@@ -1011,7 +1167,7 @@ function App() {
           currentEntry.eventId
             ? entry.eventId !== currentEntry.eventId
             : entry.date !== currentEntry.date,
-        ).slice(0, 19),
+        ),
       ])
       setPainReports((current) => [
         ...getPainReportsFromMap(scheduleDrivenCheckIn.painMap, {
@@ -1082,6 +1238,93 @@ function App() {
     setSchedule((current) => [...current, eventToSave])
     if (onboardingTour === 'schedule') {
       setOnboardingTour('checkin-nav')
+    }
+  }
+
+  async function addTournament(tournamentDraft, games) {
+    const localTournament = {
+      ...tournamentDraft,
+      id: tournamentDraft.id ?? `tournament-${Date.now()}`,
+    }
+
+    if (!isSupabaseSession) {
+      const localGames = games.map((game, index) => ({
+        ...game,
+        id: game.id ?? `tournament-game-${Date.now()}-${index}`,
+        tournamentId: localTournament.id,
+      }))
+      setTournaments((current) => [...current, localTournament])
+      setSchedule((current) => [...current, ...localGames])
+      return true
+    }
+
+    try {
+      const savedTournament = await createTournament(localTournament)
+      const savedGames = []
+
+      for (const game of games) {
+        savedGames.push(await createScheduleEvent({
+          ...game,
+          tournamentId: savedTournament.id,
+          load: getDefaultLoadForEvent('Game'),
+          title: 'Game',
+          type: 'Game',
+        }))
+      }
+
+      setTournaments((current) => [...current, savedTournament])
+      setSchedule((current) => [...current, ...savedGames])
+      return true
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  async function editTournament(tournamentDraft, games) {
+    const existingGames = schedule.filter((event) => event.tournamentId === tournamentDraft.id)
+    const incomingIds = new Set(games.map((game) => game.id).filter(Boolean))
+
+    for (const oldGame of existingGames) {
+      if (!incomingIds.has(oldGame.id)) await removeScheduleItem(oldGame.id)
+    }
+
+    for (const game of games) {
+      const gameToSave = { ...game, tournamentId: tournamentDraft.id, load: 'High', title: 'Game', type: 'Game' }
+      if (game.id) await updateScheduleItem(game.id, gameToSave)
+      else await addScheduleItem(gameToSave)
+    }
+
+    const updatedTournament = { ...tournamentDraft, id: tournamentDraft.id }
+    if (!isSupabaseSession) {
+      setTournaments((current) => current.map((item) => item.id === updatedTournament.id ? updatedTournament : item))
+      return true
+    }
+
+    try {
+      const saved = await updateTournament(updatedTournament.id, updatedTournament)
+      setTournaments((current) => current.map((item) => item.id === saved.id ? saved : item))
+      return true
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  async function removeTournament(tournamentId) {
+    const games = schedule.filter((event) => event.tournamentId === tournamentId)
+    for (const game of games) await removeScheduleItem(game.id)
+    setTournaments((current) => current.filter((tournament) => tournament.id !== tournamentId))
+
+    if (!isSupabaseSession) return
+
+    try {
+      await deleteTournament(tournamentId)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
     }
   }
 
@@ -1160,6 +1403,56 @@ function App() {
         ? current.filter((entry) => !entry.date || entry.date < cutoffDate)
         : [],
     )
+  }
+
+  async function saveDailyWellness(nextWellness) {
+    const wellness = {
+      date: todayIso,
+      hydrationOz: Math.max(0, Number(nextWellness.hydrationOz ?? 0)),
+      nutritionEntries: nextWellness.nutritionEntries ?? [],
+    }
+
+    setDailyWellness(wellness)
+
+    if (!isSupabaseSession) return
+
+    try {
+      const savedWellness = await upsertDailyWellness(wellness)
+      setDailyWellness(savedWellness)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function savePainIssue(nextIssue) {
+    const existing = nextIssue.id
+      ? painIssues.find((issue) => issue.id === nextIssue.id)
+      : null
+    const issue = {
+      ...existing,
+      ...nextIssue,
+      resolvedDate: nextIssue.status === 'resolved' ? (nextIssue.resolvedDate ?? todayIso) : null,
+    }
+
+    if (!isSupabaseSession) {
+      setPainIssues((current) => existing
+        ? current.map((item) => item.id === issue.id ? issue : item)
+        : [{ ...issue, id: `pain-issue-${Date.now()}` }, ...current])
+      return
+    }
+
+    try {
+      const savedIssue = existing
+        ? await updatePainIssue(existing.id, issue)
+        : await createPainIssue(issue)
+      setPainIssues((current) => existing
+        ? current.map((item) => item.id === savedIssue.id ? savedIssue : item)
+        : [savedIssue, ...current])
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
   }
 
   async function deleteHistoryEntry(entry, kind) {
@@ -1300,7 +1593,8 @@ function App() {
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
           checkout: withoutNotes(checkout),
-          completedEvent: event,
+          completedEvent: attachTournamentContext(event, tournaments, schedule),
+          dailyWellness,
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
           requestType: 'post_checkout',
@@ -1435,12 +1729,13 @@ function App() {
     const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : null
 
     setRecoveryPlanStatus('loading')
+    setIsReplayingSavedRoutine(false)
 
     try {
       const plan = await generateAiRecommendation({
         athleteProfile,
         checkout: withoutNotes(latestCheckout),
-        completedEvent,
+        completedEvent: attachTournamentContext(completedEvent, tournaments, schedule),
         equipment,
         nextScheduledEvent,
         preCheckIn: withoutNotes(preCheckIn),
@@ -1490,6 +1785,166 @@ function App() {
     setGeneratedRecoveryCheckoutId(null)
     setIsGeneratedRecoveryPlanSaved(false)
     return true
+  }
+
+  async function favoriteRecoveryRoutine(entry) {
+    const plan = entry?.recommendation?.recoveryPlan
+    if (!plan?.routine) return
+
+    const existing = savedRoutines.find((routine) => routine.sourceCheckoutId === entry.id)
+    const routine = {
+      ...existing,
+      isFavorite: !existing?.isFavorite,
+      routine: plan,
+      sourceCheckoutId: entry.id,
+      title: plan.routine.title ?? 'Recovery routine',
+    }
+
+    if (!isSupabaseSession) {
+      const localRoutine = { ...routine, id: existing?.id ?? `saved-routine-${Date.now()}` }
+      setSavedRoutines((current) => existing
+        ? current.map((item) => item.id === existing.id ? localRoutine : item)
+        : [localRoutine, ...current])
+      return
+    }
+
+    try {
+      const saved = existing
+        ? await updateSavedRecoveryRoutine(existing.id, routine)
+        : await createSavedRecoveryRoutine(routine)
+      setSavedRoutines((current) => existing
+        ? current.map((item) => item.id === saved.id ? saved : item)
+        : [saved, ...current])
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function reportRoutinePain(report) {
+    const severity = Number(report.severity)
+    if (!report?.area || !Number.isFinite(severity) || severity <= 0) return
+
+    const painReport = {
+      bodyPart: report.area,
+      date: todayIso,
+      notes: `Reported during recovery exercise: ${report.exercise ?? 'movement'}${report.type ? ` (${report.type})` : ''}${report.sameIssue ? `. Previously reported issue: ${report.sameIssue}` : ''}`,
+      severity,
+      side: 'center',
+      sourceId: report.checkoutId,
+      sourceType: 'recovery_routine',
+      triggerMovement: report.exercise ?? '',
+    }
+
+    if (!isSupabaseSession) {
+      setPainReports((current) => [{ ...painReport, id: `routine-pain-${Date.now()}`, createdAt: new Date().toISOString() }, ...current])
+      return
+    }
+
+    try {
+      const [saved] = await createPainReports([painReport])
+      setPainReports((current) => [saved, ...current])
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function recordPainIssueShare(issue, recipientLabel) {
+    const entry = {
+      recipientLabel,
+      reportReferenceId: issue.id ?? null,
+      reportType: 'pain_issue_summary',
+    }
+
+    if (!isSupabaseSession) {
+      setShareAuditLogs((current) => [{ ...entry, id: `share-${Date.now()}`, createdAt: new Date().toISOString() }, ...current])
+      return true
+    }
+
+    try {
+      const saved = await createShareAuditLog(entry)
+      setShareAuditLogs((current) => [saved, ...current])
+      return true
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  async function removeShareAuditLog(id) {
+    setShareAuditLogs((current) => current.filter((entry) => entry.id !== id))
+
+    if (!isSupabaseSession || String(id).startsWith('share-')) return
+
+    try {
+      await deleteShareAuditLog(id)
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function updateReminderPreference(enabled) {
+    let remindersEnabled = Boolean(enabled)
+
+    if (remindersEnabled && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      const permission = await Notification.requestPermission()
+      remindersEnabled = permission === 'granted'
+    }
+
+    if (remindersEnabled && (typeof Notification === 'undefined' || Notification.permission !== 'granted')) {
+      return false
+    }
+
+    const nextPreferences = { ...privacyPreferences, remindersEnabled }
+    setPrivacyPreferences(nextPreferences)
+
+    if (!isSupabaseSession) return true
+
+    try {
+      const saved = await upsertPrivacyPreferences(nextPreferences)
+      setPrivacyPreferences(saved)
+      return true
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  function replaySavedRoutine(routine) {
+    setGeneratedRecoveryPlan(routine.routine)
+    setGeneratedRecoveryCheckoutId(null)
+    setIsGeneratedRecoveryPlanSaved(false)
+    setIsReplayingSavedRoutine(true)
+    setReplayingRoutineId(routine.id)
+    setRecoveryPlanStatus('saved')
+  }
+
+  async function completeSavedRoutine(details) {
+    const routine = savedRoutines.find((item) => item.id === replayingRoutineId)
+    if (!routine) return
+
+    if (isSupabaseSession) {
+      try {
+        await createRecoveryRoutineCompletion({
+          details,
+          routineId: routine.id,
+          sourceCheckoutId: routine.sourceCheckoutId,
+        })
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+        return
+      }
+    }
+
+    setIsReplayingSavedRoutine(false)
+    setReplayingRoutineId(null)
+    setGeneratedRecoveryPlan(null)
+    setRecoveryPlanStatus('idle')
   }
 
   async function updateRecoveryStep(stepId, status) {
@@ -1546,7 +2001,12 @@ function App() {
       setCheckIn((current) =>
         existingEntry
           ? checkInFromHistoryEntry(existingEntry, current)
-          : { ...getFreshCheckInDefaults(), ...getSharedSleepContext(history, todayIso) },
+          : {
+              ...getFreshCheckInDefaults(),
+              ...getSharedSleepContext(history, todayIso),
+              hydration: getHydrationStatus(dailyWellness.hydrationOz),
+              hydrationOz: dailyWellness.hydrationOz,
+            },
       )
     }
   }
@@ -1556,7 +2016,11 @@ function App() {
 
     setSelectedCheckInEventId(event?.id ?? null)
     setIsEditingToday(false)
-    setCheckIn(getFreshCheckInDefaults())
+    setCheckIn({
+      ...getFreshCheckInDefaults(),
+      hydration: getHydrationStatus(dailyWellness.hydrationOz),
+      hydrationOz: dailyWellness.hydrationOz,
+    })
     setActiveView('Check-in')
   }
 
@@ -1578,7 +2042,12 @@ function App() {
     setCheckIn((current) =>
       existingEntry
         ? checkInFromHistoryEntry(existingEntry, current)
-        : { ...getFreshCheckInDefaults(), ...getSharedSleepContext(history, todayIso) },
+        : {
+            ...getFreshCheckInDefaults(),
+            ...getSharedSleepContext(history, todayIso),
+            hydration: getHydrationStatus(dailyWellness.hydrationOz),
+            hydrationOz: dailyWellness.hydrationOz,
+          },
     )
   }
 
@@ -2132,6 +2601,7 @@ function App() {
               <CheckInView
                 checkIn={scheduleDrivenCheckIn}
                 checkouts={checkouts}
+                dailyWellness={dailyWellness}
                 eventOptions={checkInEventOptions}
                 isSavedToday={isCheckInSavedToday}
                 isSaving={isSavingCheckIn}
@@ -2154,13 +2624,18 @@ function App() {
             {activeView === 'Home' && (
               <HomeView
                 checkouts={checkouts}
+                dailyWellness={dailyWellness}
                 history={history}
                 painReports={painReports}
+                painIssues={painIssues}
                 recommendation={recommendation}
                 recommendationStatus="local"
                 schedule={schedule}
                 onGoCheckIn={openPreCheckIn}
                 onOpenCheckout={setCheckoutEvent}
+                onUpdateWellness={saveDailyWellness}
+                onSavePainIssue={savePainIssue}
+                onSharePainIssue={recordPainIssueShare}
               />
             )}
 
@@ -2169,31 +2644,41 @@ function App() {
                 checkouts={checkouts}
                 generatedPlan={generatedRecoveryPlan}
                 generatedPlanSaved={isGeneratedRecoveryPlanSaved}
+                isReplayingSavedRoutine={isReplayingSavedRoutine}
                 generationStatus={recoveryPlanStatus}
                 nextEvent={nextEvent}
                 onGeneratePlan={generateRecoveryPlan}
+                onReplaySavedRoutine={replaySavedRoutine}
+                onReportRoutinePain={reportRoutinePain}
+                onCompleteSavedRoutine={completeSavedRoutine}
                 onSaveRecoveryPlan={saveRecoveryPlan}
                 onUpdateRecoveryStep={updateRecoveryStep}
                 schedule={schedule}
+                savedRoutines={savedRoutines}
               />
             )}
 
             {activeView === 'Schedule' && (
               <ScheduleView
                 associations={associations}
+                athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 checkIns={history}
                 onAdd={addScheduleItem}
+                onAddTournament={addTournament}
+                onUpdateTournament={editTournament}
                 onAddAssociation={addAssociation}
                 onRenameAssociation={renameAssociation}
                 onRemoveAssociation={removeAssociation}
                 onOpenCheckIn={openPreCheckIn}
                 onOpenCheckout={setCheckoutEvent}
                 onRemove={removeScheduleItem}
+                onRemoveTournament={removeTournament}
                 onUpdate={updateScheduleItem}
                 onboardingAssociation={onboardingAssociation}
                 isOnboardingEventCreation={onboardingTour === 'schedule'}
                 schedule={schedule}
+                tournaments={tournaments}
               />
             )}
 
@@ -2204,6 +2689,8 @@ function App() {
                 insights={trendInsights}
                 onClear={clearHistory}
                 onDeleteEntry={deleteHistoryEntry}
+                onFavoriteRoutine={favoriteRecoveryRoutine}
+                savedRoutines={savedRoutines}
               />
             )}
 
@@ -2215,8 +2702,11 @@ function App() {
                 preferences={privacyPreferences}
                 schedule={schedule}
                 session={session}
+                shareAuditLogs={shareAuditLogs}
                 onClearAllHealthHistory={clearAllHealthHistory}
                 onAccountDeleted={resetDeletedSession}
+                onDeleteShareAuditLog={removeShareAuditLog}
+                onUpdateReminderPreference={updateReminderPreference}
               />
             )}
           </section>

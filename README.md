@@ -1,105 +1,77 @@
 # Athlete Reload
 
-Athlete Reload is a training readiness planner for athletes. It combines a daily check-in, a schedule calendar, and saved history to recommend how training should be adjusted for the day instead of defaulting to a simple rest/no-rest answer.
+Athlete Reload is a readiness, training, and recovery journal for athletes. It connects scheduled events with pre-event check-ins, post-event checkouts, pain reporting, and recovery routines so the athlete gets a practical plan for the session in front of them.
 
-## Features
+It is designed to support better conversations with coaches, parents, athletic trainers, and healthcare professionals. It does not diagnose injuries or provide medical clearance.
 
-- Email/password authentication with Supabase
-- Device session persistence for familiar-device sign-in
-- Daily readiness check-in
-- Schedule-aware recommendations
-- Injury and pain-aware training guidance
-- Editable monthly calendar
-- Saved check-in history
-- History detail modal
-- Mobile-friendly layout
-- Liquid glass navigation effect with `react-glassy`
+## What It Does
 
-## Stack
+- Event-based check-ins and checkouts
+- Month, week, and list schedule views with recurring events and calendar export
+- Tournament builder with individual games, turnaround visibility, and accumulated workload
+- AI-assisted preparation and recovery guidance based on the athlete's event, history, sport, and reported symptoms
+- Body pain map with per-area reporting and a pain-issue tracker
+- Daily hydration and nutrition context
+- Recovery routines with timers, reps, pain-aware substitutions, completion feedback, saved favorites, and replay
+- History, weekly reports, pattern detection, baseline context, and workload trends
+- Print-ready pain summaries with an explicit confirmation and sharing audit trail
+- Optional browser reminders for event check-ins, checkouts, and unsaved recovery plans while the app is open
+- Account-owned Supabase data with row-level security
 
-- React
-- Vite
-- Supabase
-- date-fns
-- react-glassy
-- Oxlint
-- GitHub Pages
+## Local Development
 
-## Getting Started
-
-Install dependencies:
+Requirements: Node.js 20+ and an npm-compatible shell.
 
 ```bash
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
-Build for production:
-
-```bash
-npm run build
-```
-
-Run lint:
+Useful commands:
 
 ```bash
 npm run lint
-```
-
-Preview a production build locally:
-
-```bash
+npm run build
 npm run preview
 ```
 
-## Environment Variables
+## Environment
 
-Create a `.env.local` file from `.env.example`:
+Create `.env.local` with the public Supabase configuration:
 
 ```bash
 VITE_SUPABASE_URL=
 VITE_SUPABASE_PUBLISHABLE_KEY=
 ```
 
-Use the Supabase project URL and publishable key. Do not put a service role key in the frontend.
+Never put a Supabase service-role key, Gemini key, or any other server secret in this frontend project. AI requests are handled by the Supabase Edge Function at `supabase/functions/generate-recommendation`.
 
 ## Supabase
 
-The app uses Supabase for authentication and account-owned data.
+Database migrations live in `supabase/migrations`. The app stores user-owned data for events, check-ins, checkouts, pain reports and issues, daily wellness, saved routines, routine completions, sharing records, associations, profiles, privacy preferences, and tournaments.
 
-The schema is tracked in:
+Every user-owned table has row-level security. Policies are based on the stored row owner matching `auth.uid()`; being signed in alone is not enough to access another athlete's data.
 
-```bash
-supabase/migrations/20260727210000_create_athlete_reload_user_data.sql
-```
+When adding schema changes:
 
-Tables:
-
-- `schedule_events`
-- `check_ins`
-
-Both tables use row level security so each authenticated user can only access their own schedule and check-in records.
+1. Add a SQL migration in `supabase/migrations`.
+2. Apply it to the connected project.
+3. Run Supabase security and performance advisors.
+4. Verify the new table or column through the app and with a signed-in account.
 
 ## Deployment
 
-This repo is set up for GitHub Pages using `gh-pages`.
-
-Typical deploy flow:
+GitHub Pages is deployed with `gh-pages`:
 
 ```bash
 git add .
-git commit -m "message"
+git commit -m "Describe the change"
 git push
 npm.cmd run deploy
 ```
 
-The Vite base path is configured for GitHub Pages in `vite.config.js`.
+`predeploy` runs the production build before publishing `dist`.
 
-## Notes
+## Health and Safety
 
-Athlete Reload is a planning tool, not a medical diagnosis tool. High-risk symptoms should still be handled by a coach, parent, athletic trainer, or medical professional.
+Athlete Reload is an educational planning tool. It is not medical advice, diagnosis, treatment, or return-to-play clearance. Severe, worsening, unstable, numb, neurological, concussion-related, breathing, chest-pain, or other concerning symptoms should be reported to an appropriate adult, coach, athletic trainer, or qualified healthcare professional promptly.

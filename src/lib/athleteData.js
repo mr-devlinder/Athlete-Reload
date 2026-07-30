@@ -13,6 +13,7 @@ function normalizeFivePointValue(value, fallback = 1) {
 function fromScheduleRow(row) {
   return {
     association: row.association ?? 'Personal',
+    availability: row.availability ?? 'Required',
     environment: row.environment ?? 'Outdoor',
     expectedDuration: Number(row.expected_duration ?? row.planned_minutes ?? 60),
     id: row.id,
@@ -20,17 +21,21 @@ function fromScheduleRow(row) {
     load: row.load_level,
     location: row.location ?? '',
     note: row.note ?? '',
+    opponent: row.opponent ?? '',
     plannedMinutes: Number(row.planned_minutes ?? 0) || undefined,
     surface: row.surface ?? 'Grass',
     time: row.event_time ?? '',
     title: row.event_type,
+    tournamentId: row.tournament_id ?? null,
     type: row.event_type,
+    venue: row.venue ?? '',
   }
 }
 
 function toScheduleRow(event) {
   return {
     association: event.association ?? 'Personal',
+    availability: event.availability ?? 'Required',
     environment: event.environment ?? 'Outdoor',
     expected_duration: Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
     event_date: event.date,
@@ -39,10 +44,13 @@ function toScheduleRow(event) {
     load_level: event.load,
     location: event.location ?? '',
     note: event.note ?? '',
+    opponent: event.opponent ?? '',
     planned_minutes: Number(event.plannedMinutes ?? 0) || null,
     surface: event.surface ?? 'Grass',
     title: event.type,
+    tournament_id: event.tournamentId ?? null,
     updated_at: new Date().toISOString(),
+    venue: event.venue ?? '',
   }
 }
 
@@ -50,6 +58,40 @@ function fromAssociationRow(row) {
   return {
     id: row.id,
     name: row.name,
+  }
+}
+
+function fromTournamentRow(row) {
+  return {
+    association: row.association ?? 'Personal',
+    endDate: row.end_date,
+    id: row.id,
+    location: row.location ?? '',
+    name: row.name,
+    notes: row.notes ?? '',
+    startDate: row.start_date,
+  }
+}
+
+function toTournamentRow(tournament) {
+  return {
+    association: tournament.association ?? 'Personal',
+    end_date: tournament.endDate,
+    location: tournament.location ?? '',
+    name: tournament.name,
+    notes: tournament.notes ?? '',
+    start_date: tournament.startDate,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function fromShareAuditRow(row) {
+  return {
+    createdAt: row.created_at,
+    id: row.id,
+    recipientLabel: row.recipient_label ?? '',
+    reportReferenceId: row.report_reference_id,
+    reportType: row.report_type,
   }
 }
 
@@ -237,6 +279,7 @@ function fromPrivacyPreferencesRow(row) {
     coachIncludeNotes: row.coach_include_notes,
     coachIncludePain: row.coach_include_pain,
     localCopy: row.local_copy,
+    remindersEnabled: Boolean(row.reminders_enabled),
   }
 }
 
@@ -244,10 +287,14 @@ function fromAthleteProfileRow(row) {
   return {
     displayName: row.display_name ?? '',
     dominantSide: row.dominant_side ?? 'Right',
+    genderIdentity: row.gender_identity ?? '',
+    heightInches: row.height_inches ?? null,
     onboardingCompleted: Boolean(row.onboarding_completed),
     position: row.position ?? '',
     sport: row.sport ?? '',
+    sportProfiles: row.sport_profiles ?? [],
     trainingStyle: row.training_style ?? 'Team and individual',
+    weightLbs: row.weight_lbs ?? null,
   }
 }
 
@@ -255,11 +302,85 @@ function toAthleteProfileRow(profile) {
   return {
     display_name: profile.displayName ?? '',
     dominant_side: profile.dominantSide ?? 'Right',
+    gender_identity: profile.genderIdentity ?? '',
+    height_inches: profile.heightInches ? Number(profile.heightInches) : null,
     onboarding_completed: Boolean(profile.onboardingCompleted),
     position: profile.position ?? '',
     sport: profile.sport ?? '',
+    sport_profiles: profile.sportProfiles ?? [],
     training_style: profile.trainingStyle ?? 'Team and individual',
     updated_at: new Date().toISOString(),
+    weight_lbs: profile.weightLbs ? Number(profile.weightLbs) : null,
+  }
+}
+
+function fromDailyWellnessRow(row) {
+  return {
+    date: row.wellness_date,
+    hydrationOz: Number(row.hydration_oz ?? 0),
+    id: row.id,
+    nutritionEntries: row.nutrition_entries ?? [],
+    updatedAt: row.updated_at,
+  }
+}
+
+function fromPainIssueRow(row) {
+  return {
+    athleteNotes: row.athlete_notes ?? '',
+    bodyPart: row.body_part,
+    clinicianNotes: row.clinician_notes ?? '',
+    firstReportedDate: row.first_reported_date,
+    id: row.id,
+    resolvedDate: row.resolved_date,
+    side: row.side ?? 'center',
+    status: row.status ?? 'active',
+    trainerNotes: row.trainer_notes ?? '',
+    updatedAt: row.updated_at,
+  }
+}
+
+function fromSavedRecoveryRoutineRow(row) {
+  return {
+    createdAt: row.created_at,
+    id: row.id,
+    isFavorite: Boolean(row.is_favorite),
+    sourceCheckoutId: row.source_checkout_id,
+    title: row.title,
+    routine: row.routine_json,
+    updatedAt: row.updated_at,
+  }
+}
+
+function toSavedRecoveryRoutineRow(routine) {
+  return {
+    is_favorite: Boolean(routine.isFavorite),
+    routine_json: routine.routine,
+    source_checkout_id: routine.sourceCheckoutId ?? null,
+    title: routine.title,
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function toPainIssueRow(issue) {
+  return {
+    athlete_notes: issue.athleteNotes ?? '',
+    body_part: issue.bodyPart,
+    clinician_notes: issue.clinicianNotes ?? '',
+    first_reported_date: issue.firstReportedDate ?? format(new Date(), 'yyyy-MM-dd'),
+    resolved_date: issue.resolvedDate ?? null,
+    side: issue.side ?? 'center',
+    status: issue.status ?? 'active',
+    trainer_notes: issue.trainerNotes ?? '',
+    updated_at: new Date().toISOString(),
+  }
+}
+
+function toDailyWellnessRow(wellness) {
+  return {
+    hydration_oz: Math.max(0, Number(wellness.hydrationOz ?? 0)),
+    nutrition_entries: wellness.nutritionEntries ?? [],
+    updated_at: new Date().toISOString(),
+    wellness_date: wellness.date ?? format(new Date(), 'yyyy-MM-dd'),
   }
 }
 
@@ -270,6 +391,7 @@ function toPrivacyPreferencesRow(preferences) {
     coach_include_notes: Boolean(preferences.coachIncludeNotes),
     coach_include_pain: Boolean(preferences.coachIncludePain),
     local_copy: Boolean(preferences.localCopy),
+    reminders_enabled: Boolean(preferences.remindersEnabled),
     updated_at: new Date().toISOString(),
   }
 }
@@ -281,6 +403,11 @@ export async function loadAthleteData() {
     checkInsResponse,
     checkoutsResponse,
     painReportsResponse,
+    painIssuesResponse,
+    savedRoutinesResponse,
+    tournamentsResponse,
+    shareAuditResponse,
+    wellnessResponse,
   ] = await Promise.all([
     supabase
       .from('schedule_events')
@@ -295,20 +422,39 @@ export async function loadAthleteData() {
       .from('check_ins')
       .select('*')
       .order('check_in_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(20),
+      .order('created_at', { ascending: false }),
     supabase
       .from('training_checkouts')
       .select('*')
       .order('session_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(60),
+      .order('created_at', { ascending: false }),
     supabase
       .from('pain_reports')
       .select('*')
       .order('report_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(120),
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('pain_issues')
+      .select('*')
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('saved_recovery_routines')
+      .select('*')
+      .order('is_favorite', { ascending: false })
+      .order('updated_at', { ascending: false }),
+    supabase
+      .from('tournaments')
+      .select('*')
+      .order('start_date', { ascending: true }),
+    supabase
+      .from('share_audit_log')
+      .select('*')
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('daily_wellness')
+      .select('*')
+      .eq('wellness_date', format(new Date(), 'yyyy-MM-dd'))
+      .maybeSingle(),
   ])
 
   if (scheduleResponse.error) throw scheduleResponse.error
@@ -316,14 +462,161 @@ export async function loadAthleteData() {
   if (checkInsResponse.error) throw checkInsResponse.error
   if (checkoutsResponse.error) throw checkoutsResponse.error
   if (painReportsResponse.error) throw painReportsResponse.error
+  if (painIssuesResponse.error) throw painIssuesResponse.error
+  if (savedRoutinesResponse.error) throw savedRoutinesResponse.error
+  if (tournamentsResponse.error) throw tournamentsResponse.error
+  if (shareAuditResponse.error) throw shareAuditResponse.error
+  if (wellnessResponse.error) throw wellnessResponse.error
 
   return {
     associations: associationsResponse.data.map(fromAssociationRow),
     checkouts: checkoutsResponse.data.map(fromCheckoutRow),
     history: checkInsResponse.data.map(fromCheckInRow),
     painReports: painReportsResponse.data.map(fromPainReportRow),
+    painIssues: painIssuesResponse.data.map(fromPainIssueRow),
+    savedRoutines: savedRoutinesResponse.data.map(fromSavedRecoveryRoutineRow),
+    shareAuditLogs: shareAuditResponse.data.map(fromShareAuditRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
+    tournaments: tournamentsResponse.data.map(fromTournamentRow),
+    wellness: wellnessResponse.data ? fromDailyWellnessRow(wellnessResponse.data) : null,
   }
+}
+
+export async function createShareAuditLog(entry) {
+  const { data, error } = await supabase
+    .from('share_audit_log')
+    .insert({
+      recipient_label: entry.recipientLabel ?? '',
+      report_reference_id: entry.reportReferenceId ?? null,
+      report_type: entry.reportType,
+    })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromShareAuditRow(data)
+}
+
+export async function deleteShareAuditLog(id) {
+  const { error } = await supabase
+    .from('share_audit_log')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
+export async function createTournament(tournament) {
+  const { data, error } = await supabase
+    .from('tournaments')
+    .insert(toTournamentRow(tournament))
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromTournamentRow(data)
+}
+
+export async function updateTournament(id, tournament) {
+  const { data, error } = await supabase
+    .from('tournaments')
+    .update(toTournamentRow(tournament))
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromTournamentRow(data)
+}
+
+export async function deleteTournament(id) {
+  const { error } = await supabase
+    .from('tournaments')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
+export async function upsertDailyWellness(wellness) {
+  const { data, error } = await supabase
+    .from('daily_wellness')
+    .upsert(toDailyWellnessRow(wellness), { onConflict: 'user_id,wellness_date' })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromDailyWellnessRow(data)
+}
+
+export async function createPainIssue(issue) {
+  const { data, error } = await supabase
+    .from('pain_issues')
+    .insert(toPainIssueRow(issue))
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromPainIssueRow(data)
+}
+
+export async function updatePainIssue(id, issue) {
+  const { data, error } = await supabase
+    .from('pain_issues')
+    .update(toPainIssueRow(issue))
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromPainIssueRow(data)
+}
+
+export async function createSavedRecoveryRoutine(routine) {
+  const { data, error } = await supabase
+    .from('saved_recovery_routines')
+    .insert(toSavedRecoveryRoutineRow(routine))
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromSavedRecoveryRoutineRow(data)
+}
+
+export async function updateSavedRecoveryRoutine(id, routine) {
+  const { data, error } = await supabase
+    .from('saved_recovery_routines')
+    .update(toSavedRecoveryRoutineRow(routine))
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromSavedRecoveryRoutineRow(data)
+}
+
+export async function createRecoveryRoutineCompletion(completion) {
+  const { data, error } = await supabase
+    .from('recovery_routine_completions')
+    .insert({
+      completion_json: completion.details ?? {},
+      routine_id: completion.routineId ?? null,
+      source_checkout_id: completion.sourceCheckoutId ?? null,
+    })
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return data
 }
 
 export async function loadPrivacyPreferences() {

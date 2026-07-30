@@ -73,7 +73,7 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
           </div>
 
           {checkout && !isEditing ? (
-            <CheckoutComparison checkout={checkout} onEdit={() => setIsEditing(true)} />
+            <CheckoutComparison checkout={checkout} event={event} preCheckIn={preCheckIn} onEdit={() => setIsEditing(true)} />
           ) : (
             <div className="modal-form">
             {saveError && <p className="form-error" role="alert">{saveError}</p>}
@@ -188,9 +188,12 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
   )
 }
 
-function CheckoutComparison({ checkout, onEdit }) {
+function CheckoutComparison({ checkout, event, onEdit, preCheckIn }) {
   const sessionLoad = checkout.sessionLoad ?? getSessionLoad(checkout)
   const content = checkout.sessionContent?.length ? checkout.sessionContent.join(', ') : 'No session content recorded'
+  const painChanges = getPainChanges(preCheckIn?.painMap, checkout.painMap)
+  const expectedParticipation = getExpectedParticipation(event)
+  const plannedMinutes = Number(checkout.plannedMinutes ?? event?.plannedMinutes ?? event?.expectedDuration ?? 0)
 
   return (
     <div className="checkout-comparison">
@@ -200,23 +203,48 @@ function CheckoutComparison({ checkout, onEdit }) {
         <p>{checkout.actualMinutes} minutes at {checkout.difficulty}/10 effort. This is for comparing your own sessions over time.</p>
       </div>
 
+      <div className="checkout-comparison-heading">
+        <p className="eyebrow">Event comparison</p>
+        <h3>What changed from plan to reality.</h3>
+      </div>
       <div className="comparison-grid">
         <span>
+          <strong>Expected difficulty</strong>
+          {preCheckIn?.expectedDifficulty ?? 'Not recorded'}/10 planned vs {checkout.difficulty}/10 actual
+        </span>
+        <span>
+          <strong>Minutes</strong>
+          {plannedMinutes || 'Not recorded'} planned vs {checkout.actualMinutes} completed
+        </span>
+        <span>
           <strong>Participation</strong>
-          {checkout.participation ?? checkout.completionLevel}
+          {expectedParticipation} planned vs {checkout.participation ?? checkout.completionLevel} actual
         </span>
         <span>
           <strong>Session content</strong>
           {content}
         </span>
         <span>
-          <strong>Physical response</strong>
-          Fatigue {checkout.postFatigue ?? 3}/5, soreness {checkout.postSoreness ?? 3}/5
+          <strong>Soreness</strong>
+          {preCheckIn ? `${preCheckIn.soreness}/5 before vs ` : ''}{checkout.postSoreness ?? 3}/5 after
+        </span>
+        <span>
+          <strong>Fatigue</strong>
+          {preCheckIn ? `${preCheckIn.fatigue}/5 before vs ` : ''}{checkout.postFatigue ?? 3}/5 after
         </span>
         <span>
           <strong>Performance</strong>
           {checkout.performanceRating ?? 'Normal'}
         </span>
+      </div>
+
+      <div className="pain-change-summary">
+        <strong>Pain map changes</strong>
+        {painChanges.length > 0 ? (
+          <ul>{painChanges.map((change) => <li key={change}>{change}</li>)}</ul>
+        ) : (
+          <p>No pain locations were added, removed, or changed meaningfully.</p>
+        )}
       </div>
 
       {checkout.recommendation && (
@@ -232,6 +260,32 @@ function CheckoutComparison({ checkout, onEdit }) {
       </button>
     </div>
   )
+}
+
+function getExpectedParticipation(event) {
+  if (event?.type === 'Recovery' || event?.type === 'Rest day') return 'Limited'
+  if (/gym|workout|optional/i.test(`${event?.type ?? ''} ${event?.title ?? ''}`)) return 'Individual'
+  return 'Full'
+}
+
+function getPainChanges(preMap = {}, postMap = {}) {
+  const labels = new Map(bodyPainAreas.map((area) => [area.id, area.label]))
+  const areaIds = new Set([...Object.keys(preMap ?? {}), ...Object.keys(postMap ?? {})])
+
+  return [...areaIds].flatMap((areaId) => {
+    const before = Number(preMap?.[areaId] ?? 0)
+    const after = Number(postMap?.[areaId] ?? 0)
+    const label = labels.get(areaId) ?? areaId
+
+    if (before === 0 && after > 0) return [`${label} was added after the event (${Math.round(after / 10)}/10).`]
+    if (before > 0 && after === 0) return [`${label} settled to no reported pain after the event.`]
+    if (Math.abs(after - before) >= 10) {
+      const direction = after > before ? 'increased' : 'decreased'
+      return [`${label} ${direction} from ${Math.round(before / 10)}/10 to ${Math.round(after / 10)}/10.`]
+    }
+
+    return []
+  })
 }
 
 function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {

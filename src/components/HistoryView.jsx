@@ -18,7 +18,7 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry }) {
+export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, savedRoutines = [] }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
@@ -186,7 +186,9 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
       {selectedEntry && createPortal(
         <HistoryModal
           entry={selectedEntry}
+          onFavoriteRoutine={onFavoriteRoutine}
           onClose={() => setSelectedEntry(null)}
+          savedRoutines={savedRoutines}
         />,
         document.body,
       )}
@@ -275,6 +277,10 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
           <p>No saved recovery plans this week.</p>
         ) : (
           recoveryItems.map((item) => (
+            (() => {
+              const progress = getRecoveryProgress(item.entry.recommendation.recoveryPlan)
+
+              return (
             <HistoryRow
               className="history-row recovery-history-row"
               entry={item.entry}
@@ -287,14 +293,37 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
               <div>
                 <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
                 <strong>{item.entry.recommendation.recoveryPlan.routine?.title ?? 'Recovery plan'}</strong>
-                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine</small>
+                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine · {progress.label}</small>
+                <div aria-label={`Recovery plan ${progress.percent}% complete`} className="history-recovery-progress">
+                  <span style={{ width: `${progress.percent}%` }} />
+                </div>
               </div>
             </HistoryRow>
+              )
+            })()
           ))
         )}
       </div>
     </>
   )
+}
+
+function getRecoveryProgress(plan) {
+  const routineProgress = plan?.routineProgress
+  if (Number.isFinite(Number(routineProgress?.total)) && Number(routineProgress.total) > 0) {
+    const percent = Math.round((Number(routineProgress.completed ?? 0) / Number(routineProgress.total)) * 100)
+    return { label: percent === 100 ? 'Routine complete' : `${percent}% routine complete`, percent }
+  }
+
+  const steps = plan?.recoverySteps ?? []
+  const statuses = plan?.stepStatuses ?? {}
+
+  if (steps.length === 0) return { label: 'Not started', percent: 0 }
+
+  const complete = steps.filter((step, index) => statuses[step.id ?? `recovery-step-${index}`] === 'complete').length
+  const percent = Math.round((complete / steps.length) * 100)
+
+  return { label: percent === 100 ? 'Complete' : `${percent}% complete`, percent }
 }
 
 function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectEntry }) {
@@ -369,7 +398,7 @@ function WeeklyReportModal({ week, onClose }) {
           <span><strong>Check-ins</strong>{checkIns.length}</span>
           <span><strong>Checkouts</strong>{checkouts.length}</span>
           <span><strong>Sleep</strong>{averageSleep}h average</span>
-          <span><strong>Fatigue</strong>{averageFatigue}/10 average</span>
+          <span><strong>Fatigue</strong>{averageFatigue}/5 average</span>
           <span><strong>Workload</strong>{workload || 'No checkouts'}</span>
           <span><strong>Availability</strong>{averageReadiness >= 80 ? 'Mostly available' : averageReadiness >= 60 ? 'Modified training likely' : 'Recovery focus'}</span>
           <span><strong>Pain pattern</strong>{painAreas || 'No recurring pain areas'}</span>
@@ -415,13 +444,13 @@ function ClearHistoryModal({ onClear, onClose }) {
   )
 }
 
-function HistoryModal({ entry, onClose }) {
+function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
   if (entry.historyKind === 'checkout') {
     return <CheckoutHistoryModal entry={entry} onClose={onClose} />
   }
 
   if (entry.historyKind === 'recovery') {
-    return <RecoveryHistoryModal entry={entry} onClose={onClose} />
+    return <RecoveryHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
   }
 
   const detailSections = getCheckInDetailSections(entry)
@@ -591,8 +620,9 @@ function getReadinessBand(score) {
   return 'readiness-red'
 }
 
-function RecoveryHistoryModal({ entry, onClose }) {
+function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
   const plan = entry.recommendation?.recoveryPlan
+  const savedRoutine = savedRoutines.find((routine) => routine.sourceCheckoutId === entry.id)
 
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
@@ -611,6 +641,11 @@ function RecoveryHistoryModal({ entry, onClose }) {
             Close
           </button>
         </div>
+        {plan?.routine && (
+          <button className={`secondary-button compact-action ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
+            {savedRoutine?.isFavorite ? 'Favorited routine' : 'Favorite routine'}
+          </button>
+        )}
         {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan for this session.</p>}
       </section>
     </div>
