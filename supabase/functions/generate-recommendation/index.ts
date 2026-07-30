@@ -20,6 +20,9 @@ type Recommendation = {
   score: number
   summary: string
   tone: 'danger' | 'warning' | 'caution' | 'ready'
+  recoverySteps?: Array<{ title: string; why: string; when: string; id?: string }>
+  timeline?: Array<{ title: string; items: string[] }>
+  routine?: { title: string; summary: string; durationMinutes: number; painAware: boolean; exercises: any[] }
 }
 
 Deno.serve(async (request) => {
@@ -75,6 +78,10 @@ function buildPrompt(payload: unknown) {
     return buildPostCheckoutPrompt(payload)
   }
 
+  if ((payload as any)?.requestType === 'recovery_plan') {
+    return buildRecoveryPlanPrompt(payload)
+  }
+
   return `
 You are Athlete Reload's training readiness assistant for student athletes.
 
@@ -100,7 +107,7 @@ Calibration rules:
 - Always return 2-4 concrete items in each of preparation, during, and recovery. Those three arrays power the visible event-plan cards, so do not leave them empty.
 - Do not use numeric pain cutoffs or phrases such as "exceeds 3/10" in the recommendation. Describe meaningful changes plainly, such as sharp pain, worsening symptoms, altered movement, or inability to perform the motion normally.
 - Use the event type, sport, association, duration, intensity, surface, environment, and every selected pain area together. Tailor each modification to the athlete's sport and the actual event demands: upper-body symptoms may affect overhead work, throwing, catching, lifting, bracing, or contact; lower-body symptoms may affect sprinting, jumping, cutting, kicking, landing, or lifting; trunk symptoms may affect rotation, bracing, and contact. Head or neck symptoms require the red-flag rules.
-- Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, illness symptoms, sleep quality, recovery actions, and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, and performance/focus data as the prior-session context.
+- Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, illness symptoms, sleep quality, recovery actions, and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, and saved recoveryPlan action statuses or feedback as the prior-session context. Notice when an athlete repeatedly cannot complete an important recovery action, but do not shame them; make the next plan practical and prioritize the most important missing action.
 - Treat hydrationOz as the athlete's cumulative fluid total so far today, measured at the time of this event. Compare it with the event start time: an early-morning event should not be judged as if the athlete had the whole day to hydrate, while an evening event reasonably has a higher expected total. Never penalize an early event simply because the daily total is not yet high.
 - Base the recommendation on the selected event type and planned intensity. A high-intensity game, gym session, recovery day, and team practice should not get the same advice.
 - Use the athlete profile's sport, position, training style, and dominant side when they are provided. The same pain can affect participation differently by sport and event: shoulder symptoms matter more for volleyball serving or hitting than for a lower-body gym session, while a knee issue matters more for jumping, cutting, and running.
@@ -177,6 +184,59 @@ ${JSON.stringify(payload, null, 2)}
 `
 }
 
+function buildRecoveryPlanPrompt(payload: unknown) {
+  return `
+You are Athlete Reload's recovery planning assistant for student athletes.
+
+Return ONLY valid JSON. No markdown. No extra commentary.
+
+Build an actionable recovery plan from the athlete's latest completed checkout, its pre-event check-in, the completed event, athlete profile, equipment choice, available time, and the next scheduled event. This is not medical advice or injury diagnosis.
+
+Important behavior:
+- The recovery plan is for the completed event. Do not decide whether the athlete is cleared for the next event.
+- Use actual minutes, session difficulty, participation, session content, surface, sport, position, current soreness, pain before versus after, new symptoms, changed movement, and the next event's timing together.
+- Generate 3-6 prioritized Do now recovery steps. Each needs a title, why it matters, and a suggested completion time.
+- Include normal recovery habits such as fluids, a normal meal or snack, sleep, a cooldown, and comfortable mobility when appropriate. Do not prescribe exact medical or nutrition quantities.
+- If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
+- A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.
+- Do not imply stretching prevents soreness or injury or that temporary looseness proves healing. Present it as optional comfortable mobility or relaxation.
+- Treat the supplied timeAvailable as an exact routine time budget, not merely a maximum. Set routine.durationMinutes to exactly that selected whole-minute duration. The sum of the individual timed exercise steps must land within about one minute of that duration, with enough distinct exercises to cover full-body recovery. Adjust the content to effort, duration, participation, and the next event. The equipment array describes what is available, but the routine does not need to use every item. Always include a no-equipment option.
+- Build a real stretching and mobility routine, not generic filler. The routine must contain enough distinct stretches and movements to use the full exact time budget. For 10 minutes, return 10-14 individual exercise steps; for 15 minutes, 14-18; for 20 minutes, 18-24; for 30 minutes, 24-32. Each step should usually be a 20-45 second hold or 6-12 controlled repetitions; do not rely on long holds to fill time. Never prescribe a three-minute hold or a multi-minute single movement.
+- Only split a movement into separate left and right exercise steps when it is genuinely unilateral. For example, output "Half-kneeling hip-flexor stretch - Left" and then a separate "Half-kneeling hip-flexor stretch - Right" instead of one "each side" entry. Keep truly bilateral or full-body movements, such as cat-cow, child's pose, wall slides, or a symmetrical squat hold, as one exercise labeled "Both sides" or "Full body". Do not force a left/right split where it does not make sense.
+- Build every routine as full-body recovery, not only an injury-focused sequence. Include comfortable mobility or flexibility for the major regions relevant after activity: neck/upper back and shoulders, trunk/thoracic movement, hips, legs, and ankles/feet, unless a reported symptom makes a region inappropriate. Then devote additional exercises to the athlete's pain areas, sport demands, and session content. Keep painful or concerning areas protected rather than forcing direct stretching.
+- Do not include standalone walking, breathing, or generic ankle rolls as routine exercises. They are not acceptable filler. Only include a short cooldown movement when it is specific to the completed sport or a symptom/safety concern, and it must never replace the stretching and mobility work.
+- Prefer useful movement variety: dynamic range work, joint-specific mobility, controlled rotations, tissue-friendly flexibility, and side-specific stretches. Every routine should feel like something an athlete can actually follow exercise by exercise.
+- Prefer widely recognized, high-quality recovery and mobility movements with clear form cues: for example, cat-cow, open books, child's pose, thread-the-needle, wall slides, shoulder circles, chest doorway stretches, hip flexor stretches, 90/90 hip switches, adductor rock-backs, hamstring flosses, calf stretches, ankle dorsiflexion mobility, and gentle quad stretches when appropriate. Use niche or specialty exercises only when they clearly fit a specific sport, position, painful area, equipment choice, or movement limitation. Do not choose unusual movements just to create variety.
+- Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
+- For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
+- Use each exercise's instruction, side, feel, and avoid fields well. Include a mix of reps and holds, clear body-area labels, and enough useful work to fill the selected time without exceeding it.
+- Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
+- If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
+- Do not use a readiness score in this response. A stored score may be 0.
+
+JSON shape:
+{
+  "label": "Immediate recovery" | "Extra recovery" | "Monitor symptoms" | "Tell an adult / trainer",
+  "tone": "ready" | "caution" | "warning" | "danger",
+  "summary": "one short sentence",
+  "action": "one short paragraph describing the priority tonight",
+  "recoverySteps": [{"title":"Drink fluids","why":"Why this matters","when":"Right now"}],
+  "timeline": [{"title":"Right now","items":["..."]},{"title":"Within two hours","items":["..."]},{"title":"Tonight","items":["..."]},{"title":"Tomorrow morning","items":["..."]}],
+  "routine": {"title":"sport-aware routine title","summary":"optional comfortable routine explanation","durationMinutes":10,"painAware":true,"exercises":[{"name":"Easy walk","type":"Cooldown","area":"Whole body","side":"Both sides","durationSeconds":120,"instruction":"...","feel":"easy breathing","avoid":"sharp pain"}]},
+  "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
+  "recovery":["fallback recovery actions"],
+  "preparation":["right now actions"],
+  "during":["within two hours actions"],
+  "reasons":["specific reason"],
+  "score": 0,
+  "breakdown": []
+}
+
+Athlete data:
+${JSON.stringify(payload, null, 2)}
+`
+}
+
 function extractOutputText(data: any) {
   if (typeof data?.output_text === 'string') return data.output_text
 
@@ -230,11 +290,86 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
     preparation: ensurePlanItems(removeOverlyRestrictiveAdvice(prepare, calibration), sectionFallbacks.preparation),
     reassess: stringArray(value.reassess).slice(0, 3),
     recovery: ensurePlanItems(recovery, sectionFallbacks.recovery),
+    recoverySteps: normalizeRecoverySteps(value.recoverySteps, recovery),
     reasons: stringArray(value.reasons).slice(0, 5),
     score: calibratedScore,
     summary: stringOrFallback(value.summary, 'Recommendation generated from this event check-in.'),
+    timeline: normalizeRecoveryTimeline(value.timeline, prepare, during, recovery),
     tone,
+    routine: normalizeRoutine(value.routine, payload),
   }
+}
+
+function normalizeRecoverySteps(value: any, fallback: string[]) {
+  const steps = Array.isArray(value)
+    ? value
+      .filter((step) => step && typeof step === 'object')
+      .slice(0, 6)
+      .map((step, index) => ({
+        id: `recovery-step-${index}`,
+        title: stringOrFallback(step.title, 'Recovery action'),
+        why: stringOrFallback(step.why, 'This supports recovery after the completed session.'),
+        when: stringOrFallback(step.when, index === 0 ? 'Right now' : 'Tonight'),
+      }))
+    : []
+
+  if (steps.length > 0) return steps
+
+  return fallback.slice(0, 6).map((title, index) => ({
+    id: `recovery-step-${index}`,
+    title,
+    why: 'This supports recovery after the completed session.',
+    when: index === 0 ? 'Right now' : 'Tonight',
+  }))
+}
+
+function normalizeRecoveryTimeline(value: any, preparation: string[], during: string[], recovery: string[]) {
+  if (Array.isArray(value) && value.length > 0) {
+    return value.slice(0, 4).map((phase, index) => ({
+      title: stringOrFallback(phase?.title, ['Right now', 'Within two hours', 'Tonight', 'Tomorrow morning'][index]),
+      items: stringArray(phase?.items).slice(0, 5),
+    })).filter((phase) => phase.items.length > 0)
+  }
+
+  return [
+    { title: 'Right now', items: preparation.slice(0, 4) },
+    { title: 'Within two hours', items: during.slice(0, 4) },
+    { title: 'Tonight', items: recovery.slice(0, 5) },
+    { title: 'Tomorrow morning', items: ['Recheck soreness and pain before the next readiness check.'] },
+  ]
+}
+
+function normalizeRoutine(value: any, payload?: any) {
+  const exercises = Array.isArray(value?.exercises)
+    ? value.exercises.slice(0, 32).map((exercise: any) => ({
+      area: stringOrFallback(exercise?.area, 'Comfortable range'),
+      avoid: stringOrFallback(exercise?.avoid, 'Sharp or worsening pain'),
+      durationSeconds: Number.isFinite(Number(exercise?.durationSeconds))
+        ? clampNumber(exercise.durationSeconds, 15, 60)
+        : 0,
+      feel: stringOrFallback(exercise?.feel, 'Mild, comfortable tension'),
+      instruction: stringOrFallback(exercise?.instruction, 'Move slowly through a comfortable range.'),
+      name: stringOrFallback(exercise?.name, 'Gentle mobility'),
+      reps: Number.isFinite(Number(exercise?.reps))
+        ? clampNumber(exercise.reps, 4, 15)
+        : 0,
+      side: stringOrFallback(exercise?.side, 'Both sides'),
+      type: stringOrFallback(exercise?.type, 'Mobility'),
+    }))
+    : []
+
+  return {
+    durationMinutes: getRequestedRoutineMinutes(payload?.timeAvailable) ?? Math.max(10, Math.min(30, Math.round(Number(value?.durationMinutes) || 10))),
+    exercises,
+    painAware: Boolean(value?.painAware),
+    summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
+    title: stringOrFallback(value?.title, 'Cooldown and mobility'),
+  }
+}
+
+function getRequestedRoutineMinutes(value: unknown) {
+  const minutes = Number.parseInt(String(value ?? ''), 10)
+  return Number.isFinite(minutes) && minutes >= 10 && minutes <= 30 ? minutes : null
 }
 
 function formatEventLabel(label: string, payload: any) {

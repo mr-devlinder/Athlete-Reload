@@ -459,6 +459,17 @@ export async function deleteCheckInsForEvent(eventId) {
   if (error) throw error
 }
 
+export async function deleteCheckIn(checkInId) {
+  if (!checkInId) return
+
+  const { error } = await supabase
+    .from('check_ins')
+    .delete()
+    .eq('id', checkInId)
+
+  if (error) throw error
+}
+
 export async function deleteCheckInsForDate(date) {
   const { error } = await supabase
     .from('check_ins')
@@ -499,6 +510,17 @@ export async function deleteTrainingCheckoutsForEvent(eventId) {
     .from('training_checkouts')
     .delete()
     .eq('schedule_event_id', eventId)
+
+  if (error) throw error
+}
+
+export async function deleteTrainingCheckout(checkoutId) {
+  if (!checkoutId) return
+
+  const { error } = await supabase
+    .from('training_checkouts')
+    .delete()
+    .eq('id', checkoutId)
 
   if (error) throw error
 }

@@ -11,6 +11,7 @@ import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { HomeView } from './components/HomeView'
 import { HistoryView } from './components/HistoryView'
+import { RecoveryView } from './components/RecoveryView'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { ScheduleView } from './components/ScheduleView'
 import {
@@ -31,10 +32,12 @@ import {
   createScheduleEvent,
   createTrainingCheckout,
   deleteAssociation,
+  deleteCheckIn,
   deleteCheckInsForEvent,
   deletePainReportsForSource,
   deleteScheduleEvent,
   deleteCheckInsForDate,
+  deleteTrainingCheckout,
   deleteTrainingCheckoutsForEvent,
   loadAthleteData,
   loadAthleteProfile,
@@ -55,6 +58,10 @@ const views = [
   {
     icon: 'home',
     label: 'Home',
+  },
+  {
+    icon: 'recovery',
+    label: 'Recovery',
   },
   {
     icon: 'pulse',
@@ -428,7 +435,7 @@ function getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
     summary: painWorsened
       ? 'Pain increased after the session, so treat recovery and symptom monitoring seriously tonight.'
       : 'Session response looks stable, so a normal cooldown and recovery routine fits.',
-    tone: score >= 82 ? 'ready' : score >= 68 ? 'caution' : score >= 52 ? 'warning' : 'danger',
+    tone: score >= 75 ? 'ready' : score >= 50 ? 'caution' : 'danger',
   }
 }
 
@@ -485,6 +492,10 @@ function App() {
   const [checkoutEvent, setCheckoutEvent] = useState(null)
   const [submittedRecommendation, setSubmittedRecommendation] = useState(null)
   const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
+  const [generatedRecoveryPlan, setGeneratedRecoveryPlan] = useState(null)
+  const [generatedRecoveryCheckoutId, setGeneratedRecoveryCheckoutId] = useState(null)
+  const [isGeneratedRecoveryPlanSaved, setIsGeneratedRecoveryPlanSaved] = useState(false)
+  const [recoveryPlanStatus, setRecoveryPlanStatus] = useState('idle')
   const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
     scoreLabel: 'readiness',
     session: '',
@@ -1151,6 +1162,61 @@ function App() {
     )
   }
 
+  async function deleteHistoryEntry(entry, kind) {
+    if (!entry?.id) return
+
+    if (kind === 'recovery') {
+      const checkout = checkouts.find((item) => item.id === entry.id)
+      const event = schedule.find((item) => item.id === checkout?.eventId)
+      if (!checkout || !event) return
+
+      const recommendation = { ...(checkout.recommendation ?? {}) }
+      delete recommendation.recoveryPlan
+      const updatedCheckout = { ...checkout, recommendation }
+      setCheckouts((current) => [updatedCheckout, ...current.filter((item) => item.id !== checkout.id)])
+
+      if (isSupabaseSession) {
+        try {
+          const savedCheckout = await updateTrainingCheckout(checkout.id, event, updatedCheckout)
+          setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
+        } catch (error) {
+          console.error(error)
+          setDataStatus('error')
+        }
+      }
+      return
+    }
+
+    if (kind === 'checkout') {
+      setCheckouts((current) => current.filter((item) => item.id !== entry.id))
+      setPainReports((current) => current.filter((report) => report.sourceId !== entry.id))
+
+      if (isSupabaseSession) {
+        try {
+          await deletePainReportsForSource('checkout', entry.id)
+          await deleteTrainingCheckout(entry.id)
+        } catch (error) {
+          console.error(error)
+          setDataStatus('error')
+        }
+      }
+      return
+    }
+
+    setHistory((current) => current.filter((item) => item.id !== entry.id))
+    setPainReports((current) => current.filter((report) => report.sourceId !== entry.id))
+
+    if (isSupabaseSession) {
+      try {
+        await deletePainReportsForSource('check_in', entry.id)
+        await deleteCheckIn(entry.id)
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+      }
+    }
+  }
+
   async function addAssociation(name) {
     const trimmedName = name.trim()
 
@@ -1251,6 +1317,9 @@ function App() {
       ...checkout,
       recommendation: finalRecommendation,
     }
+
+    setGeneratedRecoveryPlan(null)
+    setRecoveryPlanStatus('idle')
 
     if (isSupabaseSession) {
       let savedCheckout
@@ -1353,6 +1422,111 @@ function App() {
       title: 'Post-training recovery plan.',
     })
     advanceCheckInAfterCheckout(event, savedCheckout)
+  }
+
+  async function generateRecoveryPlan({ equipment, timeAvailable }) {
+    const latestCheckout = [...checkouts]
+      .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
+
+    if (!latestCheckout) return
+
+    const completedEvent = schedule.find((event) => event.id === latestCheckout.eventId)
+    const preCheckIn = history.find((entry) => entry.eventId === latestCheckout.eventId)
+    const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : null
+
+    setRecoveryPlanStatus('loading')
+
+    try {
+      const plan = await generateAiRecommendation({
+        athleteProfile,
+        checkout: withoutNotes(latestCheckout),
+        completedEvent,
+        equipment,
+        nextScheduledEvent,
+        preCheckIn: withoutNotes(preCheckIn),
+        requestType: 'recovery_plan',
+        timeAvailable,
+      })
+
+      setGeneratedRecoveryPlan(plan)
+      setGeneratedRecoveryCheckoutId(latestCheckout.id)
+      setIsGeneratedRecoveryPlanSaved(false)
+      setRecoveryPlanStatus('ai')
+    } catch (error) {
+      console.error(error)
+      setRecoveryPlanStatus('error')
+    }
+  }
+
+  async function saveRecoveryPlan(plan) {
+    const checkoutId = generatedRecoveryCheckoutId
+    const checkout = checkouts.find((item) => item.id === checkoutId)
+    const completedEvent = schedule.find((event) => event.id === checkout?.eventId)
+
+    if (!checkout || !completedEvent || !plan) return false
+
+    const updatedCheckout = {
+      ...checkout,
+      recommendation: {
+        ...(checkout.recommendation ?? {}),
+        recoveryPlan: plan,
+      },
+    }
+
+    setCheckouts((current) => [updatedCheckout, ...current.filter((item) => item.id !== checkout.id)])
+
+    if (isSupabaseSession) {
+      try {
+        const savedCheckout = await updateTrainingCheckout(checkout.id, completedEvent, updatedCheckout)
+        setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+        return false
+      }
+    }
+
+    setGeneratedRecoveryPlan(null)
+    setGeneratedRecoveryCheckoutId(null)
+    setIsGeneratedRecoveryPlanSaved(false)
+    return true
+  }
+
+  async function updateRecoveryStep(stepId, status) {
+    const latestCheckout = [...checkouts]
+      .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
+    const completedEvent = schedule.find((event) => event.id === latestCheckout?.eventId)
+
+    if (!latestCheckout || !completedEvent) return
+
+    const recoveryPlan = latestCheckout.recommendation?.recoveryPlan
+    if (!recoveryPlan) return
+
+    const updatedCheckout = {
+      ...latestCheckout,
+      recommendation: {
+        ...latestCheckout.recommendation,
+        recoveryPlan: {
+          ...recoveryPlan,
+          stepStatuses: {
+            ...(recoveryPlan.stepStatuses ?? {}),
+            [stepId]: status,
+          },
+        },
+      },
+    }
+
+    setCheckouts((current) => [updatedCheckout, ...current.filter((item) => item.id !== latestCheckout.id)])
+
+    if (isSupabaseSession) {
+      try {
+        const savedCheckout = await updateTrainingCheckout(latestCheckout.id, completedEvent, updatedCheckout)
+        setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+      }
+    }
   }
 
   function advanceCheckInAfterCheckout(event, savedCheckout) {
@@ -1990,6 +2164,20 @@ function App() {
               />
             )}
 
+            {activeView === 'Recovery' && (
+              <RecoveryView
+                checkouts={checkouts}
+                generatedPlan={generatedRecoveryPlan}
+                generatedPlanSaved={isGeneratedRecoveryPlanSaved}
+                generationStatus={recoveryPlanStatus}
+                nextEvent={nextEvent}
+                onGeneratePlan={generateRecoveryPlan}
+                onSaveRecoveryPlan={saveRecoveryPlan}
+                onUpdateRecoveryStep={updateRecoveryStep}
+                schedule={schedule}
+              />
+            )}
+
             {activeView === 'Schedule' && (
               <ScheduleView
                 associations={associations}
@@ -2015,6 +2203,7 @@ function App() {
                 history={history}
                 insights={trendInsights}
                 onClear={clearHistory}
+                onDeleteEntry={deleteHistoryEntry}
               />
             )}
 
@@ -2593,6 +2782,16 @@ function NavIcon({ type }) {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M7 3v3M17 3v3M4.5 9.2h15M6.5 5.2h11A2.5 2.5 0 0 1 20 7.7v10.1a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.8V7.7a2.5 2.5 0 0 1 2.5-2.5Z" />
+      </svg>
+    )
+  }
+
+  if (type === 'recovery') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M20 7.5a8 8 0 1 0 1.2 6.8" />
+        <path d="M20 4v5h-5" />
+        <path d="M12 8v4l2.8 2" />
       </svg>
     )
   }

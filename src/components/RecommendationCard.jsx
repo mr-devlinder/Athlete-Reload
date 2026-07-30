@@ -4,6 +4,7 @@ export function RecommendationCard({
   scoreLabel = 'readiness',
   session,
 }) {
+  const readinessBand = getReadinessBand(recommendation.score)
   const statusLabel = {
     ai: 'AI',
     fallback: 'Local fallback',
@@ -12,14 +13,14 @@ export function RecommendationCard({
   }[recommendationStatus]
 
   return (
-    <aside className={`recommendation ${recommendation.tone}`}>
+    <aside className={`recommendation ${recommendation.tone} ${readinessBand}`}>
       <div className="recommendation-source">
         <p className="eyebrow">{session}</p>
         <span>{statusLabel}</span>
       </div>
       <div className="score-row">
         <div
-          className="score-ring"
+          className={`score-ring ${readinessBand}`}
           style={{ '--score': `${recommendation.score}%` }}
         >
           <span>{recommendation.score}</span>
@@ -42,6 +43,12 @@ export function RecommendationCard({
 
     </aside>
   )
+}
+
+function getReadinessBand(score) {
+  if (Number(score) >= 75) return 'readiness-green'
+  if (Number(score) >= 50) return 'readiness-yellow'
+  return 'readiness-red'
 }
 
 export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local', session }) {

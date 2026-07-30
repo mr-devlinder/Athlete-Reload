@@ -615,9 +615,9 @@ export function getRecommendation(checkIn) {
     tone:
       redFlag || status.label === 'Stop and Check In'
         ? 'danger'
-        : score < 56
-          ? 'warning'
-          : score < 84
+        : score < 50
+          ? 'danger'
+          : score < 75
             ? 'caution'
             : 'ready',
     intensity: status.intensity,

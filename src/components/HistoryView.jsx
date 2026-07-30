@@ -18,7 +18,7 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ checkouts = [], history, insights, onClear }) {
+export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
@@ -165,6 +165,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
                                   <HistoryGroup
                                     checkouts={week.items.filter((item) => item.kind === 'checkout')}
                                     checkIns={week.items.filter((item) => item.kind === 'check-in')}
+                                    onDeleteEntry={onDeleteEntry}
                                     onSelectEntry={setSelectedEntry}
                                   />
                                 </div>
@@ -209,7 +210,9 @@ export function HistoryView({ checkouts = [], history, insights, onClear }) {
   )
 }
 
-function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
+function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
+  const recoveryItems = checkouts.filter((item) => item.entry.recommendation?.recoveryPlan)
+
   return (
     <>
       <div className="history-subsection">
@@ -218,14 +221,16 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
           <p>No check-ins this week.</p>
         ) : (
           checkIns.map((item) => (
-            <button
-              className="history-row history-button"
+            <HistoryRow
+              className="history-row"
+              entry={item.entry}
               key={`check-${item.entry.id ?? item.entry.date}-${item.entry.createdAt ?? item.entry.note}`}
-              onClick={() => onSelectEntry(item.entry)}
-              type="button"
+              kind="check-in"
+              onDeleteEntry={onDeleteEntry}
+              onSelectEntry={onSelectEntry}
             >
               <div
-                className="score-ring history-score-ring"
+                className={`score-ring history-score-ring ${getReadinessBand(item.entry.score)}`}
                 style={{ '--score': `${item.entry.score}%` }}
               >
                 <span>{item.entry.score}</span>
@@ -234,7 +239,7 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
                 <p className="eyebrow">{formatHistoryDate(item.entry)}</p>
                 <strong>{item.entry.eventTitle ?? item.entry.session}</strong>
               </div>
-            </button>
+            </HistoryRow>
           ))
         )}
       </div>
@@ -245,11 +250,13 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
           <p>No checkouts this week.</p>
         ) : (
           checkouts.map((item) => (
-            <button
-              className="history-row history-button checkout-history-row"
+            <HistoryRow
+              className="history-row checkout-history-row"
+              entry={item.entry}
               key={`checkout-${item.entry.id}`}
-              onClick={() => onSelectEntry({ ...item.entry, historyKind: 'checkout' })}
-              type="button"
+              kind="checkout"
+              onDeleteEntry={onDeleteEntry}
+              onSelectEntry={onSelectEntry}
             >
               <span className="history-record-kind">Checkout</span>
               <div>
@@ -257,11 +264,76 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
                 <strong>{item.entry.title}</strong>
                 <small>{item.entry.actualMinutes} min · {item.entry.participation ?? item.entry.completionLevel}</small>
               </div>
-            </button>
+            </HistoryRow>
+          ))
+        )}
+      </div>
+
+      <div className="history-subsection">
+        <p className="eyebrow">Recovery</p>
+        {recoveryItems.length === 0 ? (
+          <p>No saved recovery plans this week.</p>
+        ) : (
+          recoveryItems.map((item) => (
+            <HistoryRow
+              className="history-row recovery-history-row"
+              entry={item.entry}
+              key={`recovery-${item.entry.id}`}
+              kind="recovery"
+              onDeleteEntry={onDeleteEntry}
+              onSelectEntry={onSelectEntry}
+            >
+              <span className="history-record-kind recovery-record-kind">Recovery</span>
+              <div>
+                <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
+                <strong>{item.entry.recommendation.recoveryPlan.routine?.title ?? 'Recovery plan'}</strong>
+                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine</small>
+              </div>
+            </HistoryRow>
           ))
         )}
       </div>
     </>
+  )
+}
+
+function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectEntry }) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const detailEntry = kind === 'check-in' ? entry : { ...entry, historyKind: kind }
+
+  function openDetails() {
+    setIsMenuOpen(false)
+    onSelectEntry(detailEntry)
+  }
+
+  function deleteEntry() {
+    setIsMenuOpen(false)
+    onDeleteEntry?.(entry, kind)
+  }
+
+  return (
+    <article className={`${className} history-row-with-menu`}>
+      <button className="history-row-main" onClick={openDetails} type="button">
+        {children}
+      </button>
+      <div className="history-quick-actions">
+        <button
+          aria-expanded={isMenuOpen}
+          aria-label="History item actions"
+          className="history-more-button"
+          onClick={() => setIsMenuOpen((current) => !current)}
+          type="button"
+        >
+          <span>...</span>
+        </button>
+        {isMenuOpen && (
+          <div className="history-quick-menu">
+            <button onClick={openDetails} type="button">View details</button>
+            <button className="history-delete-action" onClick={deleteEntry} type="button">Delete</button>
+          </div>
+        )}
+      </div>
+    </article>
   )
 }
 
@@ -348,6 +420,10 @@ function HistoryModal({ entry, onClose }) {
     return <CheckoutHistoryModal entry={entry} onClose={onClose} />
   }
 
+  if (entry.historyKind === 'recovery') {
+    return <RecoveryHistoryModal entry={entry} onClose={onClose} />
+  }
+
   const detailSections = getCheckInDetailSections(entry)
   const painSections = getPainDetailSections(entry)
 
@@ -378,7 +454,7 @@ function HistoryModal({ entry, onClose }) {
         ) : (
           <div className="history-readiness-summary">
             <div
-              className="score-ring"
+              className={`score-ring ${getReadinessBand(entry.score)}`}
               style={{ '--score': `${entry.score}%` }}
             >
               <span>{entry.score}</span>
@@ -506,6 +582,105 @@ function CheckoutHistoryModal({ entry, onClose }) {
         </div>
       </section>
     </div>
+  )
+}
+
+function getReadinessBand(score) {
+  if (Number(score) >= 75) return 'readiness-green'
+  if (Number(score) >= 50) return 'readiness-yellow'
+  return 'readiness-red'
+}
+
+function RecoveryHistoryModal({ entry, onClose }) {
+  const plan = entry.recommendation?.recoveryPlan
+
+  return (
+    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+      <section
+        className="event-modal history-modal glass-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="schedule-header">
+          <SectionHeading
+            eyebrow={formatCheckoutDate(entry)}
+            title="Recovery details."
+          />
+          <button className="ghost-close" onClick={onClose} type="button">
+            Close
+          </button>
+        </div>
+        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan for this session.</p>}
+      </section>
+    </div>
+  )
+}
+
+function SavedRecoveryPlan({ plan }) {
+  const steps = plan.recoverySteps ?? []
+  const statuses = plan.stepStatuses ?? {}
+  const feedback = plan.feedback
+
+  return (
+    <section className="history-detail-section saved-recovery-plan">
+      <p className="eyebrow">Saved recovery plan</p>
+      <h3>{plan.routine?.title ?? plan.label ?? 'Recovery routine'}</h3>
+      {plan.summary && <p className="saved-recovery-summary">{plan.summary}</p>}
+
+      {plan.timeline?.length > 0 && (
+        <div className="saved-recovery-timeline">
+          {plan.timeline.map((phase) => (
+            <article key={phase.title}>
+              <strong>{phase.title}</strong>
+              <ul>{phase.items?.map((item) => <li key={item}>{item}</li>)}</ul>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {steps.length > 0 && (
+        <div className="saved-recovery-actions">
+          <strong>Recovery actions</strong>
+          {steps.map((step, index) => {
+            const stepId = step.id ?? `recovery-step-${index}`
+            return (
+              <span key={stepId}>
+                <em>{statuses[stepId] ?? 'Not marked'}</em>
+                {step.title}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
+      {plan.routine?.exercises?.length > 0 && (
+        <div className="saved-recovery-routine">
+          <strong>{plan.routine.durationMinutes ?? 10}-minute routine</strong>
+          <ol>
+            {plan.routine.exercises.map((exercise, index) => (
+              <li key={`${exercise.name}-${index}`}>
+                <span>{exercise.type ?? 'Mobility'}</span>
+                <b>{exercise.name}</b>
+                <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+
+      {feedback && (
+        <div className="saved-recovery-feedback">
+          <strong>Recovery feedback</strong>
+          <div className="history-detail-grid">
+            <span><strong>Routine</strong>{feedback.completion || 'Not saved'}</span>
+            <span><strong>Feeling after</strong>{feedback.feeling || 'Not saved'}</span>
+            <span><strong>Tightness</strong>{feedback.tightness || 'Not saved'}</span>
+            <span><strong>Pain</strong>{feedback.pain || 'Not saved'}</span>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }
 
