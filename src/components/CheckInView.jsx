@@ -19,6 +19,7 @@ export function CheckInView({
   onOpenCheckout,
   onSelectEvent,
   onUpdate,
+  hasEarlierEventToday,
   isFirstEventToday,
 }) {
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
@@ -118,9 +119,9 @@ export function CheckInView({
         <Slider
           description="Whether your legs feel unusually heavy or slow."
           label="Leg heaviness"
-          min={1}
+          min={0}
           max={5}
-          value={checkIn.legHeaviness ?? 1}
+          value={checkIn.legHeaviness ?? 0}
           unit="/5"
           onChange={(value) => onUpdate('legHeaviness', value)}
         />
@@ -176,40 +177,42 @@ export function CheckInView({
           unit="/10"
           onChange={(value) => onUpdate('expectedDifficulty', value)}
         />
-        <fieldset className="recovery-actions-field">
-          <legend>Recovery actions completed</legend>
-          <p className="field-description">Select anything you did after your last session.</p>
-          <div className="recovery-action-options">
-            {[
-              ['Meal', 'Ate a recovery meal or snack.'],
-              ['Hydration', 'Replaced fluids after training.'],
-              ['Stretching or mobility', 'Did gentle mobility work.'],
-              ['Cooldown', 'Completed an easy cooldown.'],
-              ['Rest day', 'Took the day off from training.'],
-            ].map(([action, description]) => {
-              const checked = (checkIn.recoveryActions ?? []).includes(action)
+        {hasEarlierEventToday && (
+          <fieldset className="recovery-actions-field">
+            <legend>Recovery actions completed</legend>
+            <p className="field-description">Select anything you did after your earlier session today.</p>
+            <div className="recovery-action-options">
+              {[
+                ['Meal', 'Ate a recovery meal or snack.'],
+                ['Hydration', 'Replaced fluids after training.'],
+                ['Stretching or mobility', 'Did gentle mobility work.'],
+                ['Cooldown', 'Completed an easy cooldown.'],
+                ['Rest day', 'Took the day off from training.'],
+              ].map(([action, description]) => {
+                const checked = (checkIn.recoveryActions ?? []).includes(action)
 
-              return (
-                <label className={checked ? 'recovery-action checked' : 'recovery-action'} key={action}>
-                  <input
-                    checked={checked}
-                    type="checkbox"
-                    onChange={(event) => {
-                      const actions = new Set(checkIn.recoveryActions ?? [])
-                      if (event.target.checked) actions.add(action)
-                      else actions.delete(action)
-                      onUpdate('recoveryActions', Array.from(actions))
-                    }}
-                  />
-                  <span className="recovery-action-copy">
-                    <strong>{action}</strong>
-                    <small>{description}</small>
-                  </span>
-                </label>
-              )
-            })}
-          </div>
-        </fieldset>
+                return (
+                  <label className={checked ? 'recovery-action checked' : 'recovery-action'} key={action}>
+                    <input
+                      checked={checked}
+                      type="checkbox"
+                      onChange={(event) => {
+                        const actions = new Set(checkIn.recoveryActions ?? [])
+                        if (event.target.checked) actions.add(action)
+                        else actions.delete(action)
+                        onUpdate('recoveryActions', Array.from(actions))
+                      }}
+                    />
+                    <span className="recovery-action-copy">
+                      <strong>{action}</strong>
+                      <small>{description}</small>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </fieldset>
+        )}
 
           <BodyPainMap
           affectedMovement={checkIn.affectedMovement}
@@ -222,14 +225,6 @@ export function CheckInView({
           onDetailsChange={(value) => onUpdate('painDetails', value)}
           onChange={(value) => onUpdate('painMap', value)}
         />
-
-        <label className="notes-field">
-          Notes
-          <textarea
-            value={checkIn.notes}
-            onChange={(event) => onUpdate('notes', event.target.value)}
-          />
-        </label>
 
         <button className="primary-button" disabled={isSaving} onClick={onSave} type="button">
           {isSaving ? 'Generating recommendation...' : 'Save check-in'}

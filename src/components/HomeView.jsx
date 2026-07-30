@@ -1,4 +1,5 @@
-import { format, parseISO, startOfWeek, subDays } from 'date-fns'
+import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
@@ -25,7 +26,7 @@ export function HomeView({
   const recovery = getRecoverySummary(recentHistory, previousHistory)
   const workload = getWorkloadSummary(schedule, checkouts)
   const painWatchlist = getPainWatchlist(history, painReports)
-  const recentPainEntries = getRecentPainEntries(history, painReports)
+  const painTimelines = getPainTimelines(history, painReports)
   const patterns = getPatterns(history, checkouts, painWatchlist)
   const readinessTrend = history
     .filter((entry) => entry.date)
@@ -83,12 +84,6 @@ export function HomeView({
           value={`${recovery.sleepAverage}h`}
         />
         <DashboardMetric
-          label="Average fatigue"
-          value={`${recovery.fatigueAverage}/10`}
-          detail={recovery.fatigueAverage >= 7 ? 'High fatigue load' : undefined}
-          tone={recovery.fatigueAverage >= 7 ? 'warning' : 'neutral'}
-        />
-        <DashboardMetric
           label="Average weekly minutes"
           value={workload.averageWeeklyMinutes}
           detail="From checkouts"
@@ -140,7 +135,7 @@ export function HomeView({
         <article className="home-panel next-event-panel">
           <div className="panel-heading">
             <span>Next event</span>
-            <strong>{nextEvent ? format(parseISO(nextEvent.date), 'MMM d') : 'Open'}</strong>
+            <strong>{nextEvent ? format(parseISO(nextEvent.date), 'EEE, MMM d') : 'Open'}</strong>
           </div>
           {nextEvent ? (
             <>
@@ -209,20 +204,12 @@ export function HomeView({
           <div className="panel-heading">
             <span>Pain timeline</span>
           </div>
-          <h3>Recent reports</h3>
-          <div className="pain-watch-list">
-            {recentPainEntries.length === 0 ? (
-              <p>No pain areas have been reported recently.</p>
+          <h3>Pain by body area</h3>
+          <div className="pain-timeline-list">
+            {painTimelines.length === 0 ? (
+              <p>Report the same pain area on two different days to see its timeline here.</p>
             ) : (
-              recentPainEntries.slice(0, 6).map((entry) => (
-                <article key={`${entry.date}-${entry.label}-${entry.source}-${entry.score}`}>
-                  <div>
-                    <strong>{entry.label}</strong>
-                    <p>{entry.dateLabel} - {entry.source}</p>
-                  </div>
-                  <span>{entry.score}/10</span>
-                </article>
-              ))
+              painTimelines.map((timeline) => <PainTimelineChart key={timeline.label} timeline={timeline} />)
             )}
           </div>
         </article>
@@ -231,12 +218,13 @@ export function HomeView({
           <div className="panel-heading">
             <span>Pattern detection</span>
           </div>
-          <h3>What stands out</h3>
+          <h3>Personal patterns</h3>
           <div className="pattern-list">
             {patterns.map((pattern) => (
               <p key={pattern}>{pattern}</p>
             ))}
           </div>
+          <p className="pattern-disclaimer">These are personal patterns, not injury predictions or medical advice.</p>
         </article>
       </section>
     </div>
@@ -288,6 +276,35 @@ function ReadinessLineGraph({ entries }) {
         ))}
       </div>
     </div>
+  )
+}
+
+function PainTimelineChart({ timeline }) {
+  const gradientId = `pain-fill-${timeline.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+
+  return (
+    <article className="pain-timeline-chart">
+      <div className="pain-timeline-chart-heading">
+        <strong>{timeline.label}</strong>
+        <span>{timeline.points.length - 1} days reported</span>
+      </div>
+      <div className="pain-recharts-canvas" role="img" aria-label={`${timeline.label} pain over time`}>
+        <ResponsiveContainer height={188} width="100%">
+          <AreaChart accessibilityLayer={false} data={timeline.points} margin={{ bottom: 2, left: -12, right: 12, top: 10 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#ff6f61" stopOpacity={0.28} />
+                <stop offset="100%" stopColor="#ff6f61" stopOpacity={0.02} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.14)" strokeDasharray="3 5" vertical={false} />
+            <XAxis axisLine={false} dataKey="dateLabel" interval={0} minTickGap={0} tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false} />
+            <YAxis allowDecimals={false} axisLine={false} domain={[0, 10]} tick={{ fill: '#737984', fontSize: 11, fontWeight: 800 }} tickLine={false} ticks={[0, 5, 10]} width={30} />
+            <Area activeDot={false} dataKey="score" dot={{ fill: '#ffffff', r: 4, stroke: '#e9584a', strokeWidth: 2 }} fill={`url(#${gradientId})`} fillOpacity={1} stroke="#e9584a" strokeWidth={3} type="linear" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </article>
   )
 }
 
@@ -502,6 +519,45 @@ function getRecentPainEntries(history, painReports) {
     .sort((first, second) => new Date(`${second.date}T12:00:00`) - new Date(`${first.date}T12:00:00`))
 }
 
+function getPainTimelines(history, painReports) {
+  const byArea = new Map()
+
+  getRecentPainEntries(history, painReports).forEach((entry) => {
+    const dayEntries = byArea.get(entry.label) ?? new Map()
+    const current = dayEntries.get(entry.date)
+
+    if (!current || entry.source === 'Check-in' || (current.source !== 'Check-in' && entry.score > current.score)) {
+      dayEntries.set(entry.date, entry)
+    }
+    byArea.set(entry.label, dayEntries)
+  })
+
+  return [...byArea.entries()]
+    .map(([label, entries]) => {
+      const reportedPoints = [...entries.values()]
+        .sort((first, second) => first.date.localeCompare(second.date))
+        .slice(-6)
+      const firstPoint = reportedPoints[0]
+      const baselineDate = format(subDays(parseISO(firstPoint.date), 1), 'yyyy-MM-dd')
+
+      return {
+        label,
+        points: [
+          {
+            date: baselineDate,
+            dateLabel: formatPainDate(baselineDate),
+            score: 0,
+            source: 'Baseline',
+          },
+          ...reportedPoints,
+        ],
+      }
+    })
+    .filter((timeline) => timeline.points.length >= 2)
+    .sort((first, second) => second.points.at(-1).date.localeCompare(first.points.at(-1).date))
+    .slice(0, 4)
+}
+
 function dedupePainEntries(entries) {
   return entries.reduce((kept, entry) => {
     const duplicateIndex = kept.findIndex((current) => isSamePainReport(current, entry))
@@ -553,41 +609,224 @@ function addPainGroup(grouped, label, score) {
 }
 
 function getPatterns(history, checkouts, painWatchlist) {
-  const patterns = []
-  const recentHistory = getEntriesSince(history, 6)
-  const recentCheckouts = getEntriesSince(checkouts, 6)
-  const lowSleepDays = recentHistory.filter((entry) => Number(entry.sleep) < 7)
-  const highFatigueDays = recentHistory.filter((entry) => Number(entry.fatigue) >= 7)
-  const worsePainSessions = recentCheckouts.filter((checkout) =>
-    ['Slightly worse', 'Worse'].includes(checkout.painChange),
-  )
-  const hardSessions = recentCheckouts.filter((checkout) => Number(checkout.difficulty) >= 8)
+  const datedRecords = [...history, ...checkouts]
+    .filter((entry) => entry.date)
+    .sort((first, second) => first.date.localeCompare(second.date))
 
-  if (lowSleepDays.length >= 2) {
-    patterns.push(`Low sleep showed up ${lowSleepDays.length} times in the last 7 days.`)
+  if (datedRecords.length === 0) {
+    return ['Save check-ins and checkouts to begin building your personal baseline.']
   }
 
-  if (highFatigueDays.length >= 2) {
-    patterns.push(`Fatigue reached 7/10 or higher ${highFatigueDays.length} times recently.`)
+  const activeDays = new Set(datedRecords.map((entry) => entry.date))
+  const firstDate = parseISO(datedRecords[0].date)
+  const lastDate = parseISO(datedRecords.at(-1).date)
+  const hasBaseline = differenceInCalendarDays(lastDate, firstDate) >= 13 && activeDays.size >= 8
+
+  if (!hasBaseline) {
+    const daysLeft = Math.max(0, 14 - (differenceInCalendarDays(new Date(), firstDate) + 1))
+    return [
+      daysLeft > 0
+        ? `Keep logging events for about ${daysLeft} more day${daysLeft === 1 ? '' : 's'} to establish your personal baseline.`
+        : 'Keep logging a few more events to establish a reliable personal baseline.',
+    ]
   }
 
-  if (hardSessions.length >= 2) {
-    patterns.push(`${hardSessions.length} high-effort checkouts are stacking into this week.`)
+  const patterns = [
+    getPracticeEffortPattern(checkouts),
+    getSprintPainPattern(checkouts),
+    getSleepReadinessPattern(history),
+    getPersistentSorenessPattern(history),
+    getPlannedVsActualPattern(checkouts),
+    getHighEffortStackPattern(checkouts),
+    getConsecutivePainPattern(checkouts),
+    getGameFatiguePattern(checkouts),
+    getStressSleepPerformancePattern(history, checkouts),
+    getPainWatchlistPattern(painWatchlist),
+  ].filter(Boolean)
+
+  return patterns.slice(0, 5).length > 0
+    ? patterns.slice(0, 5)
+    : ['Your recent event records do not show a repeated pattern yet. Keep using check-ins and checkouts to sharpen the comparison.']
+}
+
+function getPracticeEffortPattern(checkouts) {
+  const practices = checkouts
+    .filter((entry) => isPractice(entry) && Number.isFinite(Number(entry.difficulty)))
+    .sort((first, second) => first.date.localeCompare(second.date))
+
+  if (practices.length < 5) return null
+
+  const recent = averageNumber(practices.slice(-3).map((entry) => entry.difficulty))
+  const baseline = averageNumber(practices.slice(0, -3).map((entry) => entry.difficulty))
+
+  return recent >= baseline + 1
+    ? 'Your last three practices felt harder than your usual practices.'
+    : null
+}
+
+function getSprintPainPattern(checkouts) {
+  const groups = new Map()
+
+  checkouts
+    .filter((entry) => entry.sessionContent?.includes('Sprinting'))
+    .forEach((entry) => {
+      getCheckoutPainAreas(entry).forEach((area) => {
+        const current = groups.get(area.label) ?? 0
+        groups.set(area.label, current + 1)
+      })
+    })
+
+  const [area, count] = [...groups.entries()].sort((first, second) => second[1] - first[1])[0] ?? []
+
+  return count >= 3
+    ? `${area} discomfort has appeared after sprint-heavy sessions ${count} times.`
+    : null
+}
+
+function getSleepReadinessPattern(history) {
+  const valid = history.filter((entry) => Number.isFinite(Number(entry.sleep)) && Number.isFinite(Number(entry.score)))
+  const shortSleep = valid.filter((entry) => Number(entry.sleep) < 7)
+  const rested = valid.filter((entry) => Number(entry.sleep) >= 7)
+
+  if (shortSleep.length < 3 || rested.length < 3) return null
+
+  const shortSleepReadiness = averageNumber(shortSleep.map((entry) => entry.score))
+  const restedReadiness = averageNumber(rested.map((entry) => entry.score))
+
+  return restedReadiness - shortSleepReadiness >= 8
+    ? 'You report lower readiness on days after fewer than seven hours of sleep.'
+    : null
+}
+
+function getPersistentSorenessPattern(history) {
+  const dailyEntries = getLatestEntryPerDay(history)
+  if (dailyEntries.length < 3) return null
+
+  const lastThree = dailyEntries.slice(-3)
+  const baseline = averageNumber(dailyEntries.slice(0, -2).map((entry) => entry.soreness))
+  const elevatedForTwoDays = Number(lastThree.at(-1)?.soreness) >= baseline + 1.5 && Number(lastThree.at(-2)?.soreness) >= baseline + 1.5
+
+  return elevatedForTwoDays
+    ? 'Your soreness usually settles sooner, but it has remained elevated across the last 48 hours.'
+    : null
+}
+
+function getPlannedVsActualPattern(checkouts) {
+  const recent = getEntriesSince(checkouts, 6).filter((entry) => Number.isFinite(Number(entry.difficulty)))
+  if (recent.length < 3) return null
+
+  const actual = averageNumber(recent.map((entry) => entry.difficulty))
+  const planned = averageNumber(recent.map((entry) => plannedDifficulty(entry.plannedLoad)))
+
+  return actual >= planned + 1
+    ? 'Your actual session effort has been higher than the planned intensity this week.'
+    : null
+}
+
+function getHighEffortStackPattern(checkouts) {
+  const recent = getEntriesSince(checkouts, 5)
+  const highEffort = recent.filter((entry) => Number(entry.difficulty) >= 8)
+
+  return highEffort.length >= 4
+    ? `You have completed ${highEffort.length} high-effort events in the last six days.`
+    : null
+}
+
+function getConsecutivePainPattern(checkouts) {
+  const ordered = [...checkouts].filter((entry) => entry.date).sort((first, second) => first.date.localeCompare(second.date))
+  const recentCheckouts = ordered.slice(-3)
+  if (recentCheckouts.length < 3) return null
+
+  for (const area of bodyPainAreas) {
+    const scores = recentCheckouts.map((entry) => Math.round(Number(entry.painMap?.[area.id] ?? 0) / 10))
+    if (scores.every((score) => score > 0) && scores[0] <= scores[1] && scores[1] <= scores[2] && scores[2] > scores[0]) {
+      return `${area.label} discomfort has increased across three consecutive checkouts.`
+    }
   }
 
-  if (worsePainSessions.length > 0) {
-    patterns.push(`${worsePainSessions.length} checkout reported worse pain after training.`)
-  }
+  return null
+}
 
-  if (painWatchlist[0]?.count >= 2) {
-    patterns.push(`${painWatchlist[0].label} has appeared ${painWatchlist[0].count} times. Track how it responds after sessions.`)
-  }
+function getGameFatiguePattern(checkouts) {
+  const games = checkouts.filter((entry) => isGame(entry) && Number.isFinite(Number(entry.postFatigue)))
+  const practices = checkouts.filter((entry) => isPractice(entry) && Number.isFinite(Number(entry.postFatigue)))
+  if (games.length < 3 || practices.length < 3) return null
 
-  if (patterns.length === 0) {
-    patterns.push('No strong trend yet. More event-based check-ins and checkouts will sharpen this dashboard.')
-  }
+  const gameMinutes = averageNumber(games.map((entry) => entry.actualMinutes))
+  const practiceMinutes = averageNumber(practices.map((entry) => entry.actualMinutes))
+  const gameFatigue = averageNumber(games.map((entry) => entry.postFatigue))
+  const practiceFatigue = averageNumber(practices.map((entry) => entry.postFatigue))
 
-  return patterns
+  return Math.abs(gameMinutes - practiceMinutes) <= 25 && gameFatigue >= practiceFatigue + 0.75
+    ? 'Games produce more post-event fatigue than practices of similar length.'
+    : null
+}
+
+function getStressSleepPerformancePattern(history, checkouts) {
+  const checkInByEvent = new Map(history.filter((entry) => entry.eventId).map((entry) => [entry.eventId, entry]))
+  const paired = checkouts
+    .map((checkout) => ({ checkIn: checkInByEvent.get(checkout.eventId), checkout }))
+    .filter(({ checkIn, checkout }) => checkIn && Number.isFinite(Number(checkout.performanceRating && performanceScore(checkout.performanceRating))))
+  const strained = paired.filter(({ checkIn }) => Number(checkIn.sleep) < 7 && stressScore(checkIn.stress) >= 4)
+  const other = paired.filter(({ checkIn }) => !(Number(checkIn.sleep) < 7 && stressScore(checkIn.stress) >= 4))
+
+  if (strained.length < 3 || other.length < 3) return null
+
+  return averageNumber(other.map(({ checkout }) => performanceScore(checkout.performanceRating))) - averageNumber(strained.map(({ checkout }) => performanceScore(checkout.performanceRating))) >= 0.75
+    ? 'Your performance ratings are usually lower when stress and sleep are both poor.'
+    : null
+}
+
+function getPainWatchlistPattern(painWatchlist) {
+  return painWatchlist[0]?.count >= 3
+    ? `${painWatchlist[0].label} has appeared in several recent reports. Track how it responds after specific session types.`
+    : null
+}
+
+function getCheckoutPainAreas(entry) {
+  return bodyPainAreas
+    .map((area) => ({ label: area.label, score: Math.round(Number(entry.painMap?.[area.id] ?? 0) / 10) }))
+    .filter((area) => area.score > 0)
+}
+
+function getLatestEntryPerDay(entries) {
+  const byDay = new Map()
+  entries.filter((entry) => entry.date).forEach((entry) => byDay.set(entry.date, entry))
+
+  return [...byDay.values()].sort((first, second) => first.date.localeCompare(second.date))
+}
+
+function isGame(entry) {
+  return /game|match|tournament|competition/i.test(`${entry.plannedType ?? ''} ${entry.title ?? ''}`)
+}
+
+function isPractice(entry) {
+  return /practice|training|team/i.test(`${entry.plannedType ?? ''} ${entry.title ?? ''}`) && !isGame(entry)
+}
+
+function plannedDifficulty(load) {
+  if (load === 'High') return 8
+  if (load === 'Low') return 3
+
+  return 6
+}
+
+function performanceScore(value) {
+  return ({ Worse: 1, 'Slightly worse': 2, Normal: 3, Better: 4, 'Much better': 5 })[value] ?? NaN
+}
+
+function stressScore(value) {
+  const numeric = Number(String(value).match(/^\d/)?.[0])
+  if (Number.isFinite(numeric)) return numeric
+  if (value === 'High') return 5
+  if (value === 'Medium') return 3
+
+  return 1
+}
+
+function averageNumber(values) {
+  const valid = values.map(Number).filter(Number.isFinite)
+  return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : 0
 }
 
 function getEventName(event) {

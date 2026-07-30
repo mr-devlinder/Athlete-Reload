@@ -251,12 +251,11 @@ function HistoryGroup({ checkouts, checkIns, onSelectEntry }) {
               onClick={() => onSelectEntry({ ...item.entry, historyKind: 'checkout' })}
               type="button"
             >
-              <div className="history-score checkout-score">
-                <span style={{ height: `${Math.min(100, item.entry.difficulty * 10)}%` }} />
-              </div>
+              <span className="history-record-kind">Checkout</span>
               <div>
                 <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
-                <strong>{item.entry.title}: {item.entry.actualMinutes} min, {item.entry.difficulty}/10</strong>
+                <strong>{item.entry.title}</strong>
+                <small>{item.entry.actualMinutes} min · {item.entry.participation ?? item.entry.completionLevel}</small>
               </div>
             </button>
           ))
@@ -440,17 +439,8 @@ function HistoryModal({ entry, onClose }) {
 }
 
 function CheckoutHistoryModal({ entry, onClose }) {
-  const details = [
-    ['Event', entry.title],
-    ['Date', formatCheckoutDate(entry)],
-    ['Planned type', entry.plannedType],
-    ['Planned load', entry.plannedLoad],
-    ['Planned minutes', valueWithUnit(entry.plannedMinutes, ' min')],
-    ['Actual minutes', valueWithUnit(entry.actualMinutes, ' min')],
-    ['Difficulty', valueWithUnit(entry.difficulty, '/10')],
-    ['Completion', entry.completionLevel],
-    ['Pain change', entry.painChange],
-  ]
+  const detailSections = getCheckoutDetailSections(entry)
+  const painSections = getPainDetailSections(entry)
 
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
@@ -470,29 +460,6 @@ function CheckoutHistoryModal({ entry, onClose }) {
           </button>
         </div>
 
-        <div className="history-readiness-summary">
-          <div
-            className="score-ring history-workload-ring"
-            style={{ '--score': `${Math.min(100, entry.difficulty * 10)}%` }}
-          >
-            <span>{entry.difficulty}</span>
-            <small>effort</small>
-          </div>
-          <div>
-            <strong>{entry.title}</strong>
-            <p>{entry.actualMinutes} minutes completed at {entry.difficulty}/10 difficulty.</p>
-          </div>
-        </div>
-
-        <div className="history-detail-grid">
-          {details.map(([label, value]) => (
-            <span key={label}>
-              <strong>{label}</strong>
-              {value ?? 'Not saved'}
-            </span>
-          ))}
-        </div>
-
         {entry.recommendation && (
           <RecoveryPlanCard
             recommendation={entry.recommendation}
@@ -501,12 +468,42 @@ function CheckoutHistoryModal({ entry, onClose }) {
           />
         )}
 
-        {entry.notes && (
-          <div className="history-note">
-            <strong>Notes</strong>
-            <p>{entry.notes}</p>
-          </div>
-        )}
+        <div className="history-detail-sections">
+          {detailSections.map((section) => (
+            <section className="history-detail-section" key={section.title}>
+              <h3>{section.title}</h3>
+              <div className="history-detail-grid">
+                {section.items.map(([label, value]) => (
+                  <span key={label}>
+                    <strong>{label}</strong>
+                    {value}
+                  </span>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {painSections.length > 0 && (
+            <section className="history-detail-section">
+              <h3>Post-event pain map</h3>
+              <div className="history-pain-stack">
+                {painSections.map((section) => (
+                  <article className="history-pain-card" key={section.title}>
+                    <strong>{section.title}</strong>
+                    <div className="history-detail-grid">
+                      {section.items.map(([label, value]) => (
+                        <span key={label}>
+                          <strong>{label}</strong>
+                          {value}
+                        </span>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </section>
     </div>
   )
@@ -539,30 +536,73 @@ function getCheckInDetailSections(entry) {
   return [
     {
       title: 'Event',
-      items: [
+      items: presentItems([
         ['Event', entry.eventTitle ?? entry.session],
         ['Date', formatHistoryDate(entry)],
-        ['Planned intensity', entry.plannedIntensity],
-        ['Previous day', entry.yesterdayLoad],
-      ],
+        ['Expected difficulty', valueWithUnit(entry.expectedDifficulty, '/10')],
+      ]),
     },
     {
       title: 'Readiness inputs',
-      items: [
-        ['Energy', valueWithUnit(entry.energy, '/10')],
-        ['Soreness', valueWithUnit(entry.soreness, '/10')],
-        ['Fatigue', valueWithUnit(entry.fatigue, '/10')],
-        ['Sleep', valueWithUnit(entry.sleep, 'h')],
-      ],
+      items: presentItems([
+        ['Energy', valueWithUnit(entry.energy, '/5')],
+        ['Muscle soreness', valueWithUnit(entry.soreness, '/5')],
+        ['General fatigue', valueWithUnit(entry.fatigue, '/5')],
+        ['Leg heaviness', valueWithUnit(entry.legHeaviness, '/5')],
+        ['Illness symptoms', entry.illnessSymptoms],
+      ]),
     },
     {
       title: 'Recovery context',
-      items: [
+      items: presentItems([
+        ['Sleep', valueWithUnit(entry.sleep, 'h')],
+        ['Sleep quality', valueWithUnit(entry.sleepQuality, '/5')],
         ['Stress', entry.stress],
-        ['Hydration', `${entry.hydrationOz ?? 0} fl oz (${entry.hydration})`],
-      ],
+        ['Today\'s hydration', entry.hydrationOz === undefined ? undefined : `${entry.hydrationOz} fl oz`],
+        ['Recovery actions', entry.recoveryActions?.length ? entry.recoveryActions.join(', ') : undefined],
+      ]),
     },
-  ]
+  ].filter((section) => section.items.length > 0)
+}
+
+function getCheckoutDetailSections(entry) {
+  const sessionLoad = entry.sessionLoad ?? Number(entry.actualMinutes ?? 0) * Number(entry.difficulty ?? 0)
+
+  return [
+    {
+      title: 'Session completed',
+      items: presentItems([
+        ['Event', entry.title],
+        ['Date', formatCheckoutDate(entry)],
+        ['Participation', entry.participation ?? entry.completionLevel],
+        ['Actual duration', valueWithUnit(entry.actualMinutes, ' min')],
+        ['Session effort', valueWithUnit(entry.difficulty, '/10')],
+        ['Session load', `${sessionLoad} units`],
+        ['Session content', entry.sessionContent?.length ? entry.sessionContent.join(', ') : undefined],
+      ]),
+    },
+    {
+      title: 'Physical response',
+      items: presentItems([
+        ['Fatigue after event', valueWithUnit(entry.postFatigue, '/5')],
+        ['Soreness after event', valueWithUnit(entry.postSoreness, '/5')],
+        ['Existing pain', entry.painChange],
+        ['New pain or discomfort', yesNo(entry.newPain)],
+        ['Cramping', yesNo(entry.cramping)],
+        ['Symptoms', entry.heatSymptoms?.length ? entry.heatSymptoms.join(', ') : undefined],
+        ['Movement or performance changed', yesNo(entry.movementChanged)],
+      ]),
+    },
+    {
+      title: 'Performance and focus',
+      items: presentItems([
+        ['Performance compared with normal', entry.performanceRating],
+        ['Mental focus', valueWithUnit(entry.mentalFocus, '/5')],
+        ['Motivation', valueWithUnit(entry.motivation, '/5')],
+        ['Fatigue affected decisions or technique', yesNo(entry.fatigueAffectedTechnique)],
+      ]),
+    },
+  ].filter((section) => section.items.length > 0)
 }
 
 function getPainDetailSections(entry) {
@@ -573,7 +613,7 @@ function getPainDetailSections(entry) {
 
       return {
         title: area.label,
-        items: getPainItems(entry, Math.round(severity / 10)),
+        items: getPainItems(entry, Math.round(severity / 10), area.id),
       }
     })
     .filter(Boolean)
@@ -594,13 +634,27 @@ function getPainDetailSections(entry) {
   ]
 }
 
-function getPainItems(entry, score) {
-  return [
+function getPainItems(entry, score, areaId) {
+  const details = areaId ? entry.painDetails?.[areaId] ?? {} : {}
+
+  return presentItems([
     ['Pain level', valueWithUnit(score, '/10')],
-    ['Injury type', entry.injuryType],
-    ['Pain type', entry.painType],
-    ['Hurts when', entry.hurtsWhen],
-  ]
+    ['Injury type', details.injuryType ?? entry.injuryType],
+    ['Pain type', details.painType ?? entry.painType],
+    ['When it occurs', details.hurtsWhen ?? entry.hurtsWhen],
+    ['Change since last session', details.painTrend ?? entry.painTrend],
+    ['Affected movement', details.affectedMovement ?? entry.affectedMovement],
+  ])
+}
+
+function presentItems(items) {
+  return items.filter(([, value]) => value !== undefined && value !== null && value !== '')
+}
+
+function yesNo(value) {
+  if (value === undefined || value === null) return undefined
+
+  return value ? 'Yes' : 'No'
 }
 
 function getCutoffDate(days) {

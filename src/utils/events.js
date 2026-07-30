@@ -10,17 +10,26 @@ export function parseEventDateTime(event) {
 
   const time = event.time?.trim()
 
-  if (!time) {
-    return new Date(`${event.date}T00:00:00`)
+  if (!time) return null
+
+  const dateMatch = event.date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  const timeMatch = time.match(/^(\d{1,2}):(\d{2})(?:\s*([AaPp][Mm]))?$/)
+
+  if (!dateMatch || !timeMatch) return null
+
+  const [, year, month, day] = dateMatch
+  const [, hourText, minuteText, period] = timeMatch
+  let hour = Number(hourText)
+  const minute = Number(minuteText)
+
+  if (minute > 59 || hour > 23 || hour < 0) return null
+
+  if (period) {
+    if (hour < 1 || hour > 12) return null
+    hour = hour % 12 + (period.toLowerCase() === 'pm' ? 12 : 0)
   }
 
-  if (/^\d{2}:\d{2}$/.test(time)) {
-    return new Date(`${event.date}T${time}:00`)
-  }
-
-  const parsed = new Date(`${event.date} ${time}`)
-
-  return Number.isNaN(parsed.getTime()) ? new Date(`${event.date}T00:00:00`) : parsed
+  return new Date(Number(year), Number(month) - 1, Number(day), hour, minute)
 }
 
 export function hasEventStarted(event, now = new Date()) {

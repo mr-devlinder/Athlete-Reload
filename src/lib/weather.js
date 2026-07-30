@@ -11,3 +11,18 @@ export async function getEventWeather(city) {
 
   return { city: `${result.name}, ${result.admin1 ?? result.country_code}`, feelsLike: Math.round(current.apparent_temperature), temperature: Math.round(current.temperature_2m), wet: Number(current.precipitation) > 0 || [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(Number(current.weather_code)) }
 }
+
+export async function searchUsCities(query) {
+  const name = query?.trim()
+  if (!name || name.length < 2) return []
+
+  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&countryCode=US&name=${encodeURIComponent(name)}`)
+  if (!response.ok) throw new Error('City search is temporarily unavailable.')
+
+  const data = await response.json()
+
+  return (data.results ?? []).map((result) => ({
+    id: `${result.id ?? `${result.latitude}-${result.longitude}`}`,
+    label: `${result.name}, ${result.admin1 ?? result.country_code}`,
+  }))
+}

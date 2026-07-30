@@ -390,6 +390,7 @@ function getInjuryTypeRisk(checkIn, pain) {
     'Tendon irritation': pain <= 2 ? 4 : 8,
     'Joint irritation': pain <= 2 ? 4 : 9,
     'Impact bruise': pain <= 2 ? 2 : 5,
+    'Potential Bone Bruise': pain <= 2 ? 2 : 5,
     'Overuse soreness': pain <= 2 ? 2 : 5,
     Cramp: pain <= 2 ? 2 : 5,
     'Bone stress': 20,
@@ -564,10 +565,11 @@ function getSummary(checkIn, status, reasons) {
 export function getRecommendation(checkIn) {
   const pain = getPain(checkIn)
   const breakdown = [
-    { label: 'Energy', value: -Math.max(0, 8 - checkIn.energy) * 4 },
+    { label: 'Energy', value: -Math.max(0, 5 - checkIn.energy) * 5 },
     { label: 'Sleep', value: -Math.max(0, 8 - checkIn.sleep) * 6 },
-    { label: 'Fatigue', value: -checkIn.fatigue * 4 },
-    { label: 'Soreness', value: -checkIn.soreness * 4 },
+    { label: 'Fatigue', value: -Math.max(0, checkIn.fatigue - 1) * 5 },
+    { label: 'Soreness', value: -Math.max(0, checkIn.soreness - 1) * 5 },
+    { label: 'Leg heaviness', value: -Math.max(0, (checkIn.legHeaviness ?? 1) - 1) * 4 },
     { label: 'Pain level', value: -pain * 8 },
     { label: 'Injury type', value: -getInjuryTypeRisk(checkIn, pain) },
     { label: 'Pain type', value: -getPainTypeRisk(checkIn, pain) },
@@ -593,8 +595,13 @@ export function getRecommendation(checkIn) {
     },
   ].filter((item) => item.value !== 0)
   const adjustment = breakdown.reduce((total, item) => total + item.value, 0)
-  const score = Math.max(6, Math.min(98, 100 + adjustment))
+  const rawScore = Math.max(6, Math.min(98, 100 + adjustment))
   const redFlag = hasRedFlag(checkIn)
+  const score = !redFlag && pain > 0 && pain <= 2
+    ? Math.max(rawScore, 64)
+    : !redFlag && pain >= 3 && pain <= 4
+      ? Math.max(rawScore, 56)
+      : rawScore
   const status = redFlag
     ? { label: 'Stop and Check In', intensity: 'No training' }
     : getStatus(score)

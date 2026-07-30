@@ -1,0 +1,16 @@
+alter table public.training_checkouts
+  add column if not exists participation text not null default 'Full',
+  add column if not exists session_content jsonb not null default '[]'::jsonb,
+  add column if not exists session_load integer not null default 0,
+  add column if not exists post_fatigue integer not null default 3 check (post_fatigue between 1 and 5),
+  add column if not exists post_soreness integer not null default 3 check (post_soreness between 1 and 5),
+  add column if not exists new_pain boolean not null default false,
+  add column if not exists cramping boolean not null default false,
+  add column if not exists heat_symptoms jsonb not null default '[]'::jsonb,
+  add column if not exists movement_changed boolean not null default false,
+  add column if not exists performance_rating text not null default 'Normal',
+  add column if not exists mental_focus integer not null default 3 check (mental_focus between 1 and 5),
+  add column if not exists motivation integer not null default 3 check (motivation between 1 and 5),
+  add column if not exists fatigue_affected_technique boolean not null default false,
+  add column if not exists pain_map jsonb not null default '{}'::jsonb,
+  add column if not exists pain_details jsonb not null default '{}'::jsonb;

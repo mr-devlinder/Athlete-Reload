@@ -31,6 +31,13 @@ export function RecommendationCard({
         </div>
       </div>
 
+      {recommendation.action && (
+        <section className="training-action">
+          <strong>Today&apos;s plan</strong>
+          <p>{recommendation.action}</p>
+        </section>
+      )}
+
       <RecommendationSections recommendation={recommendation} />
 
     </aside>
@@ -57,7 +64,21 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
         <p>{recommendation.summary}</p>
       </div>
 
-      <RecommendationSections recommendation={recommendation} />
+      {recommendation.action && (
+        <section className="training-action">
+          <strong>Recovery plan</strong>
+          <p>{recommendation.action}</p>
+        </section>
+      )}
+
+      <RecommendationSections recoveryMode recommendation={recommendation} />
+
+      {recommendation.nextEventWarning && (
+        <div className="next-event-warning">
+          <strong>Next event</strong>
+          <p>{recommendation.nextEventWarning}</p>
+        </div>
+      )}
 
       {recommendation.reasons.length > 0 && (
         <div className="recovery-reasons">
@@ -71,20 +92,21 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
   )
 }
 
-function RecommendationSections({ recommendation }) {
+function RecommendationSections({ recommendation, recoveryMode = false }) {
   const sections = [
-    ['Prepare', recommendation.preparation],
-    ['During the event', recommendation.during],
-    ['After the event', recommendation.recovery],
-  ].filter(([, items]) => items?.length)
+    [recoveryMode ? 'Right now' : 'Prepare', recoveryMode ? 'Start with the immediate steps that support recovery.' : 'Set up the event with the right warm-up and adjustments.', recommendation.preparation],
+    [recoveryMode ? 'Next few hours' : 'During the event', recoveryMode ? 'Use these cues while your body settles after the session.' : 'Keep these modifications in place while you participate.', recommendation.during],
+    [recoveryMode ? 'Later today' : 'After the event', recoveryMode ? 'Finish the day with the recovery actions that matter most.' : 'Close the event with recovery and symptom-aware follow-through.', recommendation.recovery],
+  ].filter(([, , items]) => items?.length)
 
   if (sections.length === 0) return null
 
   return (
     <div className="recommendation-sections">
-      {sections.map(([title, items]) => (
-        <section className={`recommendation-section${title === 'After the event' ? ' after-event' : ''}`} key={title}>
+      {sections.map(([title, description, items]) => (
+        <section className={`recommendation-section${title === 'After the event' || title === 'Later today' ? ' after-event' : ''}`} key={title}>
           <strong>{title}</strong>
+          <p>{description}</p>
           <ul>
             {items.map((item) => <li key={item}>{item}</li>)}
           </ul>

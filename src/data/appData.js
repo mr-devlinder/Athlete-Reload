@@ -11,12 +11,12 @@ export const todayLabel = format(today, 'EEEE, MMMM d')
 
 export const checkInDefaults = {
   energy: 5,
-  soreness: 1,
+  soreness: 0,
   pain: 0,
   painMap: createEmptyPainMap(),
   painDetails: {},
-  fatigue: 1,
-  legHeaviness: 1,
+  fatigue: 0,
+  legHeaviness: 0,
   illnessSymptoms: 'None',
   sleep: 10,
   sleepQuality: 5,

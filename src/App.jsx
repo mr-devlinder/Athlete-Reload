@@ -8,6 +8,7 @@ import { GuidedTour } from './components/GuidedTour'
 import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
+import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { HomeView } from './components/HomeView'
 import { HistoryView } from './components/HistoryView'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
@@ -105,6 +106,10 @@ function normalizeScheduleItem(item, index) {
     load: item.load ?? 'Medium',
     note: item.note ?? '',
     association: item.association ?? 'Personal',
+    environment: item.environment ?? 'Outdoor',
+    expectedDuration: Number(item.expectedDuration ?? item.plannedMinutes ?? 60),
+    location: item.location ?? '',
+    surface: item.surface ?? 'Grass',
     time: item.time ?? '',
     title: item.type ?? item.title ?? 'Training',
     type: item.type ?? 'Team practice',
@@ -154,6 +159,25 @@ function getHydrationStatus(hydrationOz = 0) {
   return 'Poor'
 }
 
+function normalizeFivePointValue(value, fallback = 1) {
+  const number = Number(value)
+
+  if (!Number.isFinite(number)) return fallback
+
+  return Math.max(0, Math.min(5, Math.round(number)))
+}
+
+function normalizeCheckInScales(checkIn) {
+  return {
+    ...checkIn,
+    energy: normalizeFivePointValue(checkIn.energy, 5),
+    fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
+    legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
+    sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, 5),
+    soreness: normalizeFivePointValue(checkIn.soreness, 0),
+  }
+}
+
 function getYesterdayLoadFromSchedule(schedule) {
   const yesterdayIso = format(subDays(new Date(), 1), 'yyyy-MM-dd')
   const yesterdayEvents = schedule.filter((event) => event.date === yesterdayIso)
@@ -170,26 +194,26 @@ function applyPainMapToCheckIn(checkIn) {
   const severity = primaryArea?.severity ?? 0
   const pain = severity > 0 ? Math.max(1, Math.round(severity / 10)) : 0
 
-  return {
+  return normalizeCheckInScales({
     ...checkIn,
     hurtsWhen: pain > 0 ? checkIn.hurtsWhen : 'At rest',
     injuryType: pain > 0 ? checkIn.injuryType : 'Unknown',
     location: pain > 0 ? primaryArea.recommendationLocation : 'Hamstring',
     pain,
     painType: pain > 0 ? checkIn.painType : 'No pain',
-  }
+  })
 }
 
 function checkInFromHistoryEntry(entry, fallback) {
   if (!entry) return fallback
 
-  return {
+  return normalizeCheckInScales({
     ...fallback,
     energy: entry.energy,
     fatigue: entry.fatigue,
     hurtsWhen: entry.hurtsWhen,
     hydration: entry.hydration,
-    hydrationOz: entry.hydrationOz ?? fallback.hydrationOz ?? 64,
+    hydrationOz: entry.hydrationOz ?? 0,
     injuryType: entry.injuryType,
     location: entry.location,
     notes: entry.note ?? '',
@@ -199,7 +223,7 @@ function checkInFromHistoryEntry(entry, fallback) {
     sleep: entry.sleep,
     soreness: entry.soreness,
     stress: entry.stress,
-  }
+  })
 }
 
 function getComparableCheckIn(checkIn) {
@@ -262,6 +286,14 @@ function getFreshCheckInDefaults() {
   }
 }
 
+function withoutNotes(value) {
+  if (Array.isArray(value)) return value.map(withoutNotes)
+  if (!value || typeof value !== 'object') return value
+
+  const { note: _note, notes: _notes, ...rest } = value
+  return rest
+}
+
 function getSharedSleepContext(history, date) {
   const firstCheckIn = history
     .filter((entry) => (entry.checkInType ?? 'pre_event') === 'pre_event' && entry.date === date)
@@ -289,15 +321,27 @@ function getNextScheduledEvent(schedule, event) {
   return sortedSchedule.slice(currentIndex + 1)[0] ?? null
 }
 
-function getHoursBetweenEvents(event, nextEvent) {
-  if (!nextEvent) return null
+function getPreviousCheckout(checkouts, schedule, currentEvent) {
+  const currentEventTime = getEventDateTime(currentEvent)
 
-  const currentDate = getEventDateTime(event)
-  const nextDate = getEventDateTime(nextEvent)
+  return checkouts
+    .map((checkout) => ({
+      checkout,
+      event: schedule.find((event) => event.id === checkout.eventId),
+    }))
+    .filter(({ checkout, event }) => {
+      if (checkout.eventId === currentEvent?.id) return false
 
-  if (!currentDate || !nextDate) return null
+      const checkoutEventTime = getEventDateTime(event)
+      if (currentEventTime && checkoutEventTime) return checkoutEventTime < currentEventTime
 
-  return Math.max(0, Math.round((nextDate - currentDate) / (1000 * 60 * 60)))
+      return String(checkout.date ?? '') < String(currentEvent?.date ?? '')
+    })
+    .sort((first, second) => {
+      const firstTime = getEventDateTime(first.event)?.getTime() ?? 0
+      const secondTime = getEventDateTime(second.event)?.getTime() ?? 0
+      return secondTime - firstTime
+    })[0]?.checkout ?? null
 }
 
 function getEventDateTime(event) {
@@ -306,28 +350,37 @@ function getEventDateTime(event) {
   const minutes = getScheduleTimeValue(event.time)
   const date = new Date(`${event.date}T00:00:00`)
 
-  date.setMinutes(minutes >= 24 * 60 ? 0 : minutes)
+  const safeMinutes = minutes >= 24 * 60 ? 0 : minutes
+  date.setHours(Math.floor(safeMinutes / 60), safeMinutes % 60, 0, 0)
 
   return date
 }
 
 function getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
   const difficulty = Number(checkout.difficulty)
-  const painWorsened = ['Slightly worse', 'Worse'].includes(checkout.painChange)
-  const stoppedShort = ['Modified', 'Stopped early', 'Missed'].includes(checkout.completionLevel)
+  const sessionLoad = Number(checkout.actualMinutes ?? 0) * difficulty
+  const painWorsened = ['Slightly worse', 'Much worse'].includes(checkout.painChange)
+  const stoppedShort = ['Modified', 'Partial', 'Did not participate'].includes(checkout.participation)
+  const heatConcern = checkout.heatSymptoms?.length > 0 || checkout.cramping
+  const concerningSymptoms = heatConcern || checkout.newPain || checkout.movementChanged
   let score = 86
 
   if (difficulty >= 8) score -= 12
-  if (painWorsened) score -= checkout.painChange === 'Worse' ? 24 : 12
+  if (painWorsened) score -= checkout.painChange === 'Much worse' ? 24 : 12
   if (stoppedShort) score -= 10
+  if (concerningSymptoms) score -= 16
   if (preCheckIn?.score && preCheckIn.score < 70) score -= 6
 
   score = Math.max(30, Math.min(96, Math.round(score)))
 
   return {
-    action: painWorsened
-      ? 'Start with a calm cooldown, then use ice on the irritated area for 10-15 minutes, elevate it if there is swelling, hydrate, eat a normal meal, and tell an adult, coach, or athletic trainer if pain keeps rising or feels sharp/unstable.'
-      : 'Start recovery now: do an easy cooldown, drink water, eat a normal meal, use light stretching or mobility for tight areas, and set up a good night of sleep.',
+    action: heatConcern
+      ? 'Stop any additional exercise, move to a cool place, and tell a parent, coach, or athletic trainer now. Follow your team or medical hydration guidance and seek urgent help for fainting, confusion, vomiting, or severe symptoms.'
+      : painWorsened || checkout.newPain || checkout.movementChanged
+        ? 'Start with a calm cooldown, then use comfort measures that do not increase symptoms. Avoid additional impact work tonight and tell a parent, coach, or athletic trainer if pain keeps rising, changes movement, or feels sharp or unstable.'
+        : difficulty >= 8
+          ? 'Begin recovery now with a short cooldown, steady fluids, and a balanced carbohydrate-and-protein meal or snack. Skip any extra conditioning tonight and protect a full night of sleep.'
+          : 'Complete a short cooldown, have a normal recovery meal and fluids, then use gentle mobility only where it stays comfortable. Do not add extra training simply because this session was lighter.',
     avoid: painWorsened
       ? ['Extra training tonight', 'Aggressive stretching into pain', 'Ignoring worsening symptoms']
       : difficulty >= 8
@@ -338,18 +391,38 @@ function getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
       { label: 'Pain change', value: painWorsened ? -14 : 6 },
       { label: 'Completion', value: stoppedShort ? -8 : 5 },
     ],
+    during: heatConcern
+      ? ['Stay in a cool environment and have an adult, coach, or trainer monitor symptoms for the next few hours.']
+      : concerningSymptoms
+        ? ['Monitor the changed area over the next few hours and tell an adult if symptoms worsen.']
+        : [],
     focus: [
       'Hydrate steadily',
       'Eat a normal recovery meal',
       painWorsened ? 'Ice the irritated area' : 'Light stretching or mobility',
       'Prioritize sleep',
     ],
-    intensity: painWorsened ? 'Soreness care' : difficulty >= 8 ? 'High-load recovery' : 'Normal cooldown',
-    label: painWorsened ? 'Monitor Symptoms' : stoppedShort ? 'Extra Recovery' : 'Normal Recovery',
+    intensity: heatConcern ? 'Heat and symptom care' : painWorsened ? 'Soreness care' : difficulty >= 8 ? 'High-load recovery' : 'Normal cooldown',
+    label: heatConcern ? 'Tell an Adult / Trainer' : painWorsened || checkout.newPain || checkout.movementChanged ? 'Monitor Symptoms' : stoppedShort ? 'Extra Recovery' : 'Normal Recovery',
+    nextEventWarning: heatConcern
+      ? 'Your next event should be treated as assessment-needed until these symptoms have resolved and an adult, coach, or trainer says it is appropriate.'
+      : concerningSymptoms || painWorsened
+        ? 'Your next check-in should flag this response for reassessment before you begin the event.'
+      : sessionLoad >= 600
+        ? 'Your next check-in should account for this high personal workload.'
+        : '',
+    preparation: ['Begin a short, easy cooldown before leaving the training area.'],
+    recovery: heatConcern
+      ? ['Move to a cool environment and stop additional exercise.', 'Tell a parent, coach, or athletic trainer about the symptoms now.', 'Follow your team or medical hydration guidance and monitor for worsening symptoms.']
+      : painWorsened || checkout.newPain || checkout.movementChanged
+        ? ['Avoid additional impact exercise tonight.', 'Use gentle recovery only and monitor the changed area before sleep.', 'Tell a parent, coach, or athletic trainer if symptoms continue to rise.']
+        : difficulty >= 8
+          ? ['Rehydrate over the evening based on your usual team guidance.', 'Eat a normal meal or snack with carbohydrates and protein.', 'Use an easy cooldown and set up a full night of sleep.']
+          : ['Have normal fluids and a meal or snack after the session.', 'Use gentle mobility only where it feels comfortable.', 'Keep the rest of the day easy and set up a full night of sleep.'],
     reasons: [
-      `${checkout.actualMinutes} minutes at ${difficulty}/10 difficulty`,
+      `${checkout.actualMinutes} minutes at ${difficulty}/10 difficulty (${sessionLoad} load units)`,
       `Pain change: ${checkout.painChange}`,
-      `Completion: ${checkout.completionLevel}`,
+      `Participation: ${checkout.participation ?? checkout.completionLevel}`,
     ],
     score,
     summary: painWorsened
@@ -419,12 +492,13 @@ function App() {
   })
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
+  const [isAthleteProfileOpen, setIsAthleteProfileOpen] = useState(false)
   const [navLens, setNavLens] = useState(null)
   const lensFrameRef = useRef(null)
   const lensNodeRef = useRef(null)
   const lensTargetRef = useRef(null)
   const navRef = useRef(null)
-  const [checkIn, setCheckIn] = useState(savedState?.checkIn ?? checkInDefaults)
+  const [checkIn, setCheckIn] = useState(() => normalizeCheckInScales(savedState?.checkIn ?? checkInDefaults))
   const [history, setHistory] = useState(savedState?.history ?? [])
   const [checkouts, setCheckouts] = useState(savedState?.checkouts ?? [])
   const [painReports, setPainReports] = useState(savedState?.painReports ?? [])
@@ -470,18 +544,23 @@ function App() {
   )
   const scheduleDrivenCheckIn = useMemo(
     () => ({
-      ...applyPainMapToCheckIn(checkIn),
+      ...applyPainMapToCheckIn(normalizeCheckInScales(checkIn)),
       checkInType: 'pre_event',
       eventDate: selectedCheckInEvent?.date ?? todayIso,
       eventId: selectedCheckInEvent?.id ?? null,
       eventTime: selectedCheckInEvent?.time ?? '',
       eventTitle: selectedCheckInEvent?.title ?? 'Open training day',
+      notes: '',
       plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
       session: getSessionFromEvent(selectedCheckInEvent) || getSessionFromSchedule(todayEvents),
       yesterdayLoad: getYesterdayLoadFromSchedule(schedule),
     }),
     [checkIn, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
+  const hasEarlierEventToday = Boolean(selectedCheckInEvent && todayEvents.some((event) =>
+    event.id !== selectedCheckInEvent.id
+      && getScheduleTimeValue(event.time) < getScheduleTimeValue(selectedCheckInEvent.time),
+  ))
 
   const localRecommendation = useMemo(
     () => getRecommendation(scheduleDrivenCheckIn),
@@ -759,6 +838,14 @@ function App() {
   }, [])
 
   function updateField(field, value) {
+    if (['energy', 'soreness', 'fatigue', 'legHeaviness', 'sleepQuality'].includes(field)) {
+      setCheckIn((current) => ({
+        ...current,
+        [field]: normalizeFivePointValue(value, field === 'energy' || field === 'sleepQuality' ? 5 : 0),
+      }))
+      return
+    }
+
     if (field === 'hydrationOz') {
       const hydrationOz = Math.max(0, Number(value) || 0)
 
@@ -839,14 +926,13 @@ function App() {
 
     if (isSupabaseSession) {
       try {
+        const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
+
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
-          checkIn: scheduleDrivenCheckIn,
-          checkouts: checkouts.slice(0, 12),
-          history: history.slice(0, 10),
-          localRecommendation,
-          painReports: painReports.slice(0, 20),
-          schedule: schedule.slice(0, 20),
+          checkIn: withoutNotes(scheduleDrivenCheckIn),
+          event: selectedCheckInEvent,
+          previousCheckout: withoutNotes(previousCheckout),
         })
         finalRecommendationStatus = 'ai'
       } catch (error) {
@@ -1143,19 +1229,15 @@ function App() {
 
     if (isSupabaseSession) {
       try {
+        const previousCheckout = getPreviousCheckout(checkouts, schedule, event)
+
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
-          checkout,
-          checkouts: checkouts.slice(0, 12),
+          checkout: withoutNotes(checkout),
           completedEvent: event,
-          history: history.slice(0, 10),
-          hoursUntilNextEvent: getHoursBetweenEvents(event, nextScheduledEvent),
-          localRecommendation: localCheckoutRecommendation,
-          nextEvent: nextScheduledEvent,
-          painReports: painReports.slice(0, 20),
-          preCheckIn,
+          preCheckIn: withoutNotes(preCheckIn),
+          previousCheckout: withoutNotes(previousCheckout),
           requestType: 'post_checkout',
-          schedule: schedule.slice(0, 20),
         })
         finalRecommendationStatus = 'ai'
       } catch (error) {
@@ -1193,7 +1275,7 @@ function App() {
           checkout.painMap,
           {
             date: event.date,
-            notes: checkout.notes,
+            notes: '',
             sourceId: savedCheckout.id,
             sourceType: 'checkout',
             triggerMovement: checkout.painChange,
@@ -1228,14 +1310,14 @@ function App() {
     }
 
     const savedCheckout = {
+      ...checkout,
       actualMinutes: Number(checkout.actualMinutes),
-      completionLevel: checkout.completionLevel,
+      completionLevel: checkout.participation,
       createdAt: new Date().toISOString(),
       date: event.date,
       difficulty: Number(checkout.difficulty),
       eventId: event.id,
       id: existingCheckout?.id ?? `checkout-${Date.now()}`,
-      notes: checkout.notes ?? '',
       painChange: checkout.painChange,
       painMap: checkout.painMap,
       plannedLoad: event.load,
@@ -1252,7 +1334,7 @@ function App() {
     setPainReports((current) => [
       ...getPainReportsFromMap(checkout.painMap, {
         date: event.date,
-        notes: checkout.notes,
+        notes: '',
         sourceId: savedCheckout.id,
         sourceType: 'checkout',
         triggerMovement: checkout.painChange,
@@ -1452,8 +1534,8 @@ function App() {
     setAthleteProfile(nextProfile)
   }
 
-  async function clearAllHealthHistory() {
-    if (isSupabaseSession) {
+  async function clearAllHealthHistory({ remotelyCleared = false } = {}) {
+    if (isSupabaseSession && !remotelyCleared) {
       try {
         await Promise.all([
           clearCheckIns(),
@@ -1574,6 +1656,21 @@ function App() {
 
     if (requiredView && view !== requiredView) {
       return
+    }
+
+    if (view === 'Check-in' && activeView !== 'Check-in') {
+      const event = currentTodayCheckInEvent
+      const existingEntry = event
+        ? history.find((entry) => entry.eventId === event.id)
+        : null
+
+      setSelectedCheckInEventId(event?.id ?? null)
+      setIsEditingToday(false)
+      setCheckIn(
+        existingEntry
+          ? checkInFromHistoryEntry(existingEntry, getFreshCheckInDefaults())
+          : { ...getFreshCheckInDefaults(), ...getSharedSleepContext(history, todayIso) },
+      )
     }
 
     setActiveView(view)
@@ -1755,7 +1852,7 @@ function App() {
           </div>
         </div>
         <div className="account-actions">
-          <button className="account-name-button" onClick={() => setActiveView('Settings')} type="button">
+          <button className="account-name-button" onClick={() => setIsAthleteProfileOpen(true)} type="button">
             {athleteProfile?.displayName || session.user?.email || 'Athlete'}
           </button>
           <button
@@ -1875,6 +1972,7 @@ function App() {
                 onOpenCheckout={setCheckoutEvent}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
+                hasEarlierEventToday={hasEarlierEventToday}
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
               />
             )}
@@ -1922,7 +2020,6 @@ function App() {
 
             {activeView === 'Settings' && (
               <AccountPrivacyView
-                athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 history={history}
                 painReports={painReports}
@@ -1930,8 +2027,7 @@ function App() {
                 schedule={schedule}
                 session={session}
                 onClearAllHealthHistory={clearAllHealthHistory}
-                onOpenHistory={() => setActiveView('History')}
-                onProfileSave={updateAthleteProfile}
+                onAccountDeleted={resetDeletedSession}
               />
             )}
           </section>
@@ -1963,8 +2059,21 @@ function App() {
             checkout.id === checkoutEvent.checkoutId || checkout.eventId === checkoutEvent.id
           )}
           event={checkoutEvent}
+          preCheckIn={history.find((entry) => entry.eventId === checkoutEvent.id)}
+          preCheckInPainReports={painReports.filter((report) => {
+            const checkIn = history.find((entry) => entry.eventId === checkoutEvent.id)
+            return report.sourceType === 'check_in' && report.sourceId === checkIn?.id
+          })}
           onClose={() => setCheckoutEvent(null)}
           onSave={saveCheckout}
+        />
+      )}
+
+      {isAthleteProfileOpen && (
+        <AthleteProfileModal
+          onClose={() => setIsAthleteProfileOpen(false)}
+          onSave={updateAthleteProfile}
+          profile={athleteProfile}
         />
       )}
 

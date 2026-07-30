@@ -15,6 +15,7 @@ import {
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { getCheckoutForEvent } from '../utils/events'
+import { searchUsCities } from '../lib/weather'
 
 const eventTypes = [
   'Rest day',
@@ -99,6 +100,7 @@ export function ScheduleView({
   function updateDraft(field, value) {
     setDraftEvent((current) => ({
       ...current,
+      environment: field === 'surface' ? getEnvironmentForSurface(value) : current.environment,
       load: field === 'type' ? getDefaultLoadForEvent(value) : current.load,
       title: field === 'type' ? value : current.title,
       [field]: value,
@@ -108,6 +110,7 @@ export function ScheduleView({
   async function saveDraft() {
     const event = {
       ...draftEvent,
+      environment: getEnvironmentForSurface(draftEvent.surface),
       load: getDefaultLoadForEvent(draftEvent.type),
       plannedMinutes: Number(draftEvent.expectedDuration ?? 60),
       title: draftEvent.type,
@@ -308,11 +311,63 @@ export function ScheduleView({
 }
 
 function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode, onClose, onSave, onUpdate }) {
+  const [cityQuery, setCityQuery] = useState(draftEvent.location ?? '')
+  const [cityResults, setCityResults] = useState([])
+  const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
+  const [citySearchError, setCitySearchError] = useState('')
+
   useEffect(() => {
     document.body.classList.add('modal-open')
 
     return () => document.body.classList.remove('modal-open')
   }, [])
+
+  useEffect(() => {
+    let isCurrent = true
+    const query = cityQuery.trim()
+
+    if (query.length < 2 || query === draftEvent.location) {
+      setCityResults([])
+      return () => {
+        isCurrent = false
+      }
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const results = await searchUsCities(query)
+        if (!isCurrent) return
+        setCityResults(results)
+        setCitySearchError(results.length === 0 ? 'Choose a valid U.S. city from the list.' : '')
+      } catch (error) {
+        if (!isCurrent) return
+        setCityResults([])
+        setCitySearchError(error.message)
+      }
+    }, 220)
+
+    return () => {
+      isCurrent = false
+      window.clearTimeout(timeoutId)
+    }
+  }, [cityQuery, draftEvent.location])
+
+  const cityIsValid = !cityQuery.trim() || cityQuery === draftEvent.location
+
+  function updateCity(value) {
+    setCityQuery(value)
+    setCitySearchError('')
+    setIsCityMenuOpen(true)
+    onUpdate('location', '')
+  }
+
+  function chooseCity(city) {
+    setCityQuery(city.label)
+    setCityResults([])
+    setCitySearchError('')
+    setIsCityMenuOpen(false)
+    onUpdate('location', city.label)
+  }
 
   return (
     <div
@@ -388,20 +443,29 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
             options={['Grass', 'Turf', 'Court', 'Track', 'Gym', 'Other']}
             onChange={(value) => onUpdate('surface', value)}
           />
-          <Select
-            label="Environment"
-            value={draftEvent.environment ?? 'Outdoor'}
-            options={['Outdoor', 'Indoor']}
-            onChange={(value) => onUpdate('environment', value)}
-          />
-          <label className="compact-field">
-            U.S. city
+          <div className="compact-field city-autocomplete">
+            <span>U.S. city</span>
             <input
-              value={draftEvent.location ?? ''}
-              placeholder="Fresno, CA"
-              onChange={(event) => onUpdate('location', event.target.value)}
+              aria-autocomplete="list"
+              aria-expanded={isCityMenuOpen && cityResults.length > 0}
+              aria-invalid={!cityIsValid}
+              autoComplete="off"
+              value={cityQuery}
+              onChange={(event) => updateCity(event.target.value)}
+              onFocus={() => setIsCityMenuOpen(true)}
             />
-          </label>
+            {isCityMenuOpen && cityResults.length > 0 && (
+              <div className="city-suggestions" role="listbox">
+                {cityResults.map((city) => (
+                  <button key={city.id} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCity(city)} role="option" type="button">
+                    {city.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!cityIsValid && <small className="city-validation">Choose a city from the suggestions.</small>}
+            {citySearchError && cityQuery.trim().length >= 2 && <small className="city-validation">{citySearchError}</small>}
+          </div>
           {mode === 'create' && (
             <>
               <Select
@@ -434,7 +498,7 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
           </label>
         </div>
 
-        <button className="primary-button" onClick={onSave} type="button">
+        <button className="primary-button" disabled={!cityIsValid} onClick={onSave} type="button">
           {mode === 'edit' ? 'Save changes' : 'Create event'}
         </button>
       </section>
@@ -634,6 +698,10 @@ function getDefaultLoadForEvent(type) {
   if (['Recovery', 'Rest day'].includes(type)) return 'Low'
 
   return 'Medium'
+}
+
+function getEnvironmentForSurface(surface) {
+  return ['Court', 'Gym'].includes(surface) ? 'Indoor' : 'Outdoor'
 }
 
 function createRecurringEvents(event) {

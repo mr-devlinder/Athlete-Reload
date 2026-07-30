@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
+import { SectionHeading } from './SectionHeading'
+
+const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
 
 export function AccountPrivacyView({
-  athleteProfile,
   checkouts,
   history,
+  onAccountDeleted,
   onClearAllHealthHistory,
-  onOpenHistory,
-  onProfileSave,
   painReports,
   preferences,
   schedule,
@@ -16,7 +17,11 @@ export function AccountPrivacyView({
 }) {
   const [message, setMessage] = useState('')
   const [activeSection, setActiveSection] = useState('account')
-  const [profileForm, setProfileForm] = useState(athleteProfile ?? {})
+  const [identities, setIdentities] = useState([])
+  const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [clearHistoryForm, setClearHistoryForm] = useState({ code: '', confirmation: '', password: '' })
+  const [deleteForm, setDeleteForm] = useState({ code: '', confirmation: '', password: '' })
   const [emailForm, setEmailForm] = useState({ email: '', password: '' })
   const [passwordForm, setPasswordForm] = useState({
     confirmPassword: '',
@@ -64,27 +69,35 @@ export function AccountPrivacyView({
   }, [session?.user?.email])
 
   useEffect(() => {
-    setProfileForm(athleteProfile ?? {})
-  }, [athleteProfile])
-
-  async function saveProfile(event) {
-    event.preventDefault()
-    setMessage('')
-
-    try {
-      await onProfileSave(profileForm)
-      setMessage('Athlete profile updated.')
-    } catch (error) {
-      console.error(error)
-      setMessage('Unable to update your athlete profile.')
-    }
-  }
-
-  useEffect(() => {
     if (!hasSupabaseConfig || !session?.user?.id) return
 
     loadMfaFactors()
+    loadIdentities()
   }, [session?.user?.id])
+
+  async function loadIdentities() {
+    const { data, error } = await supabase.auth.getUserIdentities()
+
+    if (error) {
+      setMessage('Unable to load connected accounts.')
+      return
+    }
+
+    setIdentities(data?.identities ?? [])
+  }
+
+  async function connectProvider(provider) {
+    setMessage('')
+
+    const { error } = await supabase.auth.linkIdentity({
+      provider,
+      options: { redirectTo: getAuthRedirectUrl() },
+    })
+
+    if (error) {
+      setMessage('Unable to start account connection. Check that this provider and manual linking are enabled in Supabase.')
+    }
+  }
 
   async function loadMfaFactors() {
     setMfaState((current) => ({ ...current, isLoading: true }))
@@ -298,6 +311,103 @@ export function AccountPrivacyView({
     setMessage('Data export created.')
   }
 
+  async function verifyDeleteTotp() {
+    const factor = verifiedTotpFactors[0]
+    if (!factor || deleteForm.code.length !== 6) return false
+
+    const challenge = await supabase.auth.mfa.challenge({ factorId: factor.id })
+    if (challenge.error) return false
+
+    const verified = await supabase.auth.mfa.verify({
+      challengeId: challenge.data.id,
+      factorId: factor.id,
+      code: deleteForm.code,
+    })
+
+    return !verified.error
+  }
+
+  async function verifyClearHistoryTotp() {
+    const factor = verifiedTotpFactors[0]
+    if (!factor || clearHistoryForm.code.length !== 6) return false
+
+    const challenge = await supabase.auth.mfa.challenge({ factorId: factor.id })
+    if (challenge.error) return false
+
+    const verified = await supabase.auth.mfa.verify({
+      challengeId: challenge.data.id,
+      factorId: factor.id,
+      code: clearHistoryForm.code,
+    })
+
+    return !verified.error
+  }
+
+  async function clearHealthHistory(event) {
+    event.preventDefault()
+    setMessage('')
+
+    if (clearHistoryForm.confirmation !== 'CLEAR') {
+      setMessage('Type CLEAR to confirm health history deletion.')
+      return
+    }
+
+    const usesTotp = verifiedTotpFactors.length > 0
+    if (usesTotp && !(await verifyClearHistoryTotp())) {
+      setMessage('Unable to verify this sensitive action.')
+      return
+    }
+
+    const { error } = await supabase.functions.invoke('clear-health-history', {
+      body: {
+        method: usesTotp ? 'totp' : 'password',
+        password: usesTotp ? undefined : clearHistoryForm.password,
+      },
+    })
+
+    if (error) {
+      setMessage('Unable to clear health history. Verify your confirmation and try again.')
+      return
+    }
+
+    await onClearAllHealthHistory({ remotelyCleared: true })
+    setIsClearHistoryModalOpen(false)
+    setClearHistoryForm({ code: '', confirmation: '', password: '' })
+    setMessage('Health history cleared.')
+  }
+
+  async function deleteAccount(event) {
+    event.preventDefault()
+    setMessage('')
+
+    if (deleteForm.confirmation !== 'DELETE') {
+      setMessage('Type DELETE to confirm account deletion.')
+      return
+    }
+
+    const usesTotp = verifiedTotpFactors.length > 0
+    if (usesTotp && !(await verifyDeleteTotp())) {
+      setMessage('Unable to verify this sensitive action.')
+      return
+    }
+
+    const { error } = await supabase.functions.invoke('delete-account', {
+      body: {
+        method: usesTotp ? 'totp' : 'password',
+        password: usesTotp ? undefined : deleteForm.password,
+      },
+    })
+
+    if (error) {
+      setMessage('Unable to delete your account. Verify your confirmation and try again.')
+      return
+    }
+
+    setIsDeleteModalOpen(false)
+    setDeleteForm({ code: '', confirmation: '', password: '' })
+    await onAccountDeleted()
+  }
+
   if (!hasSupabaseConfig) {
     return (
       <section className="settings-page">
@@ -324,7 +434,7 @@ export function AccountPrivacyView({
 
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="Settings sections">
-          {[['account', 'Account'], ['security', 'Security'], ['privacy', 'Privacy'], ['data', 'Data']].map(([key, label]) => (
+          {[['account', 'Account'], ['security', 'Security'], ['data', 'Data']].map(([key, label]) => (
             <button className={activeSection === key ? 'active' : ''} key={key} onClick={() => setActiveSection(key)} type="button">
               {label}
             </button>
@@ -349,38 +459,27 @@ export function AccountPrivacyView({
         </article>
 
         <article className="settings-panel" hidden={activeSection !== 'account'}>
-          <h2>Athlete Profile</h2>
-          <form className="settings-form" onSubmit={saveProfile}>
-            <label className="select-field">
-              Name
-              <input value={profileForm.displayName ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, displayName: event.target.value }))} required />
-            </label>
-            <label className="select-field">
-              Sport
-              <input value={profileForm.sport ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, sport: event.target.value }))} />
-            </label>
-            <label className="select-field">
-              Position or specialty
-              <input value={profileForm.position ?? ''} onChange={(event) => setProfileForm((current) => ({ ...current, position: event.target.value }))} />
-            </label>
-            <label className="select-field">
-              Training style
-              <select value={profileForm.trainingStyle ?? 'Team and individual'} onChange={(event) => setProfileForm((current) => ({ ...current, trainingStyle: event.target.value }))}>
-                <option>Team and individual</option>
-                <option>Mostly team training</option>
-                <option>Mostly individual</option>
-              </select>
-            </label>
-            <label className="select-field">
-              Dominant side
-              <select value={profileForm.dominantSide ?? 'Right'} onChange={(event) => setProfileForm((current) => ({ ...current, dominantSide: event.target.value }))}>
-                <option>Right</option>
-                <option>Left</option>
-                <option>Both / unsure</option>
-              </select>
-            </label>
-            <button className="primary-button" type="submit">Save profile</button>
-          </form>
+          <h2>Connected accounts</h2>
+          <p className="settings-copy">These are the sign-in providers already connected to this account.</p>
+          <div className="connection-list">
+            {providerOptions.map((provider) => {
+              const connected = getConnectedProviders(identities).some((identity) => identity.provider === provider.id)
+
+              return (
+                <div className="connection-row" key={provider.id}>
+                  <span className="connection-provider">
+                    <img src={`${brandIconBase}${provider.id}.svg`} alt="" aria-hidden="true" />
+                    {provider.label}
+                  </span>
+                  {connected ? (
+                    <strong>Connected</strong>
+                  ) : (
+                    <button className="secondary-button compact-action" onClick={() => connectProvider(provider.id)} type="button">Connect</button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </article>
 
         <article className="settings-panel" hidden={activeSection !== 'account'}>
@@ -507,62 +606,138 @@ export function AccountPrivacyView({
           )}
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'data' && activeSection !== 'privacy'}>
+        <article className="settings-panel" hidden={activeSection !== 'data'}>
           <h2>Data Controls</h2>
-          <p className="settings-copy">
-            Exporting health data requires password verification, or a 2FA code when two-factor authentication is enabled.
-          </p>
-          <div className="sensitive-row">
-            {verifiedTotpFactors.length > 0 ? (
-              <label className="select-field">
-                2FA code
-                <input
-                  inputMode="numeric"
-                  maxLength={6}
-                  onChange={(event) => setSensitiveForm((current) => ({
-                    ...current,
-                    code: event.target.value.replace(/\D/g, '').slice(0, 6),
-                  }))}
-                  type="text"
-                  value={sensitiveForm.code}
-                />
-              </label>
-            ) : (
-              <label className="select-field">
-                Current password
-                <input
-                  autoComplete="current-password"
-                  onChange={(event) => setSensitiveForm((current) => ({
-                    ...current,
-                    password: event.target.value,
-                  }))}
-                  type="password"
-                  value={sensitiveForm.password}
-                />
-              </label>
-            )}
-            <button className="secondary-button compact-action" onClick={downloadData} type="button">
-              Download my data
-            </button>
+          <div className="data-control-section">
+            <div>
+              <h3>Export your data</h3>
+              <p className="settings-copy">Password verification, or a 2FA code when enabled, is required before creating an export.</p>
+            </div>
+            <div className="sensitive-row">
+              {verifiedTotpFactors.length > 0 ? (
+                <label className="select-field">
+                  2FA code
+                  <input
+                    inputMode="numeric"
+                    maxLength={6}
+                    onChange={(event) => setSensitiveForm((current) => ({
+                      ...current,
+                      code: event.target.value.replace(/\D/g, '').slice(0, 6),
+                    }))}
+                    type="text"
+                    value={sensitiveForm.code}
+                  />
+                </label>
+              ) : (
+                <label className="select-field">
+                  Current password
+                  <input
+                    autoComplete="current-password"
+                    onChange={(event) => setSensitiveForm((current) => ({
+                      ...current,
+                      password: event.target.value,
+                    }))}
+                    type="password"
+                    value={sensitiveForm.password}
+                  />
+                </label>
+              )}
+              <button className="secondary-button compact-action" onClick={downloadData} type="button">Download my data</button>
+            </div>
           </div>
-          <div className="danger-actions">
-            <button className="secondary-button compact-action" onClick={onOpenHistory} type="button">
-              Delete individual check-ins
-            </button>
-            <button className="secondary-button compact-action" onClick={onOpenHistory} type="button">
-              Delete pain timeline
-            </button>
-            <button className="remove-button compact-action" onClick={onClearAllHealthHistory} type="button">
-              Clear all health history
-            </button>
+          <div className="data-control-section danger-data-section">
+            <div>
+              <h3>Clear health history</h3>
+              <p className="settings-copy">Removes saved check-ins, checkouts, and pain reports while keeping your account and schedule.</p>
+            </div>
+            <button className="remove-button compact-action" onClick={() => setIsClearHistoryModalOpen(true)} type="button">Clear health history</button>
+          </div>
+          <div className="data-control-section danger-data-section">
+            <div>
+              <h3>Delete account</h3>
+              <p className="settings-copy">Permanently removes your account and all Athlete Reload data after a security confirmation.</p>
+            </div>
+            <button className="remove-button compact-action" onClick={() => setIsDeleteModalOpen(true)} type="button">Delete account</button>
           </div>
         </article>
 
         </div>
       </div>
+
+      {isDeleteModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsDeleteModalOpen(false)}>
+          <section className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="schedule-header">
+              <SectionHeading eyebrow="Permanent action" title="Delete your account?" />
+              <button className="ghost-close" onClick={() => setIsDeleteModalOpen(false)} type="button">Close</button>
+            </div>
+            <p className="settings-copy">This permanently deletes your Athlete Reload account and its saved health, schedule, check-in, checkout, association, and preference data.</p>
+            <form className="settings-form" onSubmit={deleteAccount}>
+              <label className="select-field">
+                Type DELETE to confirm
+                <input autoComplete="off" value={deleteForm.confirmation} onChange={(event) => setDeleteForm((current) => ({ ...current, confirmation: event.target.value }))} required />
+              </label>
+              {verifiedTotpFactors.length > 0 ? (
+                <label className="select-field">
+                  2FA code
+                  <input autoComplete="one-time-code" inputMode="numeric" maxLength={6} onChange={(event) => setDeleteForm((current) => ({ ...current, code: event.target.value.replace(/\D/g, '').slice(0, 6) }))} required type="text" value={deleteForm.code} />
+                </label>
+              ) : (
+                <label className="select-field">
+                  Current password
+                  <input autoComplete="current-password" onChange={(event) => setDeleteForm((current) => ({ ...current, password: event.target.value }))} required type="password" value={deleteForm.password} />
+                </label>
+              )}
+              <button className="remove-button" type="submit">Permanently delete account</button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {isClearHistoryModalOpen && (
+        <div className="modal-backdrop" onClick={() => setIsClearHistoryModalOpen(false)}>
+          <section className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="schedule-header">
+              <SectionHeading eyebrow="Protected action" title="Clear health history?" />
+              <button className="ghost-close" onClick={() => setIsClearHistoryModalOpen(false)} type="button">Close</button>
+            </div>
+            <p className="settings-copy">This permanently removes your saved check-ins, checkouts, and pain reports. Your account and schedule remain intact.</p>
+            <form className="settings-form" onSubmit={clearHealthHistory}>
+              <label className="select-field">
+                Type CLEAR to confirm
+                <input autoComplete="off" value={clearHistoryForm.confirmation} onChange={(event) => setClearHistoryForm((current) => ({ ...current, confirmation: event.target.value }))} required />
+              </label>
+              {verifiedTotpFactors.length > 0 ? (
+                <label className="select-field">
+                  2FA code
+                  <input autoComplete="one-time-code" inputMode="numeric" maxLength={6} onChange={(event) => setClearHistoryForm((current) => ({ ...current, code: event.target.value.replace(/\D/g, '').slice(0, 6) }))} required type="text" value={clearHistoryForm.code} />
+                </label>
+              ) : (
+                <label className="select-field">
+                  Current password
+                  <input autoComplete="current-password" onChange={(event) => setClearHistoryForm((current) => ({ ...current, password: event.target.value }))} required type="password" value={clearHistoryForm.password} />
+                </label>
+              )}
+              <button className="remove-button" type="submit">Permanently clear health history</button>
+            </form>
+          </section>
+        </div>
+      )}
     </section>
   )
 }
+
+function getConnectedProviders(identities) {
+  return identities
+    .filter((identity) => providerOptions.some((provider) => provider.id === identity.provider))
+    .map((identity) => ({ id: identity.identity_id ?? identity.id ?? identity.provider, provider: identity.provider }))
+}
+
+const providerOptions = [
+  { id: 'google', label: 'Google' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'discord', label: 'Discord' },
+]
 
 function getQrSource(qrCode) {
   if (!qrCode) return ''

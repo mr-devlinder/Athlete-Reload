@@ -160,51 +160,11 @@ export function BodyPainMap({
           {activePainScore > 0 && (
             <div className="body-part-pain-details">
               <p className="eyebrow">{activeArea.label} details</p>
-              <label className="compact-field">
-                Injury type
-                <select
-                  value={details[activeArea.id]?.injuryType ?? injuryType}
-                  onChange={(event) => updateDetail('injuryType', event.target.value)}
-                >
-                  {injuryTypeOptions.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="compact-field">
-                Pain type
-                <select
-                  value={details[activeArea.id]?.painType ?? painType}
-                  onChange={(event) => updateDetail('painType', event.target.value)}
-                >
-                  {painTypeOptions.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="compact-field">
-                When it occurs
-                <select
-                  value={details[activeArea.id]?.hurtsWhen ?? hurtsWhen}
-                  onChange={(event) => updateDetail('hurtsWhen', event.target.value)}
-                >
-                  {hurtsWhenOptions.map((option) => (
-                    <option key={option}>{option}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="compact-field">
-                Change since last session
-                <select value={details[activeArea.id]?.painTrend ?? painTrend ?? 'New'} onChange={(event) => updateDetail('painTrend', event.target.value)}>
-                  <option>New</option><option>Improving</option><option>Unchanged</option><option>Worsening</option>
-                </select>
-              </label>
-              <label className="compact-field">
-                Affected movement
-                <select value={details[activeArea.id]?.affectedMovement ?? affectedMovement ?? 'None'} onChange={(event) => updateDetail('affectedMovement', event.target.value)}>
-                  <option>None</option><option>Running</option><option>Jumping</option><option>Cutting</option><option>Kicking</option><option>Throwing</option><option>Other sport movement</option>
-                </select>
-              </label>
+              <PainDetailSelect label="Injury type" options={injuryTypeOptions} value={details[activeArea.id]?.injuryType ?? injuryType ?? 'Unknown'} onChange={(value) => updateDetail('injuryType', value)} />
+              <PainDetailSelect label="Pain type" options={painTypeOptions} value={details[activeArea.id]?.painType ?? painType ?? 'Tight / pulling'} onChange={(value) => updateDetail('painType', value)} />
+              <PainDetailSelect label="When it occurs" options={hurtsWhenOptions} value={details[activeArea.id]?.hurtsWhen ?? hurtsWhen ?? 'At rest'} onChange={(value) => updateDetail('hurtsWhen', value)} />
+              <PainDetailSelect label="Change since last session" options={painTrendOptions} value={details[activeArea.id]?.painTrend ?? painTrend ?? 'New'} onChange={(value) => updateDetail('painTrend', value)} />
+              <PainDetailSelect label="Affected movement" options={affectedMovementOptions} value={details[activeArea.id]?.affectedMovement ?? affectedMovement ?? 'None'} onChange={(value) => updateDetail('affectedMovement', value)} />
             </div>
           )}
         </div>
@@ -222,6 +182,32 @@ export function BodyPainMap({
         )}
       </div>
     </section>
+  )
+}
+
+function PainDetailSelect({ label, onChange, options, value }) {
+  const isCustom = !options.includes(value)
+
+  return (
+    <label className="compact-field pain-detail-select">
+      {label}
+      <select
+        value={isCustom ? 'Other...' : value}
+        onChange={(event) => onChange(event.target.value === 'Other...' ? '' : event.target.value)}
+      >
+        {options.map((option) => <option key={option}>{option}</option>)}
+        <option>Other...</option>
+      </select>
+      {isCustom && (
+        <input
+          autoFocus
+          className="pain-detail-custom-input"
+          placeholder={`Describe ${label.toLowerCase()}`}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
+    </label>
   )
 }
 
@@ -279,6 +265,18 @@ const hurtsWhenOptions = [
   'Bending',
   'Breathing',
   'After activity',
+]
+
+const painTrendOptions = ['New', 'Improving', 'Unchanged', 'Worsening']
+
+const affectedMovementOptions = [
+  'None',
+  'Running',
+  'Jumping',
+  'Cutting',
+  'Kicking',
+  'Throwing',
+  'Other sport movement',
 ]
 
 function getSeverityColor(severity) {
