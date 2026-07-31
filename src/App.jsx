@@ -1114,7 +1114,7 @@ function App() {
     let finalRecommendation = savedCheckIn.quickRecommendation ?? localRecommendation
     let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
 
-    if (isSupabaseSession && !scheduleDrivenCheckIn.quickRecommendation) {
+    if (supabase && !savedCheckIn.quickRecommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
 
@@ -1135,7 +1135,7 @@ function App() {
       }
     }
 
-    if (isSupabaseSession) {
+    if (supabase) {
       try {
         if (isEditingToday) {
           if (previousEntry?.id) {

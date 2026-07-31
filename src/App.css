@@ -4502,6 +4502,16 @@ button.event-status:hover {
 .nutrition-details-modal { width: min(560px, 100%); padding: 20px; }
 .nutrition-details-modal { max-height: calc(100dvh - 36px); overflow-y: auto; }
 .serving-modal { width: min(560px, 100%); display: grid; gap: 16px; padding: 22px; }
+@media (max-width: 680px) {
+  .food-log-modal, .serving-modal, .nutrition-details-modal { width: min(100%, 620px); max-height: calc(100dvh - 20px); padding: 16px; border-radius: 22px; }
+  .food-modal-search, .food-modal-actions { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .food-modal-search input, .food-modal-actions input, .food-modal-search button, .food-modal-actions button { width: 100%; min-height: 50px; font-size: 16px; }
+  .barcode-scanner video { width: 100%; height: min(58dvh, 360px); max-height: none; object-fit: cover; }
+  .barcode-scanner p { padding: 12px; font-size: 14px; }
+  .food-meal-switcher { gap: 8px; padding: 6px 0 12px; }
+  .food-meal-switcher button { min-height: 44px; padding: 10px 16px; font-size: 14px; }
+  .food-results button { min-height: 74px; padding: 14px; font-size: 15px; }
+}
 .serving-preview { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 15px; border-radius: 12px; background: rgba(47,140,255,.08); }
 .serving-preview strong { color: #252b35; font-size: 25px; }
 .serving-preview span { color: #717a85; font-size: 12px; font-weight: 800; }

@@ -17,6 +17,7 @@ const goalAdjustments = {
 export const mealOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Custom']
 
 export function getNutritionTargets(profile = {}, schedule = [], date = getLocalDate()) {
+  profile = profile ?? {}
   const weightLbs = Number(profile.weightLbs)
   const heightInches = Number(profile.heightInches)
   const age = Number(profile.age)
@@ -66,6 +67,7 @@ export function getLocalDate() {
 }
 
 export function getHydrationTarget(profile = {}, schedule = [], date = getLocalDate()) {
+  profile = profile ?? {}
   const weightLbs = Number(profile.weightLbs)
   const baseline = weightLbs ? Math.round(weightLbs * 0.55) : 80
   const eventMinutes = schedule.filter((event) => event.date === date).reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)

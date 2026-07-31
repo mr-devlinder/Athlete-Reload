@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { BrowserMultiFormatReader } from '@zxing/browser'
 import { findFoodByBarcode, searchFoods } from '../lib/foodApi'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { SectionHeading } from './SectionHeading'
@@ -137,11 +136,12 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
       streamRef.current = stream
       setIsScanning(true)
-      requestAnimationFrame(() => {
+      requestAnimationFrame(async () => {
         if (!videoRef.current) return
         videoRef.current.srcObject = stream
         videoRef.current.play().catch(() => {})
-        const reader = new BrowserMultiFormatReader()
+      const { BrowserMultiFormatReader } = await import('@zxing/browser')
+      const reader = new BrowserMultiFormatReader()
         readerRef.current = reader
         reader.decodeFromStream(stream, videoRef.current, async (result) => {
         if (!result || !streamRef.current) return

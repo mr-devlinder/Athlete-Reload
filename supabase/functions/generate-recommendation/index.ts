@@ -46,17 +46,14 @@ Deno.serve(async (request) => {
       const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
       return jsonResponse({ extraction: extractionResponse })
     }
-    const model = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash-lite'
-    const geminiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    const model = 'gemini-2.5-flash-lite'
+    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-goog-api-key': geminiApiKey,
       },
-      body: JSON.stringify({
-        model,
-        input: buildPrompt(body),
-      }),
+      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: buildPrompt(body) }] }] }),
     })
 
     if (!geminiResponse.ok) {
@@ -78,11 +75,11 @@ Deno.serve(async (request) => {
 })
 
 async function generateGeminiJson(apiKey: string, input: string) {
-  const model = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash-lite'
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+  const model = 'gemini-2.5-flash-lite'
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({ model, input }),
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: input }] }] }),
   })
   if (!response.ok) throw new Error('Gemini request failed')
   return JSON.parse(stripJsonFence(extractOutputText(await response.json())))
@@ -318,6 +315,11 @@ ${JSON.stringify(payload, null, 2)}
 
 function extractOutputText(data: any) {
   if (typeof data?.output_text === 'string') return data.output_text
+
+  const generatedText = data?.candidates?.[0]?.content?.parts
+    ?.map((part: any) => part?.text ?? '')
+    .join('')
+  if (generatedText) return generatedText
 
   const modelStep = data?.steps?.find((step: any) => step?.type === 'model_output')
   const textPart = modelStep?.content?.find((part: any) => part?.type === 'text')

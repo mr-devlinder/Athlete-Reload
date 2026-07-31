@@ -322,7 +322,7 @@ function riskFromChoice(value, weights) {
 }
 
 function getStatus(score) {
-  return statusLevels.find((level) => score < level.max) ?? statusLevels.at(-1)
+  return statusLevels.find((level) => score < level.max) ?? statusLevels[statusLevels.length - 1]
 }
 
 function getPain(checkIn) {

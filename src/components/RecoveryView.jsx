@@ -594,7 +594,7 @@ function constrainRoutine(routine, availableMinutes, alternatives = []) {
     const fillDuration = Math.min(duration, remaining)
 
     if (fillDuration < 20) {
-      const last = constrained.at(-1)
+    const last = constrained[constrained.length - 1]
       if (last?.durationSeconds) last.durationSeconds += fillDuration
       break
     }

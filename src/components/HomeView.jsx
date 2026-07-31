@@ -744,7 +744,7 @@ function getPainTimelines(history, painReports) {
       }
     })
     .filter((timeline) => timeline.points.length >= 2)
-    .sort((first, second) => second.points.at(-1).date.localeCompare(first.points.at(-1).date))
+    .sort((first, second) => second.points[second.points.length - 1].date.localeCompare(first.points[first.points.length - 1].date))
     .slice(0, 4)
 }
 
@@ -809,7 +809,7 @@ function getPatterns(history, checkouts, painWatchlist) {
 
   const activeDays = new Set(datedRecords.map((entry) => entry.date))
   const firstDate = parseISO(datedRecords[0].date)
-  const lastDate = parseISO(datedRecords.at(-1).date)
+    const lastDate = parseISO(datedRecords[datedRecords.length - 1].date)
   const hasBaseline = differenceInCalendarDays(lastDate, firstDate) >= 13 && activeDays.size >= 8
 
   if (!hasBaseline) {
@@ -894,7 +894,7 @@ function getPersistentSorenessPattern(history) {
 
   const lastThree = dailyEntries.slice(-3)
   const baseline = averageNumber(dailyEntries.slice(0, -2).map((entry) => entry.soreness))
-  const elevatedForTwoDays = Number(lastThree.at(-1)?.soreness) >= baseline + 1.5 && Number(lastThree.at(-2)?.soreness) >= baseline + 1.5
+  const elevatedForTwoDays = Number(lastThree[lastThree.length - 1]?.soreness) >= baseline + 1.5 && Number(lastThree[lastThree.length - 2]?.soreness) >= baseline + 1.5
 
   return elevatedForTwoDays
     ? 'Your soreness usually settles sooner, but it has remained elevated across the last 48 hours.'
