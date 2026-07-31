@@ -10,6 +10,7 @@ import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { HomeView } from './components/HomeView'
+import { NutritionView } from './components/NutritionView'
 import { HistoryView } from './components/HistoryView'
 import { RecoveryView } from './components/RecoveryView'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
@@ -64,6 +65,7 @@ import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { getPainReportsFromMap, getPrimaryPainArea } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
+import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
 import { loadSavedState, saveState } from './utils/storage'
 import './App.css'
 
@@ -71,6 +73,10 @@ const views = [
   {
     icon: 'home',
     label: 'Home',
+  },
+  {
+    icon: 'nutrition',
+    label: 'Nutrition',
   },
   {
     icon: 'recovery',
@@ -95,6 +101,7 @@ const privacyDefaults = {
   cloudSync: true,
   coachIncludeNotes: false,
   coachIncludePain: false,
+  coachIncludeNutrition: false,
   localCopy: false,
   remindersEnabled: false,
 }
@@ -490,10 +497,17 @@ function sortScheduleEvents(events) {
 
 function isInsideCheckInWindow(event) {
   if (!event?.date || !event?.time) return false
-  const eventStart = new Date(`${event.date}T${event.time}`).getTime()
+  const minutes = getScheduleTimeValue(event.time)
+  if (minutes >= 24 * 60) return false
+  const eventStartDate = new Date(`${event.date}T00:00:00`)
+  eventStartDate.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0)
+  const eventStart = eventStartDate.getTime()
   const now = Date.now()
 
-  return eventStart >= now && eventStart - now <= 3 * 60 * 60 * 1000
+  const isToday = event.date === getTodayIso()
+  const hasStarted = eventStart <= now
+
+  return (isToday && hasStarted) || (eventStart > now && eventStart - now <= 3 * 60 * 60 * 1000)
 }
 
 function attachTournamentContext(event, tournaments, schedule) {
@@ -563,6 +577,7 @@ function App() {
   const [isReplayingSavedRoutine, setIsReplayingSavedRoutine] = useState(false)
   const [replayingRoutineId, setReplayingRoutineId] = useState(null)
   const [dailyWellness, setDailyWellness] = useState(() => savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationOz: 0, nutritionEntries: [] }))
+  const [nutritionHistory, setNutritionHistory] = useState(() => savedState?.nutritionHistory ?? [])
   const [privacyPreferences, setPrivacyPreferences] = useState(
     savedState?.privacyPreferences ?? privacyDefaults,
   )
@@ -621,6 +636,11 @@ function App() {
     }),
     [checkIn, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
+  const nutritionContext = useMemo(() => ({
+    hydrationTargetOz: getHydrationTarget(athleteProfile, schedule, todayIso),
+    targets: getNutritionTargets(athleteProfile, schedule, todayIso),
+    totals: getNutritionTotals(dailyWellness?.nutritionEntries ?? []),
+  }), [athleteProfile, dailyWellness?.nutritionEntries, schedule, todayIso])
   const hasEarlierEventToday = Boolean(selectedCheckInEvent && todayEvents.some((event) =>
     event.id !== selectedCheckInEvent.id
       && getScheduleTimeValue(event.time) < getScheduleTimeValue(selectedCheckInEvent.time),
@@ -802,10 +822,11 @@ function App() {
       shareAuditLogs,
       tournaments,
       dailyWellness,
+      nutritionHistory,
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, painIssues, painReports, privacyPreferences, savedRoutines, schedule, shareAuditLogs, tournaments])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -855,6 +876,7 @@ function App() {
         setShareAuditLogs(data.shareAuditLogs)
         setTournaments(data.tournaments)
         setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+        setNutritionHistory(data.wellnessHistory ?? [])
         setPrivacyPreferences(preferences)
         setAthleteProfile(await loadAthleteProfile())
         setIsProfileReady(true)
@@ -886,6 +908,7 @@ function App() {
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+              setNutritionHistory(data.wellnessHistory ?? [])
               setPrivacyPreferences(preferences)
               setAthleteProfile(await loadAthleteProfile())
               setIsProfileReady(true)
@@ -926,6 +949,7 @@ function App() {
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+              setNutritionHistory(data.wellnessHistory ?? [])
               setPrivacyPreferences(preferences)
               setAthleteProfile(await loadAthleteProfile())
               setIsProfileReady(true)
@@ -1058,7 +1082,7 @@ function App() {
     }))
   }
 
-  async function saveCheckIn() {
+  async function saveCheckIn(quickDraft = null) {
     if (isSavingCheckIn) return
 
     setIsSavingCheckIn(true)
@@ -1086,18 +1110,20 @@ function App() {
       return
     }
 
-    let finalRecommendation = localRecommendation
-    let finalRecommendationStatus = 'local'
+    const savedCheckIn = quickDraft ? { ...scheduleDrivenCheckIn, ...quickDraft } : scheduleDrivenCheckIn
+    let finalRecommendation = savedCheckIn.quickRecommendation ?? localRecommendation
+    let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
 
-    if (isSupabaseSession) {
+    if (isSupabaseSession && !scheduleDrivenCheckIn.quickRecommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
 
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
           baseline: getPersonalBaseline(history, selectedCheckInEvent),
-          checkIn: withoutNotes(scheduleDrivenCheckIn),
+          checkIn: withoutNotes(savedCheckIn),
           dailyWellness,
+          nutritionContext,
           event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
           previousCheckout: withoutNotes(previousCheckout),
         })
@@ -1407,18 +1433,22 @@ function App() {
 
   async function saveDailyWellness(nextWellness) {
     const wellness = {
-      date: todayIso,
+      date: nextWellness.date ?? todayIso,
       hydrationOz: Math.max(0, Number(nextWellness.hydrationOz ?? 0)),
       nutritionEntries: nextWellness.nutritionEntries ?? [],
+      mealTiming: nextWellness.mealTiming ?? {},
+      nutritionGoalOverride: nextWellness.nutritionGoalOverride ?? {},
     }
 
-    setDailyWellness(wellness)
+    if (wellness.date === todayIso) setDailyWellness(wellness)
+    setNutritionHistory((current) => [wellness, ...current.filter((entry) => entry.date !== wellness.date)])
 
     if (!isSupabaseSession) return
 
     try {
       const savedWellness = await upsertDailyWellness(wellness)
-      setDailyWellness(savedWellness)
+      if (savedWellness.date === todayIso) setDailyWellness(savedWellness)
+      setNutritionHistory((current) => [savedWellness, ...current.filter((entry) => entry.date !== savedWellness.date)])
     } catch (error) {
       console.error(error)
       setDataStatus('error')
@@ -1595,6 +1625,7 @@ function App() {
           checkout: withoutNotes(checkout),
           completedEvent: attachTournamentContext(event, tournaments, schedule),
           dailyWellness,
+          nutritionContext,
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
           requestType: 'post_checkout',
@@ -1736,8 +1767,10 @@ function App() {
         athleteProfile,
         checkout: withoutNotes(latestCheckout),
         completedEvent: attachTournamentContext(completedEvent, tournaments, schedule),
+        dailyWellness,
         equipment,
         nextScheduledEvent,
+        nutritionContext,
         preCheckIn: withoutNotes(preCheckIn),
         requestType: 'recovery_plan',
         timeAvailable,
@@ -2612,12 +2645,14 @@ function App() {
                 todayIso={todayIso}
                 todayLabel={todayLabel}
                 onSave={saveCheckIn}
+                onQuickSave={saveCheckIn}
                 onEditToday={editTodayCheckIn}
                 onOpenCheckout={setCheckoutEvent}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
                 hasEarlierEventToday={hasEarlierEventToday}
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
+                isQuickMode={false}
               />
             )}
 
@@ -2626,6 +2661,7 @@ function App() {
                 checkouts={checkouts}
                 dailyWellness={dailyWellness}
                 history={history}
+                nutritionHistory={nutritionHistory}
                 painReports={painReports}
                 painIssues={painIssues}
                 recommendation={recommendation}
@@ -2633,9 +2669,17 @@ function App() {
                 schedule={schedule}
                 onGoCheckIn={openPreCheckIn}
                 onOpenCheckout={setCheckoutEvent}
-                onUpdateWellness={saveDailyWellness}
                 onSavePainIssue={savePainIssue}
                 onSharePainIssue={recordPainIssueShare}
+              />
+            )}
+
+            {activeView === 'Nutrition' && (
+              <NutritionView
+                athleteProfile={athleteProfile}
+                nutritionHistory={nutritionHistory}
+                onSaveWellness={saveDailyWellness}
+                schedule={schedule}
               />
             )}
 
@@ -3272,6 +3316,15 @@ function NavIcon({ type }) {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M7 3v3M17 3v3M4.5 9.2h15M6.5 5.2h11A2.5 2.5 0 0 1 20 7.7v10.1a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.8V7.7a2.5 2.5 0 0 1 2.5-2.5Z" />
+      </svg>
+    )
+  }
+
+  if (type === 'nutrition') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 3v8.2a2.5 2.5 0 0 1-5 0V3M4.5 3v18M14.5 3v7M14.5 10h5.5v11" />
+        <path d="M14.5 3h5.5v7h-5.5" />
       </svg>
     )
   }

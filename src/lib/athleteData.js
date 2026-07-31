@@ -278,6 +278,7 @@ function fromPrivacyPreferencesRow(row) {
     cloudSync: row.cloud_sync,
     coachIncludeNotes: row.coach_include_notes,
     coachIncludePain: row.coach_include_pain,
+    coachIncludeNutrition: Boolean(row.coach_include_nutrition),
     localCopy: row.local_copy,
     remindersEnabled: Boolean(row.reminders_enabled),
   }
@@ -285,9 +286,12 @@ function fromPrivacyPreferencesRow(row) {
 
 function fromAthleteProfileRow(row) {
   return {
+    age: row.age_years ?? null,
     displayName: row.display_name ?? '',
     dominantSide: row.dominant_side ?? 'Right',
+    dietaryPreferences: row.dietary_preferences ?? [],
     genderIdentity: row.gender_identity ?? '',
+    goals: row.goals ?? [],
     heightInches: row.height_inches ?? null,
     onboardingCompleted: Boolean(row.onboarding_completed),
     position: row.position ?? '',
@@ -300,9 +304,12 @@ function fromAthleteProfileRow(row) {
 
 function toAthleteProfileRow(profile) {
   return {
+    age_years: profile.age ? Number(profile.age) : null,
     display_name: profile.displayName ?? '',
     dominant_side: profile.dominantSide ?? 'Right',
+    dietary_preferences: profile.dietaryPreferences ?? [],
     gender_identity: profile.genderIdentity ?? '',
+    goals: profile.goals ?? [],
     height_inches: profile.heightInches ? Number(profile.heightInches) : null,
     onboarding_completed: Boolean(profile.onboardingCompleted),
     position: profile.position ?? '',
@@ -319,7 +326,9 @@ function fromDailyWellnessRow(row) {
     date: row.wellness_date,
     hydrationOz: Number(row.hydration_oz ?? 0),
     id: row.id,
+    mealTiming: row.meal_timing_json ?? {},
     nutritionEntries: row.nutrition_entries ?? [],
+    nutritionGoalOverride: row.nutrition_goal_override ?? {},
     updatedAt: row.updated_at,
   }
 }
@@ -378,7 +387,9 @@ function toPainIssueRow(issue) {
 function toDailyWellnessRow(wellness) {
   return {
     hydration_oz: Math.max(0, Number(wellness.hydrationOz ?? 0)),
+    meal_timing_json: wellness.mealTiming ?? {},
     nutrition_entries: wellness.nutritionEntries ?? [],
+    nutrition_goal_override: wellness.nutritionGoalOverride ?? {},
     updated_at: new Date().toISOString(),
     wellness_date: wellness.date ?? format(new Date(), 'yyyy-MM-dd'),
   }
@@ -390,6 +401,7 @@ function toPrivacyPreferencesRow(preferences) {
     cloud_sync: Boolean(preferences.cloudSync),
     coach_include_notes: Boolean(preferences.coachIncludeNotes),
     coach_include_pain: Boolean(preferences.coachIncludePain),
+    coach_include_nutrition: Boolean(preferences.coachIncludeNutrition),
     local_copy: Boolean(preferences.localCopy),
     reminders_enabled: Boolean(preferences.remindersEnabled),
     updated_at: new Date().toISOString(),
@@ -453,8 +465,7 @@ export async function loadAthleteData() {
     supabase
       .from('daily_wellness')
       .select('*')
-      .eq('wellness_date', format(new Date(), 'yyyy-MM-dd'))
-      .maybeSingle(),
+      .order('wellness_date', { ascending: false }),
   ])
 
   if (scheduleResponse.error) throw scheduleResponse.error
@@ -478,7 +489,10 @@ export async function loadAthleteData() {
     shareAuditLogs: shareAuditResponse.data.map(fromShareAuditRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
     tournaments: tournamentsResponse.data.map(fromTournamentRow),
-    wellness: wellnessResponse.data ? fromDailyWellnessRow(wellnessResponse.data) : null,
+    wellness: wellnessResponse.data?.find((row) => row.wellness_date === format(new Date(), 'yyyy-MM-dd'))
+      ? fromDailyWellnessRow(wellnessResponse.data.find((row) => row.wellness_date === format(new Date(), 'yyyy-MM-dd')))
+      : null,
+    wellnessHistory: (wellnessResponse.data ?? []).map(fromDailyWellnessRow),
   }
 }
 
@@ -649,6 +663,22 @@ export async function upsertAthleteProfile(profile) {
     .upsert(toAthleteProfileRow(profile), { onConflict: 'user_id' })
     .select('*')
     .single()
+
+  if (error && /column .* does not exist|schema cache/i.test(error.message ?? '')) {
+    const legacyProfile = toAthleteProfileRow(profile)
+    delete legacyProfile.age_years
+    delete legacyProfile.dietary_preferences
+    delete legacyProfile.goals
+    delete legacyProfile.tracking_preferences
+    const fallback = await supabase
+      .from('athlete_profiles')
+      .upsert(legacyProfile, { onConflict: 'user_id' })
+      .select('*')
+      .single()
+
+    if (fallback.error) throw fallback.error
+    return { ...profile, ...fromAthleteProfileRow(fallback.data) }
+  }
 
   if (error) throw error
 

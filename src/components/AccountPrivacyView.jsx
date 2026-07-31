@@ -8,6 +8,7 @@ const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
 export function AccountPrivacyView({
   checkouts,
   history,
+  nutritionHistory = [],
   onAccountDeleted,
   onClearAllHealthHistory,
   onDeleteShareAuditLog,
@@ -60,9 +61,10 @@ export function AccountPrivacyView({
       history,
       painReports,
       preferences,
+      nutritionHistory,
       schedule,
     }),
-    [checkouts, history, painReports, preferences, schedule, session?.user?.email, session?.user?.id],
+    [checkouts, history, nutritionHistory, painReports, preferences, schedule, session?.user?.email, session?.user?.id],
   )
 
   useEffect(() => {
@@ -313,6 +315,33 @@ export function AccountPrivacyView({
     URL.revokeObjectURL(url)
     setSensitiveForm({ code: '', password: '' })
     setMessage('Data export created.')
+  }
+
+  async function downloadCsv() {
+    if (!(await verifySensitiveExport())) return
+
+    const rows = nutritionHistory.flatMap((day) => (day.nutritionEntries ?? []).map((entry) => ({
+      date: day.date,
+      meal: entry.meal ?? '',
+      food: entry.name ?? '',
+      brand: entry.brand ?? '',
+      serving: entry.servingSize ?? '',
+      calories: entry.calories ?? 0,
+      protein_g: entry.protein ?? 0,
+      carbohydrates_g: entry.carbohydrates ?? 0,
+      fats_g: entry.fats ?? 0,
+      hydration_oz: day.hydrationOz ?? 0,
+    })))
+    const headers = ['date', 'meal', 'food', 'brand', 'serving', 'calories', 'protein_g', 'carbohydrates_g', 'fats_g', 'hydration_oz']
+    const csv = [headers.join(','), ...rows.map((row) => headers.map((header) => `"${String(row[header] ?? '').replaceAll('"', '""')}"`).join(','))].join('\n')
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `athlete-reload-nutrition-${new Date().toISOString().slice(0, 10)}.csv`
+    link.click()
+    URL.revokeObjectURL(url)
+    setSensitiveForm({ code: '', password: '' })
+    setMessage('Nutrition CSV created.')
   }
 
   async function verifyDeleteTotp() {
@@ -655,7 +684,8 @@ export function AccountPrivacyView({
                   />
                 </label>
               )}
-              <button className="secondary-button compact-action" onClick={downloadData} type="button">Download my data</button>
+              <button className="secondary-button compact-action" onClick={downloadData} type="button">Download JSON</button>
+              <button className="secondary-button compact-action" onClick={downloadCsv} type="button">Download nutrition CSV</button>
             </div>
           </div>
           <div className="data-control-section danger-data-section">

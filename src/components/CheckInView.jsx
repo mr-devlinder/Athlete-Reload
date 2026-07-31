@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { BodyPainMap } from './BodyPainMap'
 import { Select, Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
+import { VoiceDraftButton } from './VoiceDraftButton'
 import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
 
 export function CheckInView({
@@ -16,12 +17,14 @@ export function CheckInView({
   todayIso,
   todayLabel,
   onSave,
+  onQuickSave,
   onEditToday,
   onOpenCheckout,
   onSelectEvent,
   onUpdate,
   hasEarlierEventToday,
   isFirstEventToday,
+  isQuickMode = false,
 }) {
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
   const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
@@ -91,6 +94,11 @@ export function CheckInView({
 
         </div>
 
+        <div className="quick-checkin-tools">
+          {isQuickMode && <p>Quick check-in keeps the highest-value readiness signals. Add details whenever something needs attention.</p>}
+          <VoiceDraftButton onQuickSave={onQuickSave} onApply={(draft) => Object.entries(draft).forEach(([field, value]) => { if (value !== null && field !== 'notes') onUpdate(field, value) })} />
+        </div>
+
         <Slider
           description="How much energy you have available right now."
           label="Energy"
@@ -99,7 +107,7 @@ export function CheckInView({
           unit="/5"
           onChange={(value) => onUpdate('energy', value)}
         />
-        <Slider
+        {!isQuickMode && <Slider
           description="Overall muscle discomfort or tenderness, even before activity."
           label="Muscle soreness"
           min={1}
@@ -107,7 +115,7 @@ export function CheckInView({
           value={checkIn.soreness}
           unit="/5"
           onChange={(value) => onUpdate('soreness', value)}
-        />
+        />}
         <Slider
           description="How worn down your whole body feels."
           label="General fatigue"
@@ -117,7 +125,7 @@ export function CheckInView({
           unit="/5"
           onChange={(value) => onUpdate('fatigue', value)}
         />
-        <Slider
+        {!isQuickMode && <Slider
           description="Whether your legs feel unusually heavy or slow."
           label="Leg heaviness"
           min={0}
@@ -125,7 +133,7 @@ export function CheckInView({
           value={checkIn.legHeaviness ?? 0}
           unit="/5"
           onChange={(value) => onUpdate('legHeaviness', value)}
-        />
+        />}
         {isFirstEventToday && (
           <>
             <Slider
@@ -412,8 +420,8 @@ function DailyFuelContext({ dailyWellness }) {
     <div className="daily-fuel-context">
       <span>Today's fuel</span>
       <strong>{hydrationOz} fl oz logged</strong>
-      <small>{meals.length ? `${meals.join(', ')} marked today` : 'No meals marked yet'}</small>
-      <small className="daily-fuel-context-note">Update hydration and meals on Home.</small>
+      <small>{meals.length ? `${meals.length} food item${meals.length === 1 ? '' : 's'} logged today` : 'No food logged yet'}</small>
+      <small className="daily-fuel-context-note">Update hydration and meals in Nutrition.</small>
     </div>
   )
 }

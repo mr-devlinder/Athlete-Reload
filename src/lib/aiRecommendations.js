@@ -31,3 +31,15 @@ export async function generateAiRecommendation(payload) {
     clearTimeout(timeoutId)
   }
 }
+
+export async function extractVoiceLog(payload) {
+  if (!supabase) throw new Error('Supabase is not configured')
+
+  const { data, error } = await supabase.functions.invoke('generate-recommendation', {
+    body: { ...payload, requestType: 'voice_extract' },
+  })
+
+  if (error) throw error
+  if (!data?.extraction) throw new Error('Voice draft could not be understood')
+  return data.extraction
+}

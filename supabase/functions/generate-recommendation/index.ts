@@ -42,6 +42,10 @@ Deno.serve(async (request) => {
 
   try {
     const body = await request.json()
+    if (body?.requestType === 'voice_extract') {
+      const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
+      return jsonResponse({ extraction: extractionResponse })
+    }
     const model = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash-lite'
     const geminiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
       method: 'POST',
@@ -73,6 +77,57 @@ Deno.serve(async (request) => {
   }
 })
 
+async function generateGeminiJson(apiKey: string, input: string) {
+  const model = Deno.env.get('GEMINI_MODEL') ?? 'gemini-3.5-flash-lite'
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+    body: JSON.stringify({ model, input }),
+  })
+  if (!response.ok) throw new Error('Gemini request failed')
+  return JSON.parse(stripJsonFence(extractOutputText(await response.json())))
+}
+
+function buildVoiceExtractionPrompt(payload: any) {
+  const isCheckout = payload.logType === 'checkout'
+  return `
+You extract only explicit athlete-reported details into JSON. Never invent details. Return ONLY valid JSON.
+
+This is a ${isCheckout ? 'post-event checkout' : 'pre-event check-in'} voice note.
+Transcript: ${JSON.stringify(payload.transcript ?? '')}
+
+For each uncertain or unmentioned field, use null. Keep the original transcript in notes.
+${isCheckout ? `
+JSON shape:
+{
+  "actualMinutes": number|null,
+  "difficulty": number|null,
+  "participation": "Full"|"Modified"|"Partial"|"Did not participate"|null,
+  "postFatigue": number|null,
+  "postSoreness": number|null,
+  "performanceRating": "Worse"|"Slightly worse"|"Normal"|"Better"|"Much better"|null,
+  "mentalFocus": number|null,
+  "motivation": number|null,
+  "movementChanged": boolean|null,
+  "newPain": boolean|null,
+  "notes": string
+}` : `
+JSON shape:
+{
+  "energy": number|null,
+  "fatigue": number|null,
+  "soreness": number|null,
+  "legHeaviness": number|null,
+  "sleep": number|null,
+  "sleepQuality": number|null,
+  "stress": "1 - Low"|"2"|"3"|"4"|"5 - High"|null,
+  "illnessSymptoms": "None"|"Mild"|"Significant"|null,
+  "expectedDifficulty": number|null,
+  "notes": string
+}`}
+`
+}
+
 function buildPrompt(payload: unknown) {
   if ((payload as any)?.requestType === 'post_checkout') {
     return buildPostCheckoutPrompt(payload)
@@ -80,6 +135,10 @@ function buildPrompt(payload: unknown) {
 
   if ((payload as any)?.requestType === 'recovery_plan') {
     return buildRecoveryPlanPrompt(payload)
+  }
+
+  if ((payload as any)?.requestType === 'quick_checkin') {
+    return buildQuickCheckInPrompt(payload)
   }
 
   return `
@@ -110,7 +169,7 @@ Calibration rules:
 - When event.tournament is present, account for the tournament date range and its scheduled games. A short turnaround to the next match should favor practical recovery, symptom monitoring, and avoiding unnecessary extra work; do not treat a tournament game like an isolated event.
 - Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, illness symptoms, sleep quality, recovery actions, and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, and saved recoveryPlan action statuses or feedback as the prior-session context. Notice when an athlete repeatedly cannot complete an important recovery action, but do not shame them; make the next plan practical and prioritize the most important missing action.
 - Treat hydrationOz as the athlete's cumulative fluid total so far today, measured at the time of this event. Compare it with the event start time: an early-morning event should not be judged as if the athlete had the whole day to hydrate, while an evening event reasonably has a higher expected total. Never penalize an early event simply because the daily total is not yet high.
-- When dailyWellness is present, use its cumulative hydration and completed nutrition entries as the athlete's live day context. Mention missing meal or hydration follow-through only as a practical preparation priority, never as a diagnosis and never with rigid calorie, body-weight, or fluid prescriptions.
+- When dailyWellness and nutritionContext are present, use cumulative hydration, logged foods, macro totals, daily targets, meal timing, event timing, and the athlete's selected goals as live day context. Mention missing meal or hydration follow-through only as a practical preparation priority, never as a diagnosis and never with rigid calorie, body-weight, or fluid prescriptions. Do not make nutrition the sole reason to remove participation.
 - Use the athlete profile's sport, position, training style, dominant side, and optional body context to tailor activity choices. Do not use optional height, weight, or gender data to judge body size, health, or worth; use it only as limited context alongside the sport, event, symptoms, and the athlete's own history.
 - When baseline is present and its confidence is Building or Established, use it as one balanced context signal. Explain meaningful differences from the athlete's usual pattern without treating one unusual value as proof of injury or using baseline data to overrule red-flag symptoms.
 - Base the recommendation on the selected event type and planned intensity. A high-intensity game, gym session, recovery day, and team practice should not get the same advice.
@@ -140,6 +199,20 @@ ${JSON.stringify(payload, null, 2)}
 `
 }
 
+function buildQuickCheckInPrompt(payload: any) {
+  return `
+You are Athlete Reload's quick check-in assistant for a student athlete.
+Use only the athlete's edited words below. Do not invent missing measurements or pretend the athlete answered the detailed check-in fields.
+Create a practical event recommendation from the information that is actually present. Clearly state what is unknown and keep the plan conservative when important details are missing.
+This is not medical advice or clearance. Direct the athlete to a parent, coach, athletic trainer, or qualified healthcare professional for red flags.
+
+Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, and breakdown.
+
+Quick check-in text:
+${String(payload?.quickTranscript ?? '').trim()}
+`
+}
+
 function buildPostCheckoutPrompt(payload: unknown) {
   return `
 You are Athlete Reload's post-training recovery assistant for student athletes.
@@ -155,6 +228,7 @@ Important behavior:
 - Do not make this about deciding tomorrow's participation. Tomorrow's check-in handles that.
 - Use the completed session intensity only to scale recovery care, not to predict readiness. A larger session load needs more deliberate recovery, but never call a number inherently safe or dangerous.
 - Use the athlete profile's sport, position, training style, and dominant side to make recovery steps relevant to the session, without turning the profile into a diagnosis.
+- Use dailyWellness and nutritionContext for practical recovery-food and hydration priorities based on what the athlete has already logged, their targets, goals, and the completed session. Do not prescribe exact medical nutrition quantities or make nutrition the sole reason to escalate a symptom.
 - If pain worsened, symptoms are new, movement changed, or the athlete stopped early, give a more cautious recovery plan and a concise next-event warning for the following check-in.
 - If the session was completed normally with stable pain, give practical recovery steps without sounding alarmist.
 - When the athlete reports cramping with dizziness, nausea, headache, or unusual shortness of breath, instruct them to stop additional exercise, move to a cool environment, and tell an adult, coach, or trainer. State that fainting, confusion, vomiting, or severe/worsening symptoms require urgent help.
@@ -200,6 +274,7 @@ Important behavior:
 - The recovery plan is for the completed event. Do not decide whether the athlete is cleared for the next event.
 - Use actual minutes, session difficulty, participation, session content, surface, sport, position, current soreness, pain before versus after, new symptoms, changed movement, and the next event's timing together.
 - Generate 3-6 prioritized Do now recovery steps. Each needs a title, why it matters, and a suggested completion time.
+- Use dailyWellness, nutritionContext, selected goals, and dietary preferences to make food and hydration steps practical. Use what is already logged that day; do not prescribe exact medical nutrition quantities or claim a meal repairs an injury.
 - Include normal recovery habits such as fluids, a normal meal or snack, sleep, a cooldown, and comfortable mobility when appropriate. Do not prescribe exact medical or nutrition quantities.
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
 - A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.

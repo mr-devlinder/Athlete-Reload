@@ -9,7 +9,6 @@ import { PainShareModal } from './PainShareModal'
 
 export function HomeView({
   checkouts,
-  dailyWellness,
   history,
   painIssues = [],
   painReports = [],
@@ -18,7 +17,6 @@ export function HomeView({
   onOpenCheckout,
   onSavePainIssue,
   onSharePainIssue,
-  onUpdateWellness,
 }) {
   const now = new Date()
   const recentHistory = getEntriesSince(history, 6)
@@ -101,7 +99,6 @@ export function HomeView({
       </section>
 
       <section className="home-panels dashboard-main">
-        <DailyWellnessCard wellness={dailyWellness} onUpdate={onUpdateWellness} />
         <article className="home-panel today-flow-panel">
           <div className="panel-heading">
             <span>Today</span>
@@ -422,57 +419,6 @@ function formatPainAreaLabel(report) {
     ? `${report.side} `
     : ''
   return `${side}${report.bodyPart}`.replace(/\b\w/g, (character) => character.toUpperCase())
-}
-
-const nutritionOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Post-training meal']
-
-function DailyWellnessCard({ wellness, onUpdate }) {
-  const hydrationOz = Math.max(0, Number(wellness?.hydrationOz ?? 0))
-  const nutritionEntries = wellness?.nutritionEntries ?? []
-
-  function setHydration(value) {
-    onUpdate?.({
-      ...wellness,
-      hydrationOz: Math.max(0, Number(value) || 0),
-      nutritionEntries,
-    })
-  }
-
-  function toggleNutrition(entry) {
-    const nextEntries = nutritionEntries.includes(entry)
-      ? nutritionEntries.filter((item) => item !== entry)
-      : [...nutritionEntries, entry]
-
-    onUpdate?.({ ...wellness, hydrationOz, nutritionEntries: nextEntries })
-  }
-
-  return (
-    <article className="home-panel daily-wellness-panel">
-      <div className="panel-heading">
-        <span>Today&apos;s fuel</span>
-        <strong>{hydrationOz} fl oz</strong>
-      </div>
-      <h3>Hydration and nutrition</h3>
-      <p>Keep this current throughout the day so event recommendations have the right context.</p>
-      <div className="wellness-hydration-controls">
-        <button onClick={() => setHydration(hydrationOz - 16)} type="button">-16</button>
-        <button onClick={() => setHydration(hydrationOz + 16)} type="button">+16</button>
-        <button onClick={() => setHydration(hydrationOz + 32)} type="button">+32</button>
-        <label>
-          <span>Fluid ounces</span>
-          <input defaultValue={hydrationOz} min="0" onBlur={(event) => setHydration(event.target.value)} type="number" />
-        </label>
-      </div>
-      <div className="wellness-nutrition-options">
-        {nutritionOptions.map((entry) => (
-          <label key={entry}>
-            <input checked={nutritionEntries.includes(entry)} onChange={() => toggleNutrition(entry)} type="checkbox" />
-            <span>{entry}</span>
-          </label>
-        ))}
-      </div>
-    </article>
-  )
 }
 
 function DashboardMetric({ detail, label, tone = 'neutral', value }) {

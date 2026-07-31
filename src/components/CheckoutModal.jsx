@@ -1,10 +1,11 @@
+import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
-import { BodyPainMap } from './BodyPainMap'
 import { Slider } from './FormControls'
 import { RecoveryPlanCard } from './RecommendationCard'
 import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 import { estimatePlannedMinutes } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
+import { VoiceDraftButton } from './VoiceDraftButton'
 
 const painChanges = ['Improved', 'Unchanged', 'Slightly worse', 'Much worse']
 const participationLevels = ['Full', 'Modified', 'Partial', 'Did not participate']
@@ -58,7 +59,7 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
     }
   }
 
-  return (
+  return createPortal(
     <div className="modal-backdrop">
       <section className="event-modal checkout-modal glass-panel" role="dialog" aria-modal="true">
         <div className="checkout-modal-surface">
@@ -77,6 +78,10 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
           ) : (
             <div className="modal-form">
             {saveError && <p className="form-error" role="alert">{saveError}</p>}
+            <div className="quick-checkin-tools">
+              <p>Use a quick checkout description, then review the captured fields before saving.</p>
+              <VoiceDraftButton logType="post_checkout" onApply={(voiceDraft) => Object.entries(voiceDraft).forEach(([field, value]) => { if (value !== null && field !== 'notes') updateDraft(field, value) })} />
+            </div>
             <label className="compact-field">
               Did you participate?
               <select value={draft.participation} onChange={(changeEvent) => updateDraft('participation', changeEvent.target.value)}>
@@ -168,15 +173,6 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
                 <Slider label="Motivation" max={5} min={1} unit="/5" value={draft.motivation} onChange={(value) => updateDraft('motivation', value)} />
               </div>
             </div>
-            <div className="modal-notes">
-              <BodyPainMap
-                details={draft.painDetails}
-                value={draft.painMap}
-                onDetailsChange={(value) => updateDraft('painDetails', value)}
-                onChange={(value) => updateDraft('painMap', value)}
-              />
-            </div>
-
             <button className="primary-button modal-notes" disabled={isSaving} onClick={saveDraft} type="button">
               {isSaving ? 'Generating recovery plan...' : 'Save checkout'}
             </button>
@@ -184,7 +180,8 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
           )}
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
