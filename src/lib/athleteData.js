@@ -1,6 +1,7 @@
 import { format, parseISO } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { estimatePlannedMinutes } from '../utils/events'
+import { normalizePainMapScale } from '../data/bodyPainMap'
 
 function normalizeFivePointValue(value, fallback = 1) {
   const number = Number(value)
@@ -118,7 +119,7 @@ function fromCheckInRow(row) {
     note: row.notes,
     pain: row.pain,
     painDetails: row.pain_details ?? {},
-    painMap: row.pain_map ?? {},
+    painMap: normalizePainMapScale(row.pain_map ?? {}, row.pain),
     painTrend: row.pain_trend ?? 'New',
     painType: row.pain_type,
     plannedIntensity: row.planned_intensity ?? row.session_type,

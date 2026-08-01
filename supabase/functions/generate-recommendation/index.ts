@@ -46,7 +46,7 @@ Deno.serve(async (request) => {
       const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
       return jsonResponse({ extraction: extractionResponse })
     }
-    const model = 'gemini-2.5-flash-lite'
+    const model = 'gemini-3.5-flash-lite'
     const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
@@ -75,7 +75,7 @@ Deno.serve(async (request) => {
 })
 
 async function generateGeminiJson(apiKey: string, input: string) {
-  const model = 'gemini-2.5-flash-lite'
+  const model = 'gemini-3.5-flash-lite'
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },

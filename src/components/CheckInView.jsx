@@ -232,7 +232,7 @@ export function CheckInView({
           onChange={(value) => onUpdate('painMap', value)}
         />
 
-        <button className="primary-button" disabled={isSaving} onClick={onSave} type="button">
+        <button className="primary-button" disabled={isSaving} onClick={() => onSave()} type="button">
           {isSaving ? 'Generating recommendation...' : 'Save check-in'}
         </button>
       </div>

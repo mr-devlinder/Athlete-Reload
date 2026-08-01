@@ -62,7 +62,7 @@ import {
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
-import { getPainReportsFromMap, getPrimaryPainArea } from './data/bodyPainMap'
+import { getPainReportsFromMap, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
@@ -203,6 +203,7 @@ function normalizeCheckInScales(checkIn) {
     legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
     sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, 5),
     soreness: normalizeFivePointValue(checkIn.soreness, 0),
+    painMap: normalizePainMapScale(checkIn.painMap, checkIn.pain),
   }
 }
 
@@ -220,7 +221,7 @@ function getYesterdayLoadFromSchedule(schedule) {
 function applyPainMapToCheckIn(checkIn) {
   const primaryArea = getPrimaryPainArea(checkIn.painMap)
   const severity = primaryArea?.severity ?? 0
-  const pain = severity > 0 ? Math.max(1, Math.round(severity / 10)) : 0
+  const pain = severity > 0 ? Math.max(1, Math.min(10, Math.round(severity))) : 0
 
   return normalizeCheckInScales({
     ...checkIn,
@@ -548,6 +549,7 @@ function App() {
   const [checkoutEvent, setCheckoutEvent] = useState(null)
   const [submittedRecommendation, setSubmittedRecommendation] = useState(null)
   const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
+  const [checkInAiError, setCheckInAiError] = useState('')
   const [generatedRecoveryPlan, setGeneratedRecoveryPlan] = useState(null)
   const [generatedRecoveryCheckoutId, setGeneratedRecoveryCheckoutId] = useState(null)
   const [isGeneratedRecoveryPlanSaved, setIsGeneratedRecoveryPlanSaved] = useState(false)
@@ -1085,6 +1087,9 @@ function App() {
   async function saveCheckIn(quickDraft = null) {
     if (isSavingCheckIn) return
 
+    const validQuickDraft = quickDraft?.inputMethod === 'quick' ? quickDraft : null
+
+    setCheckInAiError('')
     setIsSavingCheckIn(true)
 
     const previousEntry = isEditingToday
@@ -1095,12 +1100,10 @@ function App() {
         )
       : null
 
-    if (isEditingToday && previousEntry && areCheckInsEquivalent(scheduleDrivenCheckIn, previousEntry)) {
-      const existingRecommendation = previousEntry.recommendation ?? localRecommendation
-
+    if (isEditingToday && previousEntry?.recommendation && areCheckInsEquivalent(scheduleDrivenCheckIn, previousEntry)) {
       setIsEditingToday(false)
-      setSubmittedRecommendation(existingRecommendation)
-      setSubmittedRecommendationStatus(previousEntry.recommendation ? 'ai' : 'local')
+      setSubmittedRecommendation(previousEntry.recommendation)
+      setSubmittedRecommendationStatus('ai')
       setSubmittedRecommendationContext({
         scoreLabel: 'readiness',
         session: scheduleDrivenCheckIn.session,
@@ -1110,11 +1113,17 @@ function App() {
       return
     }
 
-    const savedCheckIn = quickDraft ? { ...scheduleDrivenCheckIn, ...quickDraft } : scheduleDrivenCheckIn
-    let finalRecommendation = savedCheckIn.quickRecommendation ?? localRecommendation
-    let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
+    const rawSavedCheckIn = validQuickDraft
+      ? { ...scheduleDrivenCheckIn, ...validQuickDraft }
+      : scheduleDrivenCheckIn
+    const savedCheckIn = {
+      ...rawSavedCheckIn,
+      painMap: normalizePainMapScale(rawSavedCheckIn.painMap, rawSavedCheckIn.pain),
+    }
+    let finalRecommendation = savedCheckIn.quickRecommendation ?? null
+    const finalRecommendationStatus = 'ai'
 
-    if (supabase && !savedCheckIn.quickRecommendation) {
+    if (!savedCheckIn.quickRecommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
 
@@ -1126,12 +1135,13 @@ function App() {
           nutritionContext,
           event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
           previousCheckout: withoutNotes(previousCheckout),
+          requestType: 'check_in',
         })
-        finalRecommendationStatus = 'ai'
       } catch (error) {
-        console.error(error)
-        finalRecommendation = localRecommendation
-        finalRecommendationStatus = 'fallback'
+        console.error('Check-in AI recommendation failed', error)
+        setCheckInAiError(error?.message || 'The AI recommendation could not be generated. Please try again.')
+        setIsSavingCheckIn(false)
+        return
       }
     }
 
@@ -1160,15 +1170,15 @@ function App() {
           )
         }
 
-        const savedEntry = await createCheckIn(scheduleDrivenCheckIn, finalRecommendation)
+        const savedEntry = await createCheckIn(savedCheckIn, finalRecommendation)
         const savedPainReports = await createPainReports(getPainReportsFromMap(
-          scheduleDrivenCheckIn.painMap,
+          savedCheckIn.painMap,
           {
-            date: scheduleDrivenCheckIn.eventDate ?? todayIso,
-            notes: scheduleDrivenCheckIn.notes,
+            date: savedCheckIn.eventDate ?? todayIso,
+            notes: savedCheckIn.notes,
             sourceId: savedEntry.id,
             sourceType: 'check_in',
-            triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
+            triggerMovement: savedCheckIn.hurtsWhen,
           },
         ))
         setHistory((current) => [
@@ -1611,12 +1621,16 @@ function App() {
 
   async function saveCheckout(event, checkout, existingCheckout) {
     const preCheckIn = history.find((entry) => entry.eventId === event.id)
+    checkout = {
+      ...checkout,
+      painMap: normalizePainMapScale(checkout.painMap, preCheckIn?.pain),
+    }
     const nextScheduledEvent = getNextScheduledEvent(schedule, event)
     const localCheckoutRecommendation = getLocalCheckoutRecommendation(checkout, event, preCheckIn, nextScheduledEvent)
     let finalRecommendation = existingCheckout?.recommendation ?? localCheckoutRecommendation
     let finalRecommendationStatus = existingCheckout?.recommendation ? 'ai' : 'local'
 
-    if (isSupabaseSession) {
+    if (supabase) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, event)
 
@@ -2826,6 +2840,33 @@ function App() {
                 session={submittedRecommendationContext.session}
               />
             )}
+          </section>
+        </div>
+      )}
+
+      {checkInAiError && (
+        <div className="modal-backdrop" onClick={() => setCheckInAiError('')}>
+          <section
+            className="event-modal recommendation-modal glass-panel"
+            onClick={(event) => event.stopPropagation()}
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="checkin-ai-error-title"
+          >
+            <div className="schedule-header">
+              <div>
+                <p className="eyebrow">Recommendation unavailable</p>
+                <h2 id="checkin-ai-error-title">Your check-in was not saved.</h2>
+              </div>
+              <button className="ghost-close" onClick={() => setCheckInAiError('')} type="button">
+                Close
+              </button>
+            </div>
+            <p>{checkInAiError}</p>
+            <p className="field-description">Your answers are still here. Try saving again when the connection is available.</p>
+            <button className="primary-button" onClick={() => setCheckInAiError('')} type="button">
+              Return to check-in
+            </button>
           </section>
         </div>
       )}

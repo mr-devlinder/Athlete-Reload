@@ -17,7 +17,7 @@ export function BodyPainMap({
   const [activeIndex, setActiveIndex] = useState(0)
   const activeArea = bodyPainAreas[activeIndex]
   const activeValue = Number(painMap[activeArea.id] ?? 0)
-  const activePainScore = Math.round(activeValue / 10)
+  const activePainScore = Math.max(0, Math.min(10, Math.round(activeValue)))
   const painfulAreas = useMemo(
     () => bodyPainAreas.filter((area) => Number(painMap[area.id] ?? 0) > 0),
     [painMap],
@@ -130,7 +130,7 @@ export function BodyPainMap({
               min="0"
               type="number"
               value={activePainScore}
-              onChange={(event) => updateArea(activeArea.id, Number(event.target.value) * 10)}
+              onChange={(event) => updateArea(activeArea.id, Number(event.target.value))}
             />
           </label>
           <input
@@ -140,7 +140,7 @@ export function BodyPainMap({
             style={{ '--range-progress': `${activePainScore * 10}%` }}
             type="range"
             value={activePainScore}
-            onChange={(event) => updateArea(activeArea.id, Number(event.target.value) * 10)}
+            onChange={(event) => updateArea(activeArea.id, Number(event.target.value))}
           />
 
           <div className="body-map-actions">
@@ -176,7 +176,7 @@ export function BodyPainMap({
         ) : (
           painfulAreas.slice(0, 5).map((area) => (
             <span key={area.id}>
-              {area.label} <strong>{Math.round(Number(painMap[area.id] ?? 0) / 10)}/10</strong>
+              {area.label} <strong>{Math.round(Number(painMap[area.id] ?? 0))}/10</strong>
             </span>
           ))
         )}
@@ -280,8 +280,8 @@ const affectedMovementOptions = [
 ]
 
 function getSeverityColor(severity) {
-  if (severity >= 70) return '#ff6f61'
-  if (severity >= 35) return '#ffb347'
+  if (severity >= 7) return '#ff6f61'
+  if (severity >= 4) return '#ffb347'
 
   return '#ffd166'
 }

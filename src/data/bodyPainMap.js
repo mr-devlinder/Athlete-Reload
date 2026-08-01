@@ -33,6 +33,24 @@ export function createEmptyPainMap() {
   }), {})
 }
 
+export function normalizePainMapScale(painMap = {}, primaryPain = 0) {
+  const entries = Object.entries(painMap)
+  const highestSeverity = Math.max(0, ...entries.map(([, value]) => Number(value) || 0))
+  const visiblePain = Number(primaryPain) || 0
+  const isLegacyScale = highestSeverity > 10 || (
+    visiblePain > 0 &&
+    visiblePain < 10 &&
+    highestSeverity === visiblePain * 10
+  )
+
+  if (!isLegacyScale) return painMap
+
+  return Object.fromEntries(entries.map(([area, value]) => [
+    area,
+    Math.max(0, Math.min(10, Math.round((Number(value) || 0) / 10))),
+  ]))
+}
+
 export function getPrimaryPainArea(painMap = {}) {
   return bodyPainAreas
     .map((area) => ({
