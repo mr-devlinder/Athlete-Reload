@@ -20,7 +20,7 @@ Deno.serve(async (request) => {
       searchOpenFoodFacts(search),
     ])
 
-    return json({ foods: rank([...foods[0], ...foods[1]], search).slice(0, 24) })
+    return json({ foods: rank([...foods[0], ...foods[1]], search).filter(isPlausibleFood).slice(0, 24) })
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Food search failed' }, 502)
   }
@@ -83,20 +83,41 @@ function getServingGrams(name: string, serving: string) {
 
 function normalizeOff(product: any): Food {
   const n = product.nutriments ?? {}
-  return { name: product.product_name ?? product.product_name_en ?? '', brand: product.brands ?? '', barcode: product.code ?? '', foodSource: 'Open Food Facts', servingSize: product.serving_size ?? '100 g', calories: n['energy-kcal_100g'] ?? 0, protein: n.proteins_100g ?? 0, carbohydrates: n.carbohydrates_100g ?? 0, fats: n.fat_100g ?? 0, fiber: n.fiber_100g ?? 0, sugar: n.sugars_100g ?? 0, saturatedFat: n['saturated-fat_100g'] ?? 0, polyunsaturatedFat: n['polyunsaturated-fat_100g'] ?? 0, monounsaturatedFat: n['monounsaturated-fat_100g'] ?? 0, transFat: n['trans-fat_100g'] ?? 0, cholesterol: n.cholesterol_100g ?? 0, sodium: n.sodium_100g ?? 0, potassium: n.potassium_100g ?? 0, calcium: n.calcium_100g ?? 0, iron: n.iron_100g ?? 0, vitaminA: n['vitamin-a_100g'] ?? 0, vitaminC: n['vitamin-c_100g'] ?? 0, vitaminD: n['vitamin-d_100g'] ?? 0, vitaminE: n['vitamin-e_100g'] ?? 0, vitaminK: n['vitamin-k_100g'] ?? 0 }
+  const servingGrams = Number(product.serving_quantity) || 100
+  const factor = servingGrams / 100
+  const scaled = (value: unknown) => Math.round(Number(value ?? 0) * factor * 10) / 10
+  return { name: product.product_name ?? product.product_name_en ?? '', brand: product.brands ?? '', barcode: product.code ?? '', foodSource: 'Open Food Facts', servingSize: product.serving_size ?? '100 g', calories: Math.round(Number(n['energy-kcal_100g'] ?? 0) * factor), protein: scaled(n.proteins_100g), carbohydrates: scaled(n.carbohydrates_100g), fats: scaled(n.fat_100g), fiber: scaled(n.fiber_100g), sugar: scaled(n.sugars_100g), saturatedFat: scaled(n['saturated-fat_100g']), polyunsaturatedFat: scaled(n['polyunsaturated-fat_100g']), monounsaturatedFat: scaled(n['monounsaturated-fat_100g']), transFat: scaled(n['trans-fat_100g']), cholesterol: scaled(n.cholesterol_100g), sodium: scaled(n.sodium_100g), potassium: scaled(n.potassium_100g), calcium: scaled(n.calcium_100g), iron: scaled(n.iron_100g), vitaminA: scaled(n['vitamin-a_100g']), vitaminC: scaled(n['vitamin-c_100g']), vitaminD: scaled(n['vitamin-d_100g']), vitaminE: scaled(n['vitamin-e_100g']), vitaminK: scaled(n['vitamin-k_100g']) }
 }
 
 function rank(foods: Food[], query: string) {
   const seen = new Set<string>()
-  return foods.filter((food) => { const key = `${food.name}|${food.brand}`.toLowerCase(); if (!food.name || seen.has(key)) return false; seen.add(key); return true }).sort((a, b) => score(b, query) - score(a, query))
+  return foods.filter((food) => { const key = `${food.name}|${food.brand}`.toLowerCase(); if (!nameMatches(food, query) || seen.has(key)) return false; seen.add(key); return true }).sort((a, b) => score(b, query) - score(a, query))
 }
 
 function score(food: Food, query: string) {
   const name = String(food.name).toLowerCase()
-  if (name === query.toLowerCase()) return 100
-  if (name.startsWith(`${query.toLowerCase()},`) || name.startsWith(`${query.toLowerCase()} `)) return 90
-  if (name.includes(query.toLowerCase())) return 65
-  return 10
+  const sourceBoost = food.foodSource === 'USDA FoodData Central' ? 45 : 0
+  if (name === query.toLowerCase()) return 100 + sourceBoost
+  if (name.startsWith(`${query.toLowerCase()},`) || name.startsWith(`${query.toLowerCase()} `)) return 90 + sourceBoost
+  if (name.includes(query.toLowerCase())) return 65 + sourceBoost
+  return sourceBoost
+}
+
+function nameMatches(food: Food, query: string) {
+  const terms = query.toLowerCase().match(/[a-z0-9]+/g) ?? []
+  const name = String(food.name).toLowerCase()
+  return terms.every((term) => name.includes(term))
+}
+
+function isPlausibleFood(food: Food) {
+  const calories = Number(food.calories ?? 0)
+  const protein = Number(food.protein ?? 0)
+  const carbohydrates = Number(food.carbohydrates ?? 0)
+  const fats = Number(food.fats ?? 0)
+  return Number.isFinite(calories) && Number.isFinite(protein) && Number.isFinite(carbohydrates) && Number.isFinite(fats)
+    && calories >= 0 && calories <= 1_500
+    && protein >= 0 && protein <= 100 && carbohydrates >= 0 && carbohydrates <= 100 && fats >= 0 && fats <= 100
+    && protein + carbohydrates + fats <= 115
 }
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }) }

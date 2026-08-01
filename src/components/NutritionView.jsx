@@ -38,7 +38,7 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
   const displayedDate = selectedDate === today ? 'Today' : format(parseISO(selectedDate), 'EEE, MMM d')
 
   return (
-    <div className="nutrition-view">
+    <div className="nutrition-view" data-tour="nutrition-page">
       <section className="nutrition-dashboard-heading">
         <div>
           <SectionHeading eyebrow="Nutrition" title="Fuel for the day." />

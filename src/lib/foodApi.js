@@ -101,7 +101,7 @@ function rankFoods(foods, query) {
   return foods
     .filter((food) => {
       const key = `${food.name}|${food.brand}`.toLowerCase()
-      if (seen.has(key)) return false
+      if (!nameMatchesQuery(food.name, query) || !isPlausibleFood(food) || seen.has(key)) return false
       seen.add(key)
       return true
     })
@@ -112,9 +112,27 @@ function rankFoods(foods, query) {
 function scoreFood(food, query) {
   const name = food.name.toLowerCase()
   const brand = String(food.brand ?? '').toLowerCase()
-  if (name === query || name.startsWith(`${query},`) || name.startsWith(`${query} `)) return 100
-  if (name.split(/[, ]/).includes(query)) return 80
-  if (name.includes(query)) return 60
-  if (brand.includes(query)) return 30
-  return 0
+  const sourceBoost = food.foodSource === 'USDA FoodData Central' ? 45 : 0
+  if (name === query || name.startsWith(`${query},`) || name.startsWith(`${query} `)) return 100 + sourceBoost
+  if (name.split(/[, ]/).includes(query)) return 80 + sourceBoost
+  if (name.includes(query)) return 60 + sourceBoost
+  if (brand.includes(query)) return 30 + sourceBoost
+  return sourceBoost
+}
+
+function nameMatchesQuery(name, query) {
+  const terms = query.match(/[a-z0-9]+/g) ?? []
+  const normalizedName = String(name ?? '').toLowerCase()
+  return terms.every((term) => normalizedName.includes(term))
+}
+
+function isPlausibleFood(food) {
+  const calories = Number(food.calories ?? 0)
+  const protein = Number(food.protein ?? 0)
+  const carbohydrates = Number(food.carbohydrates ?? 0)
+  const fats = Number(food.fats ?? 0)
+  return Number.isFinite(calories) && Number.isFinite(protein) && Number.isFinite(carbohydrates) && Number.isFinite(fats)
+    && calories >= 0 && calories <= 1500
+    && protein >= 0 && protein <= 100 && carbohydrates >= 0 && carbohydrates <= 100 && fats >= 0 && fats <= 100
+    && protein + carbohydrates + fats <= 115
 }

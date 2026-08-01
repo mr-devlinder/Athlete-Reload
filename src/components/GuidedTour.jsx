@@ -4,13 +4,13 @@ const tourSteps = {
   schedule: {
     awaitingClick: true,
     body: 'Click Add event. The rest of the app stays locked until you create your first event.',
-    eyebrow: 'Step 1 of 4',
+    eyebrow: 'Step 1 of 6',
     target: '[data-tour="add-event"]',
     title: 'Start with your schedule',
   },
   'schedule-review': {
     body: 'Your first event is on the calendar. When you are ready, move on to the Check-in walkthrough.',
-    eyebrow: 'Step 1 of 4',
+    eyebrow: 'Step 1 of 6',
     target: '[data-tour="add-event"]',
     title: 'Your schedule is ready',
   },
@@ -18,32 +18,62 @@ const tourSteps = {
     awaitingClick: true,
     navigationStep: true,
     body: 'Next, click Check-in in the navigation bar.',
-    eyebrow: 'Step 2 of 4',
+    eyebrow: 'Step 2 of 6',
     target: '[data-view="Check-in"]',
     title: 'Open Check-in',
   },
   checkin: {
     body: 'This page is where you record sleep, energy, fatigue, soreness, hydration, and pain before an event. When an event has started, this is also where you complete its checkout.',
     bubbleTarget: '[data-tour="check-in-intro"]',
-    eyebrow: 'Step 2 of 4',
+    eyebrow: 'Step 2 of 6',
     readTarget: '[data-tour="check-in-page"]',
     requiresReadThrough: true,
     instantEntry: true,
     target: '[data-tour="check-in-page"]',
     title: 'Check in before training',
   },
+  'nutrition-nav': {
+    awaitingClick: true,
+    navigationStep: true,
+    body: 'Now click Nutrition in the navigation bar.',
+    eyebrow: 'Step 3 of 6',
+    target: '[data-view="Nutrition"]',
+    title: 'Open Nutrition',
+  },
+  nutrition: {
+    body: 'Log meals, serving sizes, calories, macros, and water here. Check-in and recovery recommendations use what you have logged for that day.',
+    eyebrow: 'Step 3 of 6',
+    instantEntry: true,
+    target: '[data-tour="nutrition-page"]',
+    title: 'Fueling lives in one place',
+  },
+  'recovery-nav': {
+    awaitingClick: true,
+    navigationStep: true,
+    body: 'Next, click Recovery in the navigation bar.',
+    eyebrow: 'Step 4 of 6',
+    target: '[data-view="Recovery"]',
+    title: 'Open Recovery',
+  },
+  recovery: {
+    body: 'After a checkout, generate a time-based mobility and stretching plan, complete the guided routine, and save feedback to history.',
+    eyebrow: 'Step 4 of 6',
+    instantEntry: true,
+    target: '[data-tour="recovery-page"]',
+    title: 'Turn checkout data into recovery',
+  },
   'home-nav': {
     awaitingClick: true,
     navigationStep: true,
     body: 'Now click Home in the navigation bar.',
-    eyebrow: 'Step 3 of 4',
+    eyebrow: 'Step 5 of 6',
     target: '[data-view="Home"]',
     title: 'Open Home',
   },
   home: {
     body: 'Home brings your readiness, today’s events, workload, pain timeline, and patterns into one place.',
     bubbleTarget: '[data-tour="home-intro"]',
-    eyebrow: 'Step 3 of 4',
+    eyebrow: 'Step 5 of 6',
     instantEntry: true,
     target: '[data-tour="home-page"]',
     title: 'Home is your overview',
@@ -52,13 +82,13 @@ const tourSteps = {
     awaitingClick: true,
     navigationStep: true,
     body: 'Last, click History in the navigation bar.',
-    eyebrow: 'Step 4 of 4',
+    eyebrow: 'Step 6 of 6',
     target: '[data-view="History"]',
     title: 'Open History',
   },
   history: {
     body: 'Review previous check-ins, checkouts, recommendations, pain reports, and weekly patterns here.',
-    eyebrow: 'Step 4 of 4',
+    eyebrow: 'Step 6 of 6',
     instantEntry: true,
     target: '[data-tour="history-page"]',
     title: 'History shows the bigger picture',
@@ -269,7 +299,7 @@ function getBlockers(rect) {
 
 function getCalloutStyle(rect, isFormOpen, calloutHeight, phase) {
   const isMobile = window.matchMedia('(max-width: 1060px)').matches
-  const width = Math.min(isMobile ? 320 : 360, window.innerWidth - 28)
+  const width = Math.min(isMobile ? 300 : 360, window.innerWidth - 28)
   const maxLeft = Math.max(14, window.innerWidth - width - 14)
   const safeHeight = Math.min(calloutHeight || (isMobile ? 208 : 260), window.innerHeight - 28)
   const clampTop = (top) => Math.min(

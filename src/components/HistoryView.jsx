@@ -341,7 +341,7 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
   }
 
   return (
-    <article className={`${className} history-row-with-menu`}>
+    <article className={`${className} history-row-with-menu${isMenuOpen ? ' history-row-menu-open' : ''}`}>
       <button className="history-row-main" onClick={openDetails} type="button">
         {children}
       </button>

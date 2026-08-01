@@ -2,9 +2,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
 import { SectionHeading } from './SectionHeading'
 import { getPositionOptions, sportOptions } from '../data/sportProfiles'
-
-const goalOptions = ['Gain weight', 'Gain muscle', 'Lose weight', 'Improve strength', 'Improve speed', 'Sport performance', 'Stay healthy', 'Stay fit', 'Improve conditioning', 'Recovery consistency']
-const dietaryOptions = ['Vegetarian', 'Vegan', 'Dairy-free', 'Gluten-free', 'Halal', 'Kosher', 'No preference']
+import { dietaryOptions, goalOptions } from '../data/profileOptions'
 
 export function AthleteProfileModal({ profile, onClose, onSave }) {
   const [draft, setDraft] = useState(profile ?? {})
@@ -14,6 +12,14 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
   function toggleListValue(field, value) {
     setDraft((current) => {
       const values = current[field] ?? []
+      if (field === 'dietaryPreferences') {
+        if (value === 'No preference') {
+          return { ...current, [field]: values.includes(value) ? [] : ['No preference'] }
+        }
+
+        const withoutNoPreference = values.filter((item) => item !== 'No preference')
+        return { ...current, [field]: withoutNoPreference.includes(value) ? withoutNoPreference.filter((item) => item !== value) : [...withoutNoPreference, value] }
+      }
       return { ...current, [field]: values.includes(value) ? values.filter((item) => item !== value) : [...values, value] }
     })
   }
@@ -34,7 +40,12 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
   function setGoalPriority(name, priority) {
     setDraft((current) => ({
       ...current,
-      goals: (current.goals ?? []).map((goal) => (goal.name ?? goal) === name ? { name, priority } : typeof goal === 'string' ? { name: goal, priority: 'secondary' } : goal),
+      goals: (current.goals ?? []).map((goal) => {
+        const goalName = goal.name ?? goal
+        if (goalName === name) return { name, priority }
+        if (priority === 'primary') return { name: goalName, priority: 'secondary' }
+        return typeof goal === 'string' ? { name: goal, priority: 'secondary' } : goal
+      }),
     }))
   }
 
@@ -60,7 +71,7 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
   }
 
   return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop athlete-profile-backdrop" onClick={onClose}>
       <section className="event-modal athlete-profile-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <div className="schedule-header">
           <SectionHeading eyebrow="Athlete profile" title="Your training context." />
@@ -144,18 +155,6 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
               {dietaryOptions.map((option) => <label key={option}><input checked={(draft.dietaryPreferences ?? []).includes(option)} onChange={() => toggleListValue('dietaryPreferences', option)} type="checkbox" /><span>{option}</span></label>)}
             </div>
           </fieldset>
-          {false && <fieldset className="profile-choice-field">
-            <legend>Tracking preferences</legend>
-            <label className="select-field">Check-in detail<select value={draft.trackingPreferences?.mode ?? 'standard'} onChange={(event) => setDraft((current) => ({ ...current, trackingPreferences: { ...current.trackingPreferences, mode: event.target.value } }))}><option value="quick">Quick Mode</option><option value="standard">Standard</option><option value="detailed">Detailed</option></select></label>
-            <div className="profile-choice-grid simple">
-              {[
-                ['nutrition', 'Nutrition'],
-                ['voice', 'Voice-assisted logs'],
-                ['detailedPain', 'Detailed pain mapping'],
-                ['recovery', 'Recovery routines'],
-              ].map(([key, label]) => <label key={key}><input checked={draft.trackingPreferences?.[key] !== false} onChange={(event) => setDraft((current) => ({ ...current, trackingPreferences: { ...current.trackingPreferences, [key]: event.target.checked } }))} type="checkbox" /><span>{label}</span></label>)}
-            </div>
-          </fieldset>}
           <button className="primary-button" disabled={isSaving} type="submit">{isSaving ? 'Saving...' : 'Save profile'}</button>
         </form>
       </section>

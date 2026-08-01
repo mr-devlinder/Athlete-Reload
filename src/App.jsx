@@ -2165,6 +2165,10 @@ function App() {
     if (onboardingTour === 'schedule-review') {
       setOnboardingTour('checkin-nav')
     } else if (onboardingTour === 'checkin') {
+      setOnboardingTour('nutrition-nav')
+    } else if (onboardingTour === 'nutrition') {
+      setOnboardingTour('recovery-nav')
+    } else if (onboardingTour === 'recovery') {
       setOnboardingTour('home-nav')
     } else if (onboardingTour === 'home') {
       setOnboardingTour('history-nav')
@@ -2180,10 +2184,20 @@ function App() {
     } else if (onboardingTour === 'checkin') {
       setOnboardingTour('checkin-nav')
     } else if (onboardingTour === 'home-nav') {
-      setActiveView('Check-in')
-      setOnboardingTour('checkin')
+      setActiveView('Recovery')
+      setOnboardingTour('recovery')
     } else if (onboardingTour === 'home') {
       setOnboardingTour('home-nav')
+    } else if (onboardingTour === 'recovery-nav') {
+      setActiveView('Nutrition')
+      setOnboardingTour('nutrition')
+    } else if (onboardingTour === 'recovery') {
+      setOnboardingTour('recovery-nav')
+    } else if (onboardingTour === 'nutrition-nav') {
+      setActiveView('Check-in')
+      setOnboardingTour('checkin')
+    } else if (onboardingTour === 'nutrition') {
+      setOnboardingTour('nutrition-nav')
     } else if (onboardingTour === 'history-nav') {
       setActiveView('Home')
       setOnboardingTour('home')
@@ -2195,6 +2209,10 @@ function App() {
   function handleTourNavigation(view) {
     if (onboardingTour === 'checkin-nav' && view === 'Check-in') {
       setOnboardingTour('checkin')
+    } else if (onboardingTour === 'nutrition-nav' && view === 'Nutrition') {
+      setOnboardingTour('nutrition')
+    } else if (onboardingTour === 'recovery-nav' && view === 'Recovery') {
+      setOnboardingTour('recovery')
     } else if (onboardingTour === 'home-nav' && view === 'Home') {
       setOnboardingTour('home')
     } else if (onboardingTour === 'history-nav' && view === 'History') {
