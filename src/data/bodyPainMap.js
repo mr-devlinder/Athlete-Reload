@@ -74,3 +74,37 @@ export function getPainReportsFromMap(painMap = {}, source = {}) {
     }))
     .filter((report) => report.severity > 0)
 }
+
+export function getPainReportsWithResolutions(painMap = {}, source = {}, previousReports = []) {
+  const currentReports = getPainReportsFromMap(painMap, source)
+  const currentKeys = new Set(currentReports.map((report) => getPainReportKey(report)))
+  const latestByArea = new Map()
+
+  previousReports.forEach((report) => {
+    const key = getPainReportKey(report)
+    const current = latestByArea.get(key)
+    const reportTime = `${report.date ?? ''}:${report.createdAt ?? ''}`
+    const currentTime = `${current?.date ?? ''}:${current?.createdAt ?? ''}`
+
+    if (!current || reportTime > currentTime) latestByArea.set(key, report)
+  })
+
+  const resolvedReports = [...latestByArea.values()]
+    .filter((report) => Number(report.severity) > 0 && !currentKeys.has(getPainReportKey(report)))
+    .map((report) => ({
+      bodyPart: report.bodyPart,
+      date: source.date,
+      notes: 'Reported pain-free at follow-up.',
+      severity: 0,
+      side: report.side ?? 'center',
+      sourceId: source.sourceId,
+      sourceType: source.sourceType,
+      triggerMovement: '',
+    }))
+
+  return [...currentReports, ...resolvedReports]
+}
+
+function getPainReportKey(report) {
+  return `${String(report.bodyPart).toLowerCase()}:${report.side ?? 'center'}`
+}

@@ -63,12 +63,12 @@ import {
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
-import { getPainReportsFromMap, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
+import { getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
 import { loadSavedState, saveState } from './utils/storage'
-import { getEventDisplayName, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
+import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import './App.css'
 
@@ -180,7 +180,7 @@ function getSessionFromEvent(event) {
 }
 
 function getCheckInEventOptions(schedule) {
-  return sortScheduleEvents(schedule.filter(isEventActionable))
+  return sortScheduleEvents(schedule.filter((event) => isEventActionable(event) || isAllDayEvent(event)))
 }
 
 function getDefaultLoadForEvent(type) {
@@ -533,8 +533,8 @@ function sortScheduleEvents(events) {
 }
 
 function isInsideCheckInWindow(event) {
+  if (isAllDayEvent(event)) return event.date === getTodayIso() && isAllDayCheckInOpen(event)
   if (!isEventActionable(event)) return false
-  if (event.allDay) return event.date === getTodayIso()
   if (!event?.date || !event?.time) return false
   const minutes = getScheduleTimeValue(event.time)
   if (minutes >= 24 * 60) return false
@@ -612,6 +612,7 @@ function App() {
   const [painReports, setPainReports] = useState(savedState?.painReports ?? [])
   const [painIssues, setPainIssues] = useState(savedState?.painIssues ?? [])
   const [savedRoutines, setSavedRoutines] = useState(savedState?.savedRoutines ?? [])
+  const [recoveryCompletions, setRecoveryCompletions] = useState(savedState?.recoveryCompletions ?? [])
   const [shareAuditLogs, setShareAuditLogs] = useState(savedState?.shareAuditLogs ?? [])
   const [tournaments, setTournaments] = useState(savedState?.tournaments ?? [])
   const [isReplayingSavedRoutine, setIsReplayingSavedRoutine] = useState(false)
@@ -638,7 +639,7 @@ function App() {
   )
   const currentTodayCheckInEvent = useMemo(
     () => {
-      const nextRequiredEvent = todayEvents.find((event) => isEventActionable(event) && !completedCheckoutEventIds.has(event.id))
+      const nextRequiredEvent = todayEvents.find((event) => isInsideCheckInWindow(event) && !completedCheckoutEventIds.has(event.id))
       return nextRequiredEvent && isInsideCheckInWindow(nextRequiredEvent) ? nextRequiredEvent : null
     },
     [completedCheckoutEventIds, todayEvents],
@@ -869,6 +870,7 @@ function App() {
       painReports,
       painIssues,
       savedRoutines,
+      recoveryCompletions,
       shareAuditLogs,
       tournaments,
       dailyWellness,
@@ -876,7 +878,7 @@ function App() {
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, savedRoutines, schedule, shareAuditLogs, tournaments])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -923,6 +925,7 @@ function App() {
         setPainReports(data.painReports)
         setPainIssues(data.painIssues)
         setSavedRoutines(data.savedRoutines)
+        setRecoveryCompletions(data.recoveryCompletions ?? [])
         setShareAuditLogs(data.shareAuditLogs)
         setTournaments(data.tournaments)
         setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
@@ -955,6 +958,7 @@ function App() {
               setPainReports(data.painReports)
               setPainIssues(data.painIssues)
               setSavedRoutines(data.savedRoutines)
+              setRecoveryCompletions(data.recoveryCompletions ?? [])
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
@@ -996,6 +1000,7 @@ function App() {
               setPainReports(data.painReports)
               setPainIssues(data.painIssues)
               setSavedRoutines(data.savedRoutines)
+              setRecoveryCompletions(data.recoveryCompletions ?? [])
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
@@ -1228,7 +1233,7 @@ function App() {
         }
 
         const savedEntry = await createCheckIn(savedCheckIn, finalRecommendation)
-        const savedPainReports = await createPainReports(getPainReportsFromMap(
+        const savedPainReports = await createPainReports(getPainReportsWithResolutions(
           savedCheckIn.painMap,
           {
             date: savedCheckIn.eventDate ?? todayIso,
@@ -1237,6 +1242,7 @@ function App() {
             sourceType: 'check_in',
             triggerMovement: savedCheckIn.hurtsWhen,
           },
+          painReports.filter((report) => report.sourceId !== previousEntry?.id),
         ))
         setHistory((current) => [
           savedEntry,
@@ -1263,13 +1269,13 @@ function App() {
         ),
       ])
       setPainReports((current) => [
-        ...getPainReportsFromMap(scheduleDrivenCheckIn.painMap, {
+        ...getPainReportsWithResolutions(scheduleDrivenCheckIn.painMap, {
           date: scheduleDrivenCheckIn.eventDate ?? todayIso,
           notes: scheduleDrivenCheckIn.notes,
           sourceId: currentEntry.id ?? currentEntry.eventId ?? currentEntry.date,
           sourceType: 'check_in',
           triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
-        }).map((report) => ({
+        }, current.filter((report) => report.sourceId !== (currentEntry.id ?? currentEntry.eventId ?? currentEntry.date))).map((report) => ({
           ...report,
           id: `pain-${Date.now()}-${report.bodyPart}`,
         })),
@@ -1822,7 +1828,7 @@ function App() {
     advanceCheckInAfterCheckout(event, savedCheckout)
   }
 
-  async function generateRecoveryPlan({ equipment, timeAvailable }) {
+  async function generateRecoveryPlan({ equipment, planType, targetedAreas, timeAvailable }) {
     const latestCheckout = [...checkouts]
       .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
 
@@ -1842,12 +1848,17 @@ function App() {
         completedEvent: attachTournamentContext(completedEvent, tournaments, schedule),
         dailyWellness,
         equipment,
+        generatedAt: new Date().toISOString(),
         nextScheduledEvent,
         nutritionContext,
+        planType,
         preCheckIn: withoutNotes(preCheckIn),
+        recentPainReports: painReports.slice(0, 12).map(withoutNotes),
+        recoveryCompletions: recoveryCompletions.slice(0, 5),
         requestType: 'recovery_plan',
         scheduleContext: getRecommendationScheduleContext(schedule, completedEvent),
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout.sportWorkload }),
+        targetedAreas,
         timeAvailable,
       })
 
@@ -2035,19 +2046,36 @@ function App() {
     const routine = savedRoutines.find((item) => item.id === replayingRoutineId)
     if (!routine) return
 
+    let completion = {
+      completedAt: details.completedAt ?? new Date().toISOString(),
+      details,
+      id: `recovery-completion-${Date.now()}`,
+      routineId: routine.id,
+      sourceCheckoutId: routine.sourceCheckoutId,
+    }
+
     if (isSupabaseSession) {
       try {
-        await createRecoveryRoutineCompletion({
+        const savedCompletion = await createRecoveryRoutineCompletion({
           details,
           routineId: routine.id,
           sourceCheckoutId: routine.sourceCheckoutId,
         })
+        completion = {
+          completedAt: savedCompletion.completed_at,
+          details: savedCompletion.completion_json ?? details,
+          id: savedCompletion.id,
+          routineId: savedCompletion.routine_id,
+          sourceCheckoutId: savedCompletion.source_checkout_id,
+        }
       } catch (error) {
         console.error(error)
         setDataStatus('error')
         return
       }
     }
+
+    setRecoveryCompletions((current) => [completion, ...current].slice(0, 12))
 
     setIsReplayingSavedRoutine(false)
     setReplayingRoutineId(null)
@@ -2120,7 +2148,7 @@ function App() {
   }
 
   function openPreCheckIn(event) {
-    if (!isEventActionable(event)) return
+    if (!isInsideCheckInWindow(event)) return
     if (event?.id !== currentTodayCheckInEvent?.id) return
 
     setSelectedCheckInEventId(event?.id ?? null)
@@ -2562,7 +2590,6 @@ function App() {
   }
 
   function showTouchLens(event) {
-    event.preventDefault()
     const touchEvent = getTouchEvent(event)
 
     if (touchEvent) {
@@ -2575,7 +2602,6 @@ function App() {
   }
 
   function moveTouchLens(event) {
-    event.preventDefault()
     const touchEvent = getTouchEvent(event)
 
     if (touchEvent) {
@@ -2759,6 +2785,7 @@ function App() {
 
             {activeView === 'Home' && (
               <HomeView
+                athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 dailyWellness={dailyWellness}
                 history={history}
@@ -2792,6 +2819,7 @@ function App() {
                 isReplayingSavedRoutine={isReplayingSavedRoutine}
                 generationStatus={recoveryPlanStatus}
                 nextEvent={nextEvent}
+                recentCompletion={recoveryCompletions[0] ?? null}
                 onGeneratePlan={generateRecoveryPlan}
                 onReplaySavedRoutine={replaySavedRoutine}
                 onReportRoutinePain={reportRoutinePain}

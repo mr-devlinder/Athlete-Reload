@@ -430,6 +430,7 @@ export async function loadAthleteData() {
     painReportsResponse,
     painIssuesResponse,
     savedRoutinesResponse,
+    recoveryCompletionsResponse,
     tournamentsResponse,
     shareAuditResponse,
     wellnessResponse,
@@ -468,6 +469,11 @@ export async function loadAthleteData() {
       .order('is_favorite', { ascending: false })
       .order('updated_at', { ascending: false }),
     supabase
+      .from('recovery_routine_completions')
+      .select('*')
+      .order('completed_at', { ascending: false })
+      .limit(12),
+    supabase
       .from('tournaments')
       .select('*')
       .order('start_date', { ascending: true }),
@@ -488,6 +494,7 @@ export async function loadAthleteData() {
   if (painReportsResponse.error) throw painReportsResponse.error
   if (painIssuesResponse.error) throw painIssuesResponse.error
   if (savedRoutinesResponse.error) throw savedRoutinesResponse.error
+  if (recoveryCompletionsResponse.error) throw recoveryCompletionsResponse.error
   if (tournamentsResponse.error) throw tournamentsResponse.error
   if (shareAuditResponse.error) throw shareAuditResponse.error
   if (wellnessResponse.error) throw wellnessResponse.error
@@ -499,6 +506,13 @@ export async function loadAthleteData() {
     painReports: painReportsResponse.data.map(fromPainReportRow),
     painIssues: painIssuesResponse.data.map(fromPainIssueRow),
     savedRoutines: savedRoutinesResponse.data.map(fromSavedRecoveryRoutineRow),
+    recoveryCompletions: recoveryCompletionsResponse.data.map((row) => ({
+      completedAt: row.completed_at,
+      details: row.completion_json ?? {},
+      id: row.id,
+      routineId: row.routine_id,
+      sourceCheckoutId: row.source_checkout_id,
+    })),
     shareAuditLogs: shareAuditResponse.data.map(fromShareAuditRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
     tournaments: tournamentsResponse.data.map(fromTournamentRow),

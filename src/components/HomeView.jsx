@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
 import { useState } from 'react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
@@ -8,6 +8,7 @@ import { getBaselineComparison, getPersonalBaseline } from '../utils/baselines'
 import { PainShareModal } from './PainShareModal'
 
 export function HomeView({
+  athleteProfile,
   checkouts,
   history,
   painIssues = [],
@@ -34,12 +35,9 @@ export function HomeView({
   const painWatchlist = getPainWatchlist(history, painReports)
   const painTimelines = getPainTimelines(history, painReports)
   const patterns = getPatterns(history, checkouts, painWatchlist)
-  const readinessTrend = history
-    .filter((entry) => entry.date)
-    .slice(0, 14)
-    .reverse()
   const baseline = getPersonalBaseline(history, nextEvent)
   const weeklySignals = getWeeklySignals(history)
+  const sportInsight = getSportInsight(athleteProfile, nextEvent, checkouts, painWatchlist)
 
   return (
     <div className="home-view" data-tour="home-page">
@@ -92,9 +90,9 @@ export function HomeView({
           value={`${recovery.sleepAverage}h`}
         />
         <DashboardMetric
-          label="Average weekly minutes"
-          value={workload.averageWeeklyMinutes}
-          detail="From checkouts"
+          label="Next event"
+          value={nextEvent ? getEventCountdown(nextEvent, now) : 'Open'}
+          detail={nextEvent ? getEventName(nextEvent) : 'Nothing scheduled'}
         />
       </section>
 
@@ -180,10 +178,11 @@ export function HomeView({
                 <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.12)" strokeDasharray="3 5" vertical={false} />
                 <XAxis axisLine={false} dataKey="date" tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false} />
                 <YAxis axisLine={false} domain={[0, 100]} hide />
-                <Area dataKey="readiness" fill="rgba(38, 185, 126, 0.12)" fillOpacity={1} stroke="#26b97e" strokeWidth={2.4} type="monotone" />
-                <Area dataKey="sleep" fill="transparent" stroke="#2f8cff" strokeWidth={2} type="monotone" />
-                <Area dataKey="fatigue" fill="transparent" stroke="#f3b43f" strokeDasharray="5 4" strokeWidth={2} type="monotone" />
-                <Area dataKey="soreness" fill="transparent" stroke="#ff6f61" strokeDasharray="2 4" strokeWidth={2} type="monotone" />
+                <Tooltip content={<SignalTooltip />} cursor={{ stroke: 'rgba(32, 38, 47, 0.18)' }} />
+                <Area animationDuration={650} dataKey="readiness" fill="rgba(38, 185, 126, 0.12)" fillOpacity={1} stroke="#26b97e" strokeWidth={2.4} type="monotone" />
+                <Area animationDuration={720} dataKey="sleep" fill="transparent" stroke="#2f8cff" strokeWidth={2} type="monotone" />
+                <Area animationDuration={790} dataKey="fatigue" fill="transparent" stroke="#f3b43f" strokeDasharray="5 4" strokeWidth={2} type="monotone" />
+                <Area animationDuration={860} dataKey="soreness" fill="transparent" stroke="#ff6f61" strokeDasharray="2 4" strokeWidth={2} type="monotone" />
               </AreaChart>
             </ResponsiveContainer>
           )}
@@ -206,21 +205,6 @@ export function HomeView({
             </div>
           )}
         </article>
-        <article className="home-panel">
-          <div className="panel-heading">
-            <span>Readiness</span>
-          </div>
-          <h3>Recent readiness trend</h3>
-          {readinessTrend.length < 7 ? (
-            <div className="chart-empty-state">
-              <strong>{7 - readinessTrend.length} more check-in{readinessTrend.length === 6 ? '' : 's'} needed</strong>
-              <p>A readiness line graph will appear after at least one week of entries.</p>
-            </div>
-          ) : (
-            <ReadinessLineGraph entries={readinessTrend} />
-          )}
-        </article>
-
         <article className="home-panel">
           <div className="panel-heading">
             <span>Workload</span>
@@ -247,6 +231,14 @@ export function HomeView({
         </article>
 
         <PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} />
+        <article className="home-panel sport-insight-panel">
+          <div className="panel-heading">
+            <span>{athleteProfile?.sport || 'Athlete'} focus</span>
+            <strong>{athleteProfile?.position || 'Today'}</strong>
+          </div>
+          <h3>{sportInsight.title}</h3>
+          <p>{sportInsight.detail}</p>
+        </article>
       </section>
 
       <section className="home-panels">
@@ -380,12 +372,11 @@ function PainIssueNotes({ issue, onSave }) {
 function getPainIssueSummaries(painReports) {
   const summaries = new Map()
 
-  for (const report of painReports) {
-    if (Number(report.severity) <= 0) continue
+  for (const report of [...painReports].sort((first, second) => `${first.date}:${first.createdAt ?? ''}`.localeCompare(`${second.date}:${second.createdAt ?? ''}`))) {
     const key = `${report.bodyPart}:${report.side ?? 'center'}`
     const current = summaries.get(key)
     const label = formatPainAreaLabel(report)
-    const severity = Math.round(Number(report.severity) / 10)
+    const severity = normalizePainSeverity(report.severity)
 
     if (!current) {
       summaries.set(key, {
@@ -411,7 +402,9 @@ function getPainIssueSummaries(painReports) {
     }
   }
 
-  return [...summaries.values()].sort((first, second) => second.latestDate.localeCompare(first.latestDate))
+  return [...summaries.values()]
+    .filter((summary) => summary.currentSeverity > 0)
+    .sort((first, second) => second.latestDate.localeCompare(first.latestDate))
 }
 
 function formatPainAreaLabel(report) {
@@ -431,44 +424,6 @@ function DashboardMetric({ detail, label, tone = 'neutral', value }) {
   )
 }
 
-function ReadinessLineGraph({ entries }) {
-  const points = entries.map((entry, index) => {
-    const x = entries.length === 1 ? 50 : (index / (entries.length - 1)) * 100
-    const y = 100 - Number(entry.score)
-
-    return {
-      date: format(parseISO(entry.date), 'M/d'),
-      id: `${entry.date}-${entry.eventId ?? entry.createdAt ?? index}`,
-      score: Number(entry.score),
-      x,
-      y,
-    }
-  })
-  const polyline = points.map((point) => `${point.x},${point.y}`).join(' ')
-
-  return (
-    <div className="readiness-line-chart">
-      <svg aria-label="Readiness line graph" preserveAspectRatio="none" viewBox="0 0 100 100">
-        <line x1="0" x2="100" y1="20" y2="20" />
-        <line x1="0" x2="100" y1="50" y2="50" />
-        <line x1="0" x2="100" y1="80" y2="80" />
-        <polyline points={polyline} />
-        {points.map((point) => (
-          <circle cx={point.x} cy={point.y} key={point.id} r="2.4" />
-        ))}
-      </svg>
-      <div className="line-chart-labels">
-        {points.map((point) => (
-          <span key={point.id}>
-            <strong>{point.score}</strong>
-            <em>{point.date}</em>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 function PainTimelineChart({ timeline }) {
   const gradientId = `pain-fill-${timeline.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
@@ -476,7 +431,7 @@ function PainTimelineChart({ timeline }) {
     <article className="pain-timeline-chart">
       <div className="pain-timeline-chart-heading">
         <strong>{timeline.label}</strong>
-        <span>{timeline.points.length - 1} days reported</span>
+        <span>{timeline.points.length} days tracked</span>
       </div>
       <div className="pain-recharts-canvas" role="img" aria-label={`${timeline.label} pain over time`}>
         <ResponsiveContainer height={188} width="100%">
@@ -490,7 +445,8 @@ function PainTimelineChart({ timeline }) {
             <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.14)" strokeDasharray="3 5" vertical={false} />
             <XAxis axisLine={false} dataKey="dateLabel" interval={0} minTickGap={0} tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false} />
             <YAxis allowDecimals={false} axisLine={false} domain={[0, 10]} tick={{ fill: '#737984', fontSize: 11, fontWeight: 800 }} tickLine={false} ticks={[0, 5, 10]} width={30} />
-            <Area activeDot={false} dataKey="score" dot={{ fill: '#ffffff', r: 4, stroke: '#e9584a', strokeWidth: 2 }} fill={`url(#${gradientId})`} fillOpacity={1} stroke="#e9584a" strokeWidth={3} type="linear" />
+            <Tooltip content={<PainTooltip />} cursor={{ stroke: 'rgba(233, 88, 74, 0.2)' }} />
+            <Area animationDuration={700} dataKey="score" dot={{ fill: '#ffffff', r: 4, stroke: '#e9584a', strokeWidth: 2 }} fill={`url(#${gradientId})`} fillOpacity={1} stroke="#e9584a" strokeWidth={3} type="monotone" />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -630,9 +586,14 @@ function getPainWatchlist(history, painReports) {
       .map((report) => report.sourceId),
   )
 
+  const latestReportByArea = new Map()
   painReports.forEach((report) => {
-    if (Number(report.severity ?? 0) <= 0) return
-    addPainGroup(grouped, getPainLabel(report.bodyPart, report.side), Number(report.severity) / 10)
+    const label = getPainLabel(report.bodyPart, report.side)
+    const current = latestReportByArea.get(label)
+    if (!current || `${report.date}:${report.createdAt ?? ''}` > `${current.date}:${current.createdAt ?? ''}`) latestReportByArea.set(label, report)
+  })
+  latestReportByArea.forEach((report, label) => {
+    if (Number(report.severity ?? 0) > 0) addPainGroup(grouped, label, normalizePainSeverity(report.severity))
   })
 
   history.forEach((entry) => {
@@ -640,7 +601,7 @@ function getPainWatchlist(history, painReports) {
 
     bodyPainAreas.forEach((area) => {
       const severity = Number(entry.painMap?.[area.id] ?? 0)
-      if (severity > 0) addPainGroup(grouped, area.label, severity / 10)
+      if (severity > 0) addPainGroup(grouped, area.label, normalizePainSeverity(severity))
     })
 
     if (!entry.painMap && Number(entry.pain ?? 0) > 0) {
@@ -664,12 +625,12 @@ function getRecentPainEntries(history, painReports) {
       .map((report) => report.sourceId),
   )
   const fromPainReports = painReports
-    .filter((report) => Number(report.severity ?? 0) > 0)
     .map((report) => ({
+      createdAt: report.createdAt,
       date: report.date,
       dateLabel: formatPainDate(report.date),
       label: getPainLabel(report.bodyPart, report.side),
-      score: Math.round(Number(report.severity) / 10),
+      score: normalizePainSeverity(report.severity),
       source: getPainSourceLabel(report.sourceType),
       sourceId: report.sourceId,
     }))
@@ -684,10 +645,11 @@ function getRecentPainEntries(history, painReports) {
           if (severity <= 0) return null
 
           return {
+            createdAt: entry.createdAt,
             date: entry.date,
             dateLabel: formatPainDate(entry.date),
             label: area.label,
-            score: Math.round(severity / 10),
+            score: normalizePainSeverity(severity),
             source: 'Check-in',
             sourceId: entry.id,
           }
@@ -698,6 +660,7 @@ function getRecentPainEntries(history, painReports) {
     if (Number(entry.pain ?? 0) <= 0) return []
 
     return [{
+      createdAt: entry.createdAt,
       date: entry.date,
       dateLabel: formatPainDate(entry.date),
       label: entry.location ?? 'Pain area',
@@ -718,7 +681,9 @@ function getPainTimelines(history, painReports) {
     const dayEntries = byArea.get(entry.label) ?? new Map()
     const current = dayEntries.get(entry.date)
 
-    if (!current || entry.source === 'Check-in' || (current.source !== 'Check-in' && entry.score > current.score)) {
+    const entryTime = `${entry.date}:${entry.createdAt ?? ''}`
+    const currentTime = `${current?.date ?? ''}:${current?.createdAt ?? ''}`
+    if (!current || entryTime > currentTime || (entryTime === currentTime && entry.score > current.score)) {
       dayEntries.set(entry.date, entry)
     }
     byArea.set(entry.label, dayEntries)
@@ -729,20 +694,9 @@ function getPainTimelines(history, painReports) {
       const reportedPoints = [...entries.values()]
         .sort((first, second) => first.date.localeCompare(second.date))
         .slice(-6)
-      const firstPoint = reportedPoints[0]
-      const baselineDate = format(subDays(parseISO(firstPoint.date), 1), 'yyyy-MM-dd')
-
       return {
         label,
-        points: [
-          {
-            date: baselineDate,
-            dateLabel: formatPainDate(baselineDate),
-            score: 0,
-            source: 'Baseline',
-          },
-          ...reportedPoints,
-        ],
+        points: reportedPoints,
       }
     })
     .filter((timeline) => timeline.points.length >= 2)
@@ -930,7 +884,7 @@ function getConsecutivePainPattern(checkouts) {
   if (recentCheckouts.length < 3) return null
 
   for (const area of bodyPainAreas) {
-    const scores = recentCheckouts.map((entry) => Math.round(Number(entry.painMap?.[area.id] ?? 0) / 10))
+    const scores = recentCheckouts.map((entry) => normalizePainSeverity(entry.painMap?.[area.id]))
     if (scores.every((score) => score > 0) && scores[0] <= scores[1] && scores[1] <= scores[2] && scores[2] > scores[0]) {
       return `${area.label} discomfort has increased across three consecutive checkouts.`
     }
@@ -977,7 +931,7 @@ function getPainWatchlistPattern(painWatchlist) {
 
 function getCheckoutPainAreas(entry) {
   return bodyPainAreas
-    .map((area) => ({ label: area.label, score: Math.round(Number(entry.painMap?.[area.id] ?? 0) / 10) }))
+    .map((area) => ({ label: area.label, score: normalizePainSeverity(entry.painMap?.[area.id]) }))
     .filter((area) => area.score > 0)
 }
 
@@ -1070,6 +1024,73 @@ function average(values, decimals = 0) {
   const result = cleanValues.reduce((sum, value) => sum + value, 0) / cleanValues.length
 
   return decimals > 0 ? result.toFixed(decimals) : Math.round(result)
+}
+
+function normalizePainSeverity(value) {
+  const severity = Number(value) || 0
+  return Math.max(0, Math.min(10, Math.round(severity > 10 ? severity / 10 : severity)))
+}
+
+function getEventCountdown(event, now) {
+  const eventDate = parseEventDateTime(event)
+  if (!eventDate) return 'Scheduled'
+
+  const minutes = Math.max(0, Math.round((eventDate.getTime() - now.getTime()) / 60000))
+  if (minutes < 60) return `${minutes}m`
+  if (minutes < 1440) return `${Math.round(minutes / 60)}h`
+  return `${Math.ceil(minutes / 1440)}d`
+}
+
+function getSportInsight(profile, nextEvent, checkouts, painWatchlist) {
+  const sport = profile?.sport || 'your sport'
+  const position = profile?.position ? ` as a ${profile.position}` : ''
+  const recentLoad = checkouts.slice(0, 3).reduce((total, entry) => total + Number(entry.actualMinutes ?? 0) * Number(entry.difficulty ?? 0), 0)
+  const pain = painWatchlist[0]
+
+  if (pain && nextEvent) {
+    return {
+      title: `Protect ${pain.label.toLowerCase()} in the next session.`,
+      detail: `For ${getEventName(nextEvent)}, use a gradual ${sport}-specific warm-up and reassess movements that load this area before increasing intensity.`,
+    }
+  }
+
+  if (recentLoad >= 900) {
+    return {
+      title: 'Recent workload is meaningful.',
+      detail: `Your last three checkouts total a higher session load. Prioritize normal food, fluids, sleep, and a deliberate warm-up for ${sport}${position}.`,
+    }
+  }
+
+  return {
+    title: nextEvent ? `Prepare for ${getEventName(nextEvent)}.` : `Keep building your ${sport} baseline.`,
+    detail: nextEvent
+      ? `Use the next check-in to match your plan to the event's ${String(nextEvent.load ?? 'planned').toLowerCase()} load and the demands of ${sport}${position}.`
+      : `Consistent check-ins and checkouts will make ${sport}${position} insights more specific over time.`,
+  }
+}
+
+function SignalTooltip({ active, label, payload }) {
+  if (!active || !payload?.length) return null
+
+  return (
+    <div className="chart-tooltip">
+      <strong>{label}</strong>
+      {payload.map((item) => <span key={item.dataKey}>{item.name}: {Math.round(Number(item.value))}</span>)}
+    </div>
+  )
+}
+
+function PainTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null
+  const point = payload[0].payload
+
+  return (
+    <div className="chart-tooltip">
+      <strong>{point.dateLabel}</strong>
+      <span>{point.score}/10 pain</span>
+      <small>{point.score === 0 ? 'Reported pain-free' : point.source}</small>
+    </div>
+  )
 }
 
 function capitalize(value) {

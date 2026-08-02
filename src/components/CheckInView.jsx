@@ -3,7 +3,7 @@ import { BodyPainMap } from './BodyPainMap'
 import { Select, Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
-import { getCheckoutForEvent, hasEventStarted } from '../utils/events'
+import { getCheckoutForEvent, hasEventStarted, isAllDayCheckInOpen, isAllDayEvent } from '../utils/events'
 
 export function CheckInView({
   checkIn,
@@ -15,6 +15,7 @@ export function CheckInView({
   isSaving,
   selectedEvent,
   selectedEventId,
+  todayEvents = [],
   todayIso,
   todayLabel,
   onSave,
@@ -31,6 +32,7 @@ export function CheckInView({
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
   const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
   const canPostCheckIn = selectedEvent && hasEventStarted(selectedEvent) && !selectedCheckout
+  const hasAllDayWellnessEvent = todayEvents.some(isAllDayEvent)
 
   if (!selectedEvent) {
     return (
@@ -43,8 +45,8 @@ export function CheckInView({
           onSelectEvent={onSelectEvent}
         />
         <SectionHeading eyebrow={todayLabel} title="No event check-in available." />
-        <p>{restDayPlanned
-          ? 'Today is a planned Rest Day. No event check-in or checkout is required; log normal wellness or pain close to the end of the day.'
+        <p>{restDayPlanned || hasAllDayWellnessEvent
+          ? 'Rest Day and Recovery Day wellness check-ins open at 12:00 PM. No checkout is required.'
           : 'Check-ins are only available for physical events scheduled today.'}</p>
       </div>
     )
@@ -409,6 +411,7 @@ function formatEventTime(value) {
 }
 
 function isInsideCheckInWindow(event) {
+  if (isAllDayEvent(event)) return isAllDayCheckInOpen(event)
   if (!event?.date || !event?.time) return false
   const eventStart = new Date(`${event.date}T${event.time}`).getTime()
   const now = Date.now()

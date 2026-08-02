@@ -2354,6 +2354,87 @@ textarea {
   line-height: 1.5;
 }
 
+.routine-goal {
+  margin: 8px 0 0;
+  color: #31483f;
+  font-size: 13px;
+}
+
+.recovery-type-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.recovery-type-grid button {
+  display: grid;
+  gap: 5px;
+  min-height: 92px;
+  padding: 13px;
+  border: 1px solid rgba(23, 23, 23, 0.1);
+  border-radius: 15px;
+  background: rgba(255, 255, 255, 0.5);
+  color: #59616e;
+  text-align: left;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.recovery-type-grid button:hover {
+  transform: translateY(-2px);
+}
+
+.recovery-type-grid button.selected {
+  border-color: rgba(25, 153, 112, 0.55);
+  background: rgba(38, 185, 126, 0.1);
+  box-shadow: 0 8px 20px rgba(26, 91, 69, 0.08);
+}
+
+.recovery-type-grid strong {
+  color: #272c34;
+  font-size: 12px;
+}
+
+.recovery-type-grid span,
+.recovery-context-note,
+.recovery-target-picker small {
+  color: #69717d;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.recovery-target-picker {
+  display: grid;
+  gap: 8px;
+}
+
+.recovery-target-picker > span {
+  color: #505865;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.recovery-target-picker > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.recovery-target-picker button {
+  padding: 8px 11px;
+  border: 1px solid rgba(23, 23, 23, 0.11);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.65);
+  color: #555d68;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.recovery-target-picker button.selected {
+  border-color: #199970;
+  background: #e8f7f1;
+  color: #126b50;
+}
+
 .recovery-generator-controls,
 .feedback-fields,
 .routine-player-actions,
@@ -2966,7 +3047,28 @@ textarea {
 .pain-recharts-canvas {
   min-height: 188px;
   margin: 0 -2px -2px;
-  pointer-events: none;
+  pointer-events: auto;
+}
+
+.chart-tooltip {
+  display: grid;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid rgba(23, 23, 23, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 28px rgba(34, 39, 47, 0.14);
+  color: #505865;
+  font-size: 11px;
+}
+
+.chart-tooltip strong {
+  color: #252932;
+}
+
+.chart-tooltip span,
+.chart-tooltip small {
+  display: block;
 }
 
 .pain-recharts-canvas .recharts-wrapper:focus,
@@ -4520,8 +4622,10 @@ button.event-status:hover {
 .food-modal-actions button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 1px solid rgba(47,140,255,.16); border-radius: 11px; background: rgba(47,140,255,.07); color: #2d668f; cursor: pointer; font: inherit; font-size: 12px; font-weight: 850; }
 .food-modal-actions svg { width: 19px; height: 19px; }
 .barcode-scanner { display: grid; gap: 7px; margin-top: 12px; overflow: hidden; border: 1px solid rgba(47,140,255,.22); border-radius: 12px; background: #121a26; }
-.barcode-scanner video { display: block; width: 100%; max-height: 220px; object-fit: cover; }
+.barcode-scanner video { display: block; width: 100%; min-height: 180px; max-height: 220px; object-fit: cover; background: #090e16; }
 .barcode-scanner p { margin: 0; padding: 0 12px 10px; color: rgba(255,255,255,.8); font-size: 12px; font-weight: 750; }
+.barcode-scanner.requesting video, .barcode-scanner.starting video, .barcode-scanner.retrying video { opacity: .42; }
+.food-modal-actions button:disabled { cursor: wait; opacity: .68; }
 .nutrition-details-modal { width: min(560px, 100%); padding: 20px; }
 .nutrition-details-modal { max-height: calc(100dvh - 36px); overflow-y: auto; }
 .serving-modal { width: min(560px, 100%); display: grid; gap: 16px; padding: 22px; }
@@ -6217,6 +6321,10 @@ body.modal-open .nav-tabs {
   .recovery-generator-controls {
     align-items: stretch;
     grid-template-columns: 1fr;
+  }
+
+  .recovery-type-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .recovery-generator-controls > label,

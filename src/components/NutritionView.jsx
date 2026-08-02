@@ -105,7 +105,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [message, setMessage] = useState('')
-  const [isScanning, setIsScanning] = useState(false)
+  const [scannerStatus, setScannerStatus] = useState('idle')
   const [isListening, setIsListening] = useState(false)
   const [savedFoods, setSavedFoods] = useState([])
   const [isFoodCurator, setIsFoodCurator] = useState(false)
@@ -113,42 +113,76 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const streamRef = useRef(null)
   const scanTimerRef = useRef(null)
   const readerRef = useRef(null)
+  const scannerControlsRef = useRef(null)
+  const scannerSessionRef = useRef(0)
+  const mountedRef = useRef(true)
+  const isScanning = !['idle', 'error'].includes(scannerStatus)
 
   useEffect(() => {
     Promise.all([loadSavedFoods(), getFoodCuratorStatus()]).then(([foods, isCurator]) => { setSavedFoods(foods); setIsFoodCurator(isCurator) }).catch(() => {})
-    return () => stopScanner()
+    return () => {
+      mountedRef.current = false
+      stopScanner(false)
+    }
   }, [])
 
-  function stopScanner() {
+  function releaseCamera() {
     if (scanTimerRef.current) window.clearTimeout(scanTimerRef.current)
     scanTimerRef.current = null
+    scannerControlsRef.current?.stop?.()
+    scannerControlsRef.current = null
     readerRef.current?.reset?.()
     readerRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
-    setIsScanning(false)
+    if (videoRef.current) {
+      videoRef.current.pause()
+      videoRef.current.srcObject = null
+    }
+  }
+
+  function stopScanner(updateState = true) {
+    scannerSessionRef.current += 1
+    releaseCamera()
+    if (updateState && mountedRef.current) setScannerStatus('idle')
   }
 
   async function startScanner() {
+    stopScanner(false)
+    await initializeScanner(0)
+  }
+
+  async function initializeScanner(attempt) {
     if (!navigator.mediaDevices?.getUserMedia) {
       setMessage('Camera scanning is not available here. Enter the barcode number below instead.')
+      setScannerStatus('error')
       return
     }
 
+    const sessionId = scannerSessionRef.current
     try {
-      setMessage('')
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+      setMessage(attempt ? 'Camera did not start. Retrying...' : 'Waiting for camera permission...')
+      setScannerStatus(attempt ? 'retrying' : 'requesting')
+      const constraints = attempt
+        ? { facingMode: 'environment' }
+        : { facingMode: { ideal: 'environment' }, height: { ideal: 720 }, width: { ideal: 1280 } }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: constraints, audio: false })
+      if (sessionId !== scannerSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
       streamRef.current = stream
-      setIsScanning(true)
-      requestAnimationFrame(async () => {
-        if (!videoRef.current) return
-        videoRef.current.srcObject = stream
-        videoRef.current.play().catch(() => {})
+      setMessage('Starting camera...')
+      setScannerStatus('starting')
+      const videoElement = await waitForVideoElement(videoRef, sessionId, scannerSessionRef)
+      videoElement.srcObject = stream
+      await waitForVideoPlayback(videoElement, sessionId, scannerSessionRef)
       const { BrowserMultiFormatReader } = await import('@zxing/browser')
+      if (sessionId !== scannerSessionRef.current) return
       const reader = new BrowserMultiFormatReader()
-        readerRef.current = reader
-        reader.decodeFromStream(stream, videoRef.current, async (result) => {
-        if (!result || !streamRef.current) return
+      readerRef.current = reader
+      scannerControlsRef.current = await reader.decodeFromStream(stream, videoElement, async (result) => {
+        if (!result || sessionId !== scannerSessionRef.current) return
         const normalizedBarcode = normalizeBarcode(result.getText())
         if (!normalizedBarcode) return
         stopScanner()
@@ -159,39 +193,27 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
         } catch (error) {
           setMessage(error.message)
         }
-        })
       })
-      return
-      /*
-      const scan = async () => {
-        if (!videoRef.current || !streamRef.current) return
-        try {
-          const codes = await detector.detect(videoRef.current)
-          const value = codes[0]?.rawValue
-          if (value) {
-            const normalizedBarcode = normalizeBarcode(value)
-            setBarcode(normalizedBarcode)
-            stopScanner()
-            try {
-              const food = await findFoodByBarcode(normalizedBarcode)
-              setResults(food ? [food] : [])
-              if (!food) setMessage('No food found for that barcode.')
-            } catch (error) {
-              setMessage(error.message)
-            }
-            return
-          }
-        } catch {
-          // Keep scanning until the camera produces a usable barcode.
-        }
-        scanTimerRef.current = window.setTimeout(scan, 250)
+      if (sessionId === scannerSessionRef.current) {
+        setMessage('Camera ready. Point it at the barcode.')
+        setScannerStatus('scanning')
       }
-      scan()
-      */
-    } catch {
-      setMessage('Camera access was unavailable. Enter the barcode number below instead.')
-      stopScanner()
+    } catch (error) {
+      if (sessionId !== scannerSessionRef.current) return
+      releaseCamera()
+      if (!attempt && isRetryableCameraError(error)) {
+        setScannerStatus('retrying')
+        scanTimerRef.current = window.setTimeout(() => initializeScanner(1), 300)
+        return
+      }
+      setScannerStatus('error')
+      setMessage(getCameraErrorMessage(error))
     }
+  }
+
+  function closeModal() {
+    stopScanner(false)
+    onClose()
   }
 
   async function search(searchValue = query) {
@@ -242,7 +264,43 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     } catch (error) { setMessage(error.message) }
   }
 
-  return <div className="modal-backdrop" onClick={onClose}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{isScanning ? 'Stop Scan' : 'Barcode Scan'}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage('') }} type="button"><Icon name="bookmark" />Saved Foods</button></div>{isScanning && <div className="barcode-scanner"><video ref={videoRef} muted playsInline /><p>Point the camera at the barcode.</p></div>}{message && <p className="form-message">{message}</p>}{results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage('') }} type="button"><Icon name="bookmark" />Saved Foods</button></div>{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && message && <p className="form-message">{message}</p>}{results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+}
+
+async function waitForVideoElement(videoRef, sessionId, sessionRef) {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    if (sessionId !== sessionRef.current) throw new DOMException('Scanner stopped', 'AbortError')
+    if (videoRef.current) return videoRef.current
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+  }
+  throw new DOMException('Camera preview did not mount', 'AbortError')
+}
+
+async function waitForVideoPlayback(video, sessionId, sessionRef) {
+  await Promise.race([
+    video.play(),
+    new Promise((_, reject) => window.setTimeout(() => reject(new DOMException('Camera preview timed out', 'AbortError')), 2500)),
+  ])
+  if (sessionId !== sessionRef.current) throw new DOMException('Scanner stopped', 'AbortError')
+}
+
+function isRetryableCameraError(error) {
+  return !['NotAllowedError', 'SecurityError', 'NotFoundError'].includes(error?.name)
+}
+
+function getCameraErrorMessage(error) {
+  if (['NotAllowedError', 'SecurityError'].includes(error?.name)) return 'Camera permission was denied. Allow camera access in your browser settings, then try again.'
+  if (error?.name === 'NotFoundError') return 'No camera was found on this device. Search for the food instead.'
+  if (error?.name === 'NotReadableError') return 'The camera is busy in another app. Close it there, then try again.'
+  return 'The camera could not start. Try again or search for the food instead.'
+}
+
+function getScannerButtonLabel(status) {
+  if (status === 'requesting') return 'Waiting for Permission'
+  if (status === 'starting') return 'Starting Camera'
+  if (status === 'retrying') return 'Retrying Camera'
+  if (status === 'scanning') return 'Stop Scan'
+  return 'Barcode Scan'
 }
 
 function FoodResult({ food, isCurator, onPromote, onSave, onSelect }) {

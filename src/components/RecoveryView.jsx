@@ -3,6 +3,17 @@ import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 
 const equipmentOptions = ['Exercise mat', 'Foam roller', 'Resistance band', 'Massage ball', 'Stationary bike', 'Pool', 'Compression equipment']
+const planTypeOptions = [
+  { id: 'last-checkout', label: 'Based on Last Checkout', description: 'Respond to the session you just completed.' },
+  { id: 'full-body', label: 'Full Body Recovery', description: 'Balanced mobility and recovery across major areas.' },
+  { id: 'flexibility', label: 'Flexibility Improving', description: 'Comfortable, progressive range-of-motion work.' },
+  { id: 'targeted', label: 'Targeted Recovery', description: 'Prioritize the body areas you select.' },
+  { id: 'quick', label: 'Quick Recovery', description: 'A focused 5-10 minute reset.' },
+  { id: 'competition', label: 'Competition Recovery', description: 'Prioritize turnaround before competition.' },
+  { id: 'recovery-day', label: 'Recovery Day', description: 'A complete low-load recovery-day plan.' },
+  { id: 'mobility', label: 'Mobility Only', description: 'Movement-focused guidance without extra conditioning.' },
+]
+const targetAreaOptions = ['Shoulders / arms', 'Back / trunk', 'Hips', 'Quads / hamstrings', 'Knees', 'Calves / ankles / feet']
 
 const fallbackRoutine = [
   { area: 'Spine', reps: 8, instruction: 'Move slowly through a comfortable range and do not force your back.', name: 'Cat-cow', side: 'Both sides', type: 'Mobility' },
@@ -16,7 +27,7 @@ const fallbackRoutine = [
   { area: 'Calves', durationSeconds: 30, instruction: 'Keep the heel down and feel gentle tension through the calf.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
 ]
 
-export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', nextEvent, onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, onUpdateRecoveryStep, savedRoutines = [], schedule = [] }) {
+export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', nextEvent, onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, onUpdateRecoveryStep, recentCompletion, savedRoutines = [], schedule = [] }) {
   const latestCheckout = useMemo(
     () => [...checkouts].sort((first, second) => getDateValue(second) - getDateValue(first))[0] ?? null,
     [checkouts],
@@ -30,6 +41,8 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const equipmentPickerRef = useRef(null)
   const equipmentMenuRef = useRef(null)
   const [timeAvailable, setTimeAvailable] = useState('15 minutes')
+  const [planType, setPlanType] = useState('last-checkout')
+  const [targetedAreas, setTargetedAreas] = useState([])
   const [completedSteps, setCompletedSteps] = useState(() => new Set())
   const [skippedSteps, setSkippedSteps] = useState(() => new Set())
   const [routineStarted, setRoutineStarted] = useState(false)
@@ -201,7 +214,18 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     setRoutineIndex(0)
     setRoutineStarted(false)
     setEquipmentTouched(true)
-    onGeneratePlan({ equipment, timeAvailable })
+    onGeneratePlan({ equipment, planType, targetedAreas, timeAvailable })
+  }
+
+  function selectPlanType(nextType) {
+    setPlanType(nextType)
+    if (nextType === 'quick' && getTimeAvailableMinutes(timeAvailable) > 10) setTimeAvailable('10 minutes')
+  }
+
+  function toggleTargetArea(area) {
+    setTargetedAreas((current) => current.includes(area)
+      ? current.filter((item) => item !== area)
+      : [...current, area])
   }
 
   async function saveRecoveryPlan() {
@@ -275,13 +299,39 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
           <div className="recovery-generator">
             <div>
               <strong>Build your recovery plan</strong>
-              <p>AI will use this checkout, the event, your sport, pain response, and what is scheduled next.</p>
+              <p>Choose the outcome you need. The plan adapts to your session, sport, pain, nutrition, recovery history, and what is next.</p>
             </div>
+            <div className="recovery-type-grid" role="radiogroup" aria-label="Recovery plan type">
+              {planTypeOptions.map((option) => (
+                <button
+                  aria-checked={planType === option.id}
+                  className={planType === option.id ? 'selected' : ''}
+                  key={option.id}
+                  onClick={() => selectPlanType(option.id)}
+                  role="radio"
+                  type="button"
+                >
+                  <strong>{option.label}</strong>
+                  <span>{option.description}</span>
+                </button>
+              ))}
+            </div>
+            {planType === 'targeted' && (
+              <div className="recovery-target-picker">
+                <span>Target areas</span>
+                <div>
+                  {targetAreaOptions.map((area) => (
+                    <button className={targetedAreas.includes(area) ? 'selected' : ''} key={area} onClick={() => toggleTargetArea(area)} type="button">{area}</button>
+                  ))}
+                </div>
+                {targetedAreas.length === 0 && <small>Select at least one area to generate a targeted plan.</small>}
+              </div>
+            )}
             <div className="recovery-generator-controls">
               <label>
                 <span>Time available</span>
                 <select value={timeAvailable} onChange={(event) => setTimeAvailable(event.target.value)}>
-                  {['10 minutes', '15 minutes', '20 minutes', '30 minutes'].map((option) => <option key={option}>{option}</option>)}
+                  {(planType === 'quick' ? ['5 minutes', '10 minutes'] : ['5 minutes', '10 minutes', '15 minutes', '20 minutes', '30 minutes']).map((option) => <option key={option}>{option}</option>)}
                 </select>
               </label>
               <div className="equipment-field" ref={equipmentPickerRef}>
@@ -313,11 +363,14 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                   document.body,
                 )}
               </div>
-              <button className="primary-button" disabled={generationStatus === 'loading'} onClick={handleGenerate} type="button">
+              <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
                 {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
               </button>
             </div>
             {generationStatus === 'error' && <p className="recovery-error">The recovery plan could not be generated. Check your connection and try again.</p>}
+            {recentCompletion?.completedAt && (
+              <p className="recovery-context-note">Last recovery completed {formatCompletionRecency(recentCompletion.completedAt)}. This is considered when pacing the next plan.</p>
+            )}
           </div>
           {savedRoutines.some((routine) => routine.isFavorite) && (
             <div className="saved-routine-library">
@@ -411,6 +464,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               </div>
               <span>{plan.routine?.durationMinutes ?? getTimeAvailableMinutes(timeAvailable)} min</span>
             </div>
+            {plan.routine?.goal && <p className="routine-goal"><strong>Routine goal:</strong> {plan.routine.goal}</p>}
             <p className="routine-intro">{plan.routine?.summary ?? 'Use this as an optional way to relax and maintain comfortable mobility, not as a guaranteed repair.'}</p>
             {isPainAware && <div className="pain-aware-callout">Your reported symptoms changed this routine. Do not stretch a painful area through discomfort.</div>}
             {!routineComplete && (
@@ -535,6 +589,14 @@ function formatCheckoutDate(date) {
 function getTimeAvailableMinutes(value) {
   const minutes = Number.parseInt(value, 10)
   return Number.isFinite(minutes) ? Math.max(10, Math.min(30, minutes)) : 15
+}
+
+function formatCompletionRecency(value) {
+  const elapsedMinutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000))
+  if (elapsedMinutes < 60) return `${elapsedMinutes || 1} min ago`
+  const hours = Math.round(elapsedMinutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
 
 function buildRoutine(routine, availableMinutes, excludedExercises = []) {

@@ -25,6 +25,16 @@ export function isEventActionable(event) {
   return Boolean(event) && !isAllDayEvent(event)
 }
 
+export function getAllDayCheckInOpenTime(event) {
+  if (!isAllDayEvent(event) || !event?.date) return null
+  return new Date(`${event.date}T12:00:00`)
+}
+
+export function isAllDayCheckInOpen(event, now = new Date()) {
+  const openTime = getAllDayCheckInOpenTime(event)
+  return Boolean(openTime && openTime <= now)
+}
+
 export function getEventDisplayName(event) {
   if (isOtherActivityEvent(event)) return event.customActivityName?.trim() || event.title?.trim() || 'Other activity'
   if (isRestDayEvent(event)) return 'Rest Day'
