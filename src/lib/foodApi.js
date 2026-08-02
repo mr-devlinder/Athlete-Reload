@@ -5,34 +5,48 @@ function normalizeProduct(product = {}) {
   const nutriments = product.nutriments ?? {}
   const servingSize = product.serving_size ?? '1 serving'
   const servingGrams = Number.parseFloat(product.serving_quantity) || 100
-  const factor = servingGrams / 100
+  const nutrient = (key, outputUnit = 'g') => {
+    const servingValue = nutriments[`${key}_serving`]
+    const per100gValue = nutriments[`${key}_100g`]
+    const rawValue = servingValue ?? (per100gValue == null ? undefined : Number(per100gValue) * servingGrams / 100)
+    if (rawValue == null || !Number.isFinite(Number(rawValue))) return undefined
+    const sourceUnit = String(nutriments[`${key}_unit`] || 'g').toLowerCase()
+    let value = Number(rawValue)
+    if (sourceUnit === 'kg') value *= 1000
+    if (sourceUnit === 'mg') value /= 1000
+    if (sourceUnit === 'µg' || sourceUnit === 'ug' || sourceUnit === 'mcg') value /= 1000000
+    if (outputUnit === 'mg') value *= 1000
+    if (outputUnit === 'mcg') value *= 1000000
+    return Math.round(value * 10) / 10
+  }
+  const calories = nutriments['energy-kcal_serving'] ?? (nutriments['energy-kcal_100g'] == null ? nutriments['energy-kcal'] : Number(nutriments['energy-kcal_100g']) * servingGrams / 100)
 
   return {
     barcode: product.code ?? '',
     brand: product.brands ?? '',
-    calories: Math.round(Number(nutriments['energy-kcal_100g'] ?? nutriments['energy-kcal'] ?? 0) * factor),
-    carbohydrates: Math.round(Number(nutriments.carbohydrates_100g ?? 0) * factor * 10) / 10,
-    fats: Math.round(Number(nutriments.fat_100g ?? 0) * factor * 10) / 10,
-    fiber: Math.round(Number(nutriments.fiber_100g ?? 0) * factor * 10) / 10,
+    calories: calories == null ? undefined : Math.round(Number(calories)),
+    carbohydrates: nutrient('carbohydrates'),
+    fats: nutrient('fat'),
+    fiber: nutrient('fiber'),
     foodSource: 'Open Food Facts',
     name: product.product_name ?? product.product_name_en ?? 'Unnamed food',
-    protein: Math.round(Number(nutriments.proteins_100g ?? 0) * factor * 10) / 10,
+    protein: nutrient('proteins'),
     servingSize,
-    sugar: Math.round(Number(nutriments.sugars_100g ?? 0) * factor * 10) / 10,
-    saturatedFat: Math.round(Number(nutriments['saturated-fat_100g'] ?? 0) * factor * 10) / 10,
-    polyunsaturatedFat: Math.round(Number(nutriments['polyunsaturated-fat_100g'] ?? 0) * factor * 10) / 10,
-    monounsaturatedFat: Math.round(Number(nutriments['monounsaturated-fat_100g'] ?? 0) * factor * 10) / 10,
-    transFat: Math.round(Number(nutriments['trans-fat_100g'] ?? 0) * factor * 10) / 10,
-    cholesterol: Math.round(Number(nutriments.cholesterol_100g ?? 0) * factor * 10) / 10,
-    sodium: Math.round(Number(nutriments.sodium_100g ?? 0) * factor * 10) / 10,
-    potassium: Math.round(Number(nutriments.potassium_100g ?? 0) * factor * 10) / 10,
-    calcium: Math.round(Number(nutriments.calcium_100g ?? 0) * factor * 10) / 10,
-    iron: Math.round(Number(nutriments.iron_100g ?? 0) * factor * 10) / 10,
-    vitaminA: Math.round(Number(nutriments['vitamin-a_100g'] ?? 0) * factor * 10) / 10,
-    vitaminC: Math.round(Number(nutriments['vitamin-c_100g'] ?? 0) * factor * 10) / 10,
-    vitaminD: Math.round(Number(nutriments['vitamin-d_100g'] ?? 0) * factor * 10) / 10,
-    vitaminE: Math.round(Number(nutriments['vitamin-e_100g'] ?? 0) * factor * 10) / 10,
-    vitaminK: Math.round(Number(nutriments['vitamin-k_100g'] ?? 0) * factor * 10) / 10,
+    sugar: nutrient('sugars'),
+    saturatedFat: nutrient('saturated-fat'),
+    polyunsaturatedFat: nutrient('polyunsaturated-fat'),
+    monounsaturatedFat: nutrient('monounsaturated-fat'),
+    transFat: nutrient('trans-fat'),
+    cholesterol: nutrient('cholesterol', 'mg'),
+    sodium: nutrient('sodium', 'mg'),
+    potassium: nutrient('potassium', 'mg'),
+    calcium: nutrient('calcium', 'mg'),
+    iron: nutrient('iron', 'mg'),
+    vitaminA: nutrient('vitamin-a', 'mcg'),
+    vitaminC: nutrient('vitamin-c', 'mg'),
+    vitaminD: nutrient('vitamin-d', 'mcg'),
+    vitaminE: nutrient('vitamin-e', 'mg'),
+    vitaminK: nutrient('vitamin-k', 'mcg'),
   }
 }
 

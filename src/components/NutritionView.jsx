@@ -324,22 +324,33 @@ function normalizeBarcode(value) {
 }
 
 function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) {
-  const options = getServingOptions(food)
+  const existingServing = parseStoredServing(food)
+  const nutrientKeys = ['calories', 'protein', 'carbohydrates', 'fats', 'fiber', 'sugar', 'saturatedFat', 'polyunsaturatedFat', 'monounsaturatedFat', 'transFat', 'cholesterol', 'sodium', 'potassium', 'vitaminA', 'vitaminC', 'vitaminD', 'vitaminE', 'vitaminK', 'calcium', 'iron']
+  const baseFood = { ...food, servingSize: existingServing.servingSize }
+  nutrientKeys.forEach((key) => {
+    if (food[key] != null && Number.isFinite(Number(food[key]))) baseFood[key] = Number(food[key]) / existingServing.servings
+  })
+  const options = getServingOptions(baseFood)
   const [servingSize, setServingSize] = useState(options[0])
-  const [servings, setServings] = useState(1)
+  const [servings, setServings] = useState(existingServing.servings)
   const [savedFoods, setSavedFoods] = useState([])
   const [saveMessage, setSaveMessage] = useState('')
   const [isSavingFood, setIsSavingFood] = useState(false)
-  const factor = getServingFactor(food, servingSize) * Math.max(0, Number(servings) || 0)
+  const factor = getServingFactor(baseFood, servingSize) * Math.max(0, Number(servings) || 0)
+  const micronutrientKeys = nutrientKeys.slice(4)
   const scaledFood = {
-    ...food,
+    ...baseFood,
     meal,
-    servingSize: `${servings} x ${servingSize}`,
-    calories: Math.round(Number(food.calories || 0) * factor),
-    protein: roundNutrient(Number(food.protein || 0) * factor),
-    carbohydrates: roundNutrient(Number(food.carbohydrates || 0) * factor),
-    fats: roundNutrient(Number(food.fats || 0) * factor),
+    servingSize,
+    servings: Math.max(0, Number(servings) || 0),
+    calories: Math.round(Number(baseFood.calories || 0) * factor),
+    protein: roundNutrient(Number(baseFood.protein || 0) * factor),
+    carbohydrates: roundNutrient(Number(baseFood.carbohydrates || 0) * factor),
+    fats: roundNutrient(Number(baseFood.fats || 0) * factor),
   }
+  micronutrientKeys.forEach((key) => {
+    if (baseFood[key] != null && Number.isFinite(Number(baseFood[key]))) scaledFood[key] = roundNutrient(Number(baseFood[key]) * factor)
+  })
 
   const isAlreadySaved = savedFoods.some((savedFood) => isSameSavedFood(savedFood, scaledFood))
 
@@ -373,6 +384,12 @@ function getServingFactor(food, selectedServing) {
   return selectedGrams / baseGrams
 }
 
+function parseStoredServing(food) {
+  if (food.servings != null) return { servingSize: food.servingSize || '1 serving', servings: Number(food.servings) || 1 }
+  const match = String(food.servingSize || '').match(/^(\d+(?:\.\d+)?)\s*x\s*(.+)$/i)
+  return match ? { servingSize: match[2], servings: Number(match[1]) } : { servingSize: food.servingSize || '1 serving', servings: 1 }
+}
+
 function parseServingGrams(serving) {
   const match = String(serving || '').match(/(\d+(?:\.\d+)?)\s*g\b/i)
   return match ? Number(match[1]) : 0
@@ -395,7 +412,7 @@ function getServingOptions(food) {
   if (name.includes('egg')) return ['1 egg', '1 large egg', '2 eggs', '100 g']
   if (name.includes('grape')) return ['1 grape', '10 grapes', '1 cup', '100 g']
   if (name.includes('peanut butter') || name.includes('syrup')) return ['1 tbsp', '2 tbsp', '1 tsp', '100 g']
-  return [food.servingSize || '1 serving', '1 cup', '1 tbsp', '1 oz', '100 g']
+  return [...new Set([food.servingSize || '1 serving', '1 cup', '1 tbsp', '1 oz', '100 g'])]
 }
 
 function roundNutrient(value) { return Math.round(value * 10) / 10 }
@@ -406,7 +423,7 @@ function Progress({ target, tone, value }) { return <div className={`nutrition-p
 function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete, onEdit }) {
   const mealEntries = entries.filter((entry) => entry.meal === meal)
   const totals = getNutritionTotals(mealEntries)
-  return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{entry.servingSize}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article>)}</div></section></div>
+  return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => { const serving = parseStoredServing(entry); return <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{serving.servingSize} · {serving.servings} serving{serving.servings === 1 ? '' : 's'}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article> })}</div></section></div>
 }
 
 function NutritionDetailsModal({ entries, hydrationOz, onClose, targets, totals }) {
