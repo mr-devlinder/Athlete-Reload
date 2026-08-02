@@ -2,13 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { findFoodByBarcode, searchFoods } from '../lib/foodApi'
+import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadSavedFoods, removeSavedFood, saveFood, searchFoods, verifyFood } from '../lib/foodApi'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { SectionHeading } from './SectionHeading'
 
 const quickWaterAmounts = [8, 16, 20, 32, 64]
 const mealCards = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
-const emptyFood = { calories: '', carbohydrates: '', fats: '', name: '', protein: '', servingSize: '1 serving' }
 
 export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWellness, schedule }) {
   const today = format(new Date(), 'yyyy-MM-dd')
@@ -16,6 +15,7 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
   const [isDateOpen, setIsDateOpen] = useState(false)
   const [loggingMeal, setLoggingMeal] = useState(null)
   const [selectedFood, setSelectedFood] = useState(null)
+  const [openMeal, setOpenMeal] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const wellness = nutritionHistory.find((entry) => entry.date === selectedDate) ?? { date: selectedDate, hydrationOz: 0, nutritionEntries: [] }
   const entries = wellness.nutritionEntries ?? []
@@ -69,13 +69,14 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
 
       <section className="nutrition-meals-section">
         <div className="nutrition-section-title"><h2>Meals</h2><span>{entries.length} logged</span></div>
-        <div className="nutrition-meal-grid">{mealCards.map((meal) => <MealCard key={meal} meal={meal} entries={entries} onLog={() => setLoggingMeal(meal === 'Snacks' ? 'Snack' : meal)} onRemove={removeFood} />)}</div>
+        <div className="nutrition-meal-grid">{mealCards.map((meal) => <MealCard key={meal} meal={meal} entries={entries} onOpen={() => setOpenMeal(meal === 'Snacks' ? 'Snack' : meal)} onLog={() => setLoggingMeal(meal === 'Snacks' ? 'Snack' : meal)} />)}</div>
       </section>
 
       <p className="nutrition-target-note">{targets.reason}</p>
 
-      {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food) => setSelectedFood({ food, meal: loggingMeal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
-      {selectedFood && <NutritionModalPortal><ServingModal food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
+      {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food, meal) => setSelectedFood({ food, meal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
+      {selectedFood && <NutritionModalPortal><ServingModal canSaveReusable={Boolean(selectedFood.entryId)} food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: selectedFood.entryId ? entries.map((entry) => entry.id === selectedFood.entryId ? { ...food, id: entry.id, loggedAt: entry.loggedAt } : entry) : [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
+      {openMeal && <NutritionModalPortal><MealDetailModal date={selectedDate} entries={entries} meal={openMeal} onClose={() => setOpenMeal(null)} onDateChange={setSelectedDate} onDelete={removeFood} onEdit={(entry) => { setOpenMeal(null); setSelectedFood({ food: entry, meal: openMeal, entryId: entry.id }) }} /></NutritionModalPortal>}
       {detailsOpen && <NutritionModalPortal><NutritionDetailsModal entries={entries} hydrationOz={wellness.hydrationOz} onClose={() => setDetailsOpen(false)} targets={targets} totals={totals} /></NutritionModalPortal>}
     </div>
   )
@@ -85,9 +86,9 @@ function NutritionModalPortal({ children }) {
   return createPortal(children, document.body)
 }
 
-function MealCard({ entries, meal, onLog, onRemove }) {
+function MealCard({ entries, meal, onLog, onOpen }) {
   const mealEntries = entries.filter((entry) => entry.meal === (meal === 'Snacks' ? 'Snack' : meal))
-  return <article className="nutrition-meal-card"><div className="nutrition-meal-icon" aria-hidden="true"><MealIcon meal={meal} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <div>{mealEntries.map((entry) => <span key={entry.id}>{entry.name} · {entry.calories} cal<button onClick={() => onRemove(entry.id)} type="button" aria-label={`Remove ${entry.name}`}>×</button></span>)}</div>}</div><button className="nutrition-log-button" onClick={onLog} type="button">Log</button></article>
+  return <article className="nutrition-meal-card nutrition-meal-card-clickable" onClick={onOpen}><div className="nutrition-meal-icon" aria-hidden="true"><MealIcon meal={meal} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <p>{mealEntries.length} food{mealEntries.length === 1 ? '' : 's'} · {Math.round(getNutritionTotals(mealEntries).calories)} cal</p>}</div><button className="nutrition-log-button" onClick={(event) => { event.stopPropagation(); onLog() }} type="button">Log</button></article>
 }
 
 function MealIcon({ meal }) {
@@ -102,18 +103,21 @@ function MealIcon({ meal }) {
 function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const [meal, setMeal] = useState(initialMeal)
   const [query, setQuery] = useState('')
-  const [barcode, setBarcode] = useState('')
   const [results, setResults] = useState([])
-  const [manualFood, setManualFood] = useState(emptyFood)
-  const [showManual, setShowManual] = useState(false)
   const [message, setMessage] = useState('')
   const [isScanning, setIsScanning] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [savedFoods, setSavedFoods] = useState([])
+  const [isFoodCurator, setIsFoodCurator] = useState(false)
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const scanTimerRef = useRef(null)
   const readerRef = useRef(null)
 
-  useEffect(() => () => stopScanner(), [])
+  useEffect(() => {
+    Promise.all([loadSavedFoods(), getFoodCuratorStatus()]).then(([foods, isCurator]) => { setSavedFoods(foods); setIsFoodCurator(isCurator) }).catch(() => {})
+    return () => stopScanner()
+  }, [])
 
   function stopScanner() {
     if (scanTimerRef.current) window.clearTimeout(scanTimerRef.current)
@@ -147,7 +151,6 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
         if (!result || !streamRef.current) return
         const normalizedBarcode = normalizeBarcode(result.getText())
         if (!normalizedBarcode) return
-        setBarcode(normalizedBarcode)
         stopScanner()
         try {
           const food = await findFoodByBarcode(normalizedBarcode)
@@ -191,38 +194,84 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     }
   }
 
-  async function search() {
-    try { setMessage(''); setResults(await searchFoods(query)) } catch (error) { setMessage(error.message) }
+  async function search(searchValue = query) {
+    try {
+      setMessage('')
+      const found = await searchFoods(searchValue)
+      const terms = searchValue.toLowerCase().match(/[a-z0-9]+/g) ?? []
+      const savedMatches = savedFoods.filter((food) => terms.every((term) => food.name.toLowerCase().includes(term)))
+      const keys = new Set(savedMatches.map(foodResultKey))
+      setResults([...savedMatches, ...found.filter((food) => !keys.has(foodResultKey(food)))])
+    } catch (error) { setMessage(error.message) }
   }
 
-  async function barcodeSearch() {
-    const normalizedBarcode = normalizeBarcode(barcode)
-    setBarcode(normalizedBarcode)
-    if (!normalizedBarcode) {
-      setMessage('Enter a valid barcode number.')
-      return
-    }
-    try { setMessage(''); const food = await findFoodByBarcode(normalizedBarcode); setResults(food ? [food] : []); if (!food) setMessage('No food found for that barcode.') } catch (error) { setMessage(error.message) }
+  function selectFood(food) { if (onSelectFood) onSelectFood(food, meal); else onSave({ ...food, meal }) }
+
+  function startVoiceSearch() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) { setMessage('Voice search is not supported in this browser.'); return }
+    const recognition = new SpeechRecognition()
+    recognition.lang = 'en-US'
+    recognition.interimResults = false
+    recognition.onstart = () => setIsListening(true)
+    recognition.onend = () => setIsListening(false)
+    recognition.onerror = () => setMessage('Voice search could not hear a food. Try again.')
+    recognition.onresult = (event) => { const value = event.results?.[0]?.[0]?.transcript?.trim() ?? ''; setQuery(value); if (value) search(value) }
+    recognition.start()
   }
 
-  function selectFood(food) { if (onSelectFood) onSelectFood(food); else onSave({ ...food, meal }) }
-
-  function saveManual() {
-    if (!manualFood.name.trim()) return
-    onSave({ ...manualFood, meal, foodSource: 'Manual entry', calories: Number(manualFood.calories || 0), protein: Number(manualFood.protein || 0), carbohydrates: Number(manualFood.carbohydrates || 0), fats: Number(manualFood.fats || 0) })
+  async function toggleSaved(food) {
+    try {
+      if (food.isSaved) {
+        await removeSavedFood(food.savedFoodId)
+        setSavedFoods((current) => current.filter((item) => item.savedFoodId !== food.savedFoodId))
+        setResults((current) => current.map((item) => item.savedFoodId === food.savedFoodId ? { ...item, isSaved: false, savedFoodId: undefined } : item))
+      } else {
+        const saved = await saveFood(food)
+        setSavedFoods((current) => [saved, ...current.filter((item) => foodResultKey(item) !== foodResultKey(saved))])
+        setResults((current) => current.map((item) => foodResultKey(item) === foodResultKey(food) ? saved : item))
+      }
+    } catch (error) { setMessage(error.message) }
   }
 
-  return <div className="modal-backdrop" onClick={onClose}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Log food" title="Add to your day." /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="food-meal-switcher">{mealOptions.map((option) => <button className={meal === option ? 'active' : ''} key={option} onClick={() => setMeal(option)} type="button">{option}</button>)}</div><div className="food-modal-search"><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, flavors…" /><button className="primary-button compact-action" onClick={search} type="button">Search</button></div><div className="food-modal-actions"><button className="secondary-button compact-action" onClick={isScanning ? stopScanner : startScanner} type="button">{isScanning ? 'Stop scan' : 'Barcode scan'}</button><input inputMode="numeric" value={barcode} onChange={(event) => setBarcode(normalizeBarcode(event.target.value))} onKeyDown={(event) => event.key === 'Enter' && barcodeSearch()} placeholder="Barcode number" /><button className="secondary-button compact-action" onClick={barcodeSearch} type="button">Look up</button><button className="secondary-button compact-action" onClick={() => setShowManual((current) => !current)} type="button">Manual entry</button></div>{isScanning && <div className="barcode-scanner"><video ref={videoRef} muted playsInline /><p>Point the camera at the barcode.</p></div>}{message && <p className="form-error">{message}</p>}{results.length > 0 && <div className="food-results">{results.map((food, index) => <button key={`${food.barcode}-${index}`} onClick={() => selectFood(food)} type="button"><strong>{food.name}</strong><span>{[food.brand, food.servingSize].filter(Boolean).join(' · ')}</span><em>{food.calories} kcal · P {food.protein}g · C {food.carbohydrates}g · F {food.fats}g</em></button>)}</div>}{showManual && <div className="manual-food-grid">{[['name', 'Food name'], ['servingSize', 'Serving size'], ['calories', 'Calories'], ['protein', 'Protein (g)'], ['carbohydrates', 'Carbs (g)'], ['fats', 'Fat (g)']].map(([field, label]) => <label key={field}>{label}<input type={field === 'name' || field === 'servingSize' ? 'text' : 'number'} value={manualFood[field]} onChange={(event) => setManualFood((current) => ({ ...current, [field]: event.target.value }))} /></label>)}<button className="primary-button compact-action" onClick={saveManual} type="button">Add manually</button></div>}</section></div>
+  async function promoteFood(food) {
+    try {
+      const verified = await verifyFood(food)
+      setResults((current) => current.map((item) => foodResultKey(item) === foodResultKey(food) ? { ...item, ...verified, isVerified: true } : item))
+      setMessage(`${food.name} added to verified foods.`)
+    } catch (error) { setMessage(error.message) }
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{isScanning ? 'Stop Scan' : 'Barcode Scan'}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage('') }} type="button"><Icon name="bookmark" />Saved Foods</button></div>{isScanning && <div className="barcode-scanner"><video ref={videoRef} muted playsInline /><p>Point the camera at the barcode.</p></div>}{message && <p className="form-message">{message}</p>}{results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+}
+
+function FoodResult({ food, isCurator, onPromote, onSave, onSelect }) {
+  const suggestions = getServingOptions(food).filter((option) => option !== food.servingSize && option !== '100 g').slice(0, 2)
+  return <div className="food-result-row"><button className="food-result-main" onClick={() => onSelect(food)} type="button"><strong>{food.name}{food.isVerified ? ' ✓' : ''}</strong><span>{[food.brand, food.servingSize].filter(Boolean).join(' · ')}</span>{suggestions.length > 0 && <small>Serving options: {suggestions.join(' or ')}</small>}<em>{food.calories} kcal · P {food.protein}g · C {food.carbohydrates}g · F {food.fats}g</em></button><div className="food-result-actions"><button onClick={() => onSave(food)} type="button">{food.isSaved ? 'Saved' : 'Save'}</button>{isCurator && !food.isVerified && <button onClick={() => onPromote(food)} type="button">Verify</button>}</div></div>
+}
+
+function foodResultKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase() }
+
+function Icon({ name }) {
+  const common = { 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 1.8, viewBox: '0 0 24 24' }
+  if (name === 'search') return <svg {...common}><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+  if (name === 'barcode') return <svg {...common}><path d="M4 5v14M7 5v14M11 5v14M14 5v14M16.5 5v14M20 5v14" /></svg>
+  if (name === 'mic') return <svg {...common}><rect height="11" rx="3.5" width="7" x="8.5" y="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6" /></svg>
+  if (name === 'bookmark') return <svg {...common}><path d="M6.5 4.5A1.5 1.5 0 0 1 8 3h8a1.5 1.5 0 0 1 1.5 1.5V21L12 17l-5.5 4V4.5Z" /></svg>
+  return <svg {...common}><path d="m7 9 5 5 5-5" /></svg>
 }
 
 function normalizeBarcode(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 14)
 }
 
-function ServingModal({ food, meal, onClose, onSave }) {
+function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) {
   const options = getServingOptions(food)
   const [servingSize, setServingSize] = useState(options[0])
   const [servings, setServings] = useState(1)
+  const [savedFoods, setSavedFoods] = useState([])
+  const [saveMessage, setSaveMessage] = useState('')
+  const [isSavingFood, setIsSavingFood] = useState(false)
   const factor = getServingFactor(food, servingSize) * Math.max(0, Number(servings) || 0)
   const scaledFood = {
     ...food,
@@ -234,7 +283,29 @@ function ServingModal({ food, meal, onClose, onSave }) {
     fats: roundNutrient(Number(food.fats || 0) * factor),
   }
 
-  return <div className="modal-backdrop" onClick={onClose}><section className="serving-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Add food" title={food.name} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="serving-preview"><strong>{scaledFood.calories} cal</strong><span>{food.brand || food.foodSource}</span></div><label className="serving-field">Serving size<select value={servingSize} onChange={(event) => setServingSize(event.target.value)}>{options.map((option) => <option key={option}>{option}</option>)}</select></label><label className="serving-field">Number of servings<input min="0.25" step="0.25" type="number" value={servings} onChange={(event) => setServings(event.target.value)} /></label><div className="serving-total"><span>Total added</span><strong>{scaledFood.calories} calories</strong><small>{scaledFood.protein}g protein · {scaledFood.carbohydrates}g carbs · {scaledFood.fats}g fat</small></div><button className="primary-button" onClick={() => onSave(scaledFood)} type="button">Add to {meal}</button></section></div>
+  const isAlreadySaved = savedFoods.some((savedFood) => isSameSavedFood(savedFood, scaledFood))
+
+  useEffect(() => {
+    if (!canSaveReusable) return
+    loadSavedFoods().then(setSavedFoods).catch((error) => setSaveMessage(error.message))
+  }, [canSaveReusable])
+
+  async function saveReusableFood() {
+    if (isAlreadySaved || isSavingFood) return
+    setIsSavingFood(true)
+    setSaveMessage('')
+    try {
+      const savedFood = await saveFood(scaledFood)
+      setSavedFoods((current) => [savedFood, ...current.filter((item) => !isSameSavedFood(item, savedFood))])
+      setSaveMessage('Saved to Saved Foods')
+    } catch (error) {
+      setSaveMessage(error.message)
+    } finally {
+      setIsSavingFood(false)
+    }
+  }
+
+  return <div className="modal-backdrop" onClick={onClose}><section className="serving-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow={canSaveReusable ? 'Edit food' : 'Add food'} title={food.name} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="serving-preview"><strong>{scaledFood.calories} cal</strong><span>{food.brand || food.foodSource}</span></div><label className="serving-field">Serving size<select value={servingSize} onChange={(event) => { setServingSize(event.target.value); setSaveMessage('') }}>{options.map((option) => <option key={option}>{option}</option>)}</select></label><label className="serving-field">Number of servings<input min="0.25" step="0.25" type="number" value={servings} onChange={(event) => { setServings(event.target.value); setSaveMessage('') }} /></label><div className="serving-total"><span>Total added</span><strong>{scaledFood.calories} calories</strong><small>{scaledFood.protein}g protein · {scaledFood.carbohydrates}g carbs · {scaledFood.fats}g fat</small></div>{canSaveReusable && <><button className="secondary-button" disabled={isAlreadySaved || isSavingFood} onClick={saveReusableFood} type="button">{isAlreadySaved ? 'Already in Saved Foods' : isSavingFood ? 'Saving...' : 'Save to Saved Foods'}</button>{saveMessage && <p className="form-message">{saveMessage}</p>}</>}<button className="primary-button" onClick={() => onSave(scaledFood)} type="button">{canSaveReusable ? 'Save meal changes' : `Add to ${meal}`}</button></section></div>
 }
 
 function getServingFactor(food, selectedServing) {
@@ -273,6 +344,13 @@ function roundNutrient(value) { return Math.round(value * 10) / 10 }
 
 function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><strong>{Math.round(value)} <small>/ {target ?? '—'}{unit}</small></strong><Progress value={value} target={target} tone={tone} /></div> }
 function Progress({ target, tone, value }) { return <div className={`nutrition-progress ${tone}`}><span style={{ width: `${target ? Math.min(100, (Number(value) / Number(target)) * 100) : 0}%` }} /></div> }
+
+function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete, onEdit }) {
+  const mealEntries = entries.filter((entry) => entry.meal === meal)
+  const totals = getNutritionTotals(mealEntries)
+  return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{entry.servingSize}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article>)}</div></section></div>
+}
+
 function NutritionDetailsModal({ entries, hydrationOz, onClose, targets, totals }) {
   const mealTotals = Object.entries(entries.reduce((result, entry) => { const meal = entry.meal || 'Other'; result[meal] = (result[meal] || 0) + Number(entry.calories || 0); return result }, {})).map(([name, calories]) => ({ name, calories })).filter((item) => item.calories > 0)
   const colors = ['#2f8cff', '#6aa76d', '#e8b04f', '#f08b46', '#a878d8', '#6b879f']

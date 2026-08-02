@@ -5,11 +5,41 @@ export function estimatePlannedMinutes(load = 'Medium') {
   return 60
 }
 
+export function isRestDayEvent(event) {
+  return ['rest day', 'rest'].includes(String(event?.type ?? '').trim().toLowerCase())
+}
+
+export function isRecoveryDayEvent(event) {
+  return String(event?.type ?? '').trim().toLowerCase() === 'recovery day'
+}
+
+export function isAllDayEvent(event) {
+  return isRestDayEvent(event) || isRecoveryDayEvent(event)
+}
+
+export function isOtherActivityEvent(event) {
+  return String(event?.type ?? '').trim().toLowerCase() === 'other activity'
+}
+
+export function isEventActionable(event) {
+  return Boolean(event) && !isAllDayEvent(event)
+}
+
+export function getEventDisplayName(event) {
+  if (isOtherActivityEvent(event)) return event.customActivityName?.trim() || event.title?.trim() || 'Other activity'
+  if (isRestDayEvent(event)) return 'Rest Day'
+  if (isRecoveryDayEvent(event)) return 'Recovery Day'
+  return event?.title || event?.type || 'Training'
+}
+
 export function parseEventDateTime(event) {
   if (!event?.date) return null
 
   const time = event.time?.trim()
 
+  if (!time && event.allDay && isEventActionable(event)) {
+    return new Date(`${event.date}T18:00:00`)
+  }
   if (!time) return null
 
   const dateMatch = event.date.match(/^(\d{4})-(\d{2})-(\d{2})$/)
@@ -33,6 +63,7 @@ export function parseEventDateTime(event) {
 }
 
 export function hasEventStarted(event, now = new Date()) {
+  if (!isEventActionable(event)) return false
   const eventDate = parseEventDateTime(event)
 
   return eventDate ? eventDate <= now : false

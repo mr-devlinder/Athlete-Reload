@@ -6,6 +6,7 @@ import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 import { estimatePlannedMinutes } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
+import { getSportWorkloadFields } from '../data/sportProfiles'
 
 const painChanges = ['Improved', 'Unchanged', 'Slightly worse', 'Much worse']
 const participationLevels = ['Full', 'Modified', 'Partial', 'Did not participate']
@@ -13,11 +14,16 @@ const performanceLevels = ['Worse', 'Slightly worse', 'Normal', 'Better', 'Much 
 const sessionContentOptions = ['Technical work', 'Tactical work', 'Scrimmage', 'Sprinting', 'Endurance', 'Strength', 'Plyometrics', 'Recovery']
 const symptomOptions = ['Dizziness', 'Nausea', 'Headache', 'Unusual shortness of breath']
 
-export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainReports, onClose, onSave }) {
+export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, preCheckInPainReports, onClose, onSave }) {
   const [isEditing, setIsEditing] = useState(!checkout)
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [draft, setDraft] = useState(() => getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports))
+  const workloadFields = getSportWorkloadFields(athleteProfile?.sport, {
+    phase: 'checkout',
+    position: athleteProfile?.position,
+    eventType: event.type,
+  })
 
   useEffect(() => {
     document.body.classList.add('modal-open')
@@ -97,6 +103,14 @@ export function CheckoutModal({ checkout, event, preCheckIn, preCheckInPainRepor
                 onChange={(changeEvent) => updateDraft('actualMinutes', changeEvent.target.value)}
               />
             </label>
+            {workloadFields.map((field) => (
+              <SportWorkloadField
+                field={field}
+                key={field.key}
+                value={draft.sportWorkload?.[field.key] ?? ''}
+                onChange={(value) => updateDraft('sportWorkload', { ...(draft.sportWorkload ?? {}), [field.key]: value })}
+              />
+            ))}
             <div className="checkout-section modal-notes">
               <div className="checkout-section-heading">
                 <strong>What happened</strong>
@@ -305,8 +319,25 @@ function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
     postSoreness: checkout?.postSoreness ?? 3,
     performanceRating: checkout?.performanceRating ?? 'Normal',
     sessionContent: checkout?.sessionContent ?? [],
+    sportWorkload: checkout?.sportWorkload ?? event.sportWorkload ?? {},
     cramping: checkout?.cramping ?? false,
   }
+}
+
+function SportWorkloadField({ field, onChange, value }) {
+  return (
+    <label className="compact-field">
+      {field.label}{field.unit ? ` (${field.unit})` : ''}
+      {field.type === 'select' ? (
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Not recorded</option>
+          {field.options.map((option) => <option key={option}>{option}</option>)}
+        </select>
+      ) : (
+        <input min="0" step={field.unit === 'miles' ? '0.1' : '1'} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </label>
+  )
 }
 
 function getPreCheckInPainMap(preCheckIn, painReports = []) {

@@ -10,6 +10,7 @@ export function CheckInView({
   checkouts = [],
   dailyWellness,
   eventOptions = [],
+  eventPreparationContext,
   isSavedToday,
   isSaving,
   selectedEvent,
@@ -25,6 +26,7 @@ export function CheckInView({
   hasEarlierEventToday,
   isFirstEventToday,
   isQuickMode = false,
+  restDayPlanned = false,
 }) {
   const selectedEventLabel = selectedEvent?.title ?? 'Open training day'
   const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
@@ -41,7 +43,9 @@ export function CheckInView({
           onSelectEvent={onSelectEvent}
         />
         <SectionHeading eyebrow={todayLabel} title="No event check-in available." />
-        <p>Check-ins are only available for events scheduled today.</p>
+        <p>{restDayPlanned
+          ? 'Today is a planned Rest Day. No event check-in or checkout is required; log normal wellness or pain close to the end of the day.'
+          : 'Check-ins are only available for physical events scheduled today.'}</p>
       </div>
     )
   }
@@ -110,7 +114,7 @@ export function CheckInView({
         {!isQuickMode && <Slider
           description="Overall muscle discomfort or tenderness, even before activity."
           label="Muscle soreness"
-          min={1}
+          min={0}
           max={5}
           value={checkIn.soreness}
           unit="/5"
@@ -119,7 +123,7 @@ export function CheckInView({
         <Slider
           description="How worn down your whole body feels."
           label="General fatigue"
-          min={1}
+          min={0}
           max={5}
           value={checkIn.fatigue}
           unit="/5"
@@ -163,7 +167,7 @@ export function CheckInView({
             options={['1 - Low', '2', '3', '4', '5 - High']}
             onChange={(value) => onUpdate('stress', value)}
           />
-          <DailyFuelContext dailyWellness={dailyWellness} />
+          <DailyFuelContext dailyWellness={dailyWellness} eventPreparationContext={eventPreparationContext} />
         </div>
         <div className="select-row">
           <Select
@@ -412,15 +416,25 @@ function isInsideCheckInWindow(event) {
   return eventStart >= now && eventStart - now <= 3 * 60 * 60 * 1000
 }
 
-function DailyFuelContext({ dailyWellness }) {
+function DailyFuelContext({ dailyWellness, eventPreparationContext }) {
   const hydrationOz = Number(dailyWellness?.hydrationOz ?? 0)
   const meals = dailyWellness?.nutritionEntries ?? []
+  const fuel = eventPreparationContext?.fuel
+  const hydration = eventPreparationContext?.hydration
+  const statusLabel = (status) => ({
+    'on-track': 'On track',
+    'slightly-behind': 'Slightly behind',
+    behind: 'Behind',
+    'insufficient-data': 'Insufficient data',
+    'not-applicable': 'Not applicable',
+  })[status] ?? 'Insufficient data'
 
   return (
     <div className="daily-fuel-context">
-      <span>Today's fuel</span>
-      <strong>{hydrationOz} fl oz logged</strong>
-      <small>{meals.length ? `${meals.length} food item${meals.length === 1 ? '' : 's'} logged today` : 'No food logged yet'}</small>
+      <span>Event fuel context</span>
+      <strong>Fuel: {statusLabel(fuel?.status)} · Hydration: {statusLabel(hydration?.status)}</strong>
+      <small>{fuel?.message ?? `${meals.length} food items and ${hydrationOz} fl oz logged before check-in.`}</small>
+      {hydration?.message && <small>{hydration.message}</small>}
       <small className="daily-fuel-context-note">Update hydration and meals in Nutrition.</small>
     </div>
   )

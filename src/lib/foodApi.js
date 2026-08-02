@@ -96,6 +96,53 @@ export async function searchFoods(query) {
   throw new Error('Food search is unavailable right now. Try a simpler search or add the food manually.')
 }
 
+export async function loadSavedFoods() {
+  if (!supabase) return []
+  const { data, error } = await supabase.from('saved_foods').select('id, food').order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map((row) => ({ ...row.food, savedFoodId: row.id, isSaved: true }))
+}
+
+export async function saveFood(food) {
+  if (!supabase) return { ...food, isSaved: true }
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) throw new Error('Sign in to save foods.')
+  const sourceKey = getFoodSourceKey(food)
+  const { data, error } = await supabase.from('saved_foods').upsert({ user_id: user.id, source_key: sourceKey, food: stripFoodState(food) }, { onConflict: 'user_id,source_key' }).select('id, food').single()
+  if (error) throw error
+  return { ...data.food, savedFoodId: data.id, isSaved: true }
+}
+
+export function isSameSavedFood(first, second) {
+  return getFoodSourceKey(first) === getFoodSourceKey(second)
+}
+
+export async function removeSavedFood(id) {
+  if (!supabase || !id) return
+  const { error } = await supabase.from('saved_foods').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function getFoodCuratorStatus() {
+  if (!supabase) return false
+  const { data, error } = await supabase.functions.invoke('manage-food', { body: { action: 'status' } })
+  if (error) return false
+  return Boolean(data?.isCurator)
+}
+
+export async function verifyFood(food) {
+  const { data, error } = await supabase.functions.invoke('manage-food', { body: { action: 'verify', food: stripFoodState(food) } })
+  if (error) throw error
+  return data.food
+}
+
+function getFoodSourceKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim() }
+function stripFoodState(food) {
+  const value = { ...food }
+  for (const field of ['isSaved', 'savedFoodId', 'isVerified', 'meal', 'id', 'loggedAt', 'date', 'completed']) delete value[field]
+  return value
+}
+
 function rankFoods(foods, query) {
   const seen = new Set()
   return foods

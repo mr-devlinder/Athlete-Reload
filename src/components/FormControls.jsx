@@ -13,10 +13,18 @@ export function Select({ description, label, value, options, onChange }) {
 }
 
 export function Slider({ description, label, min = 0, max, maxLabel, value, unit, onChange }) {
-  const progress = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100))
+  const numericMin = Number(min)
+  const numericMax = Number(max)
+  const parsedValue = Number(value)
+  const numericValue = Number.isFinite(parsedValue)
+    ? Math.max(numericMin, Math.min(numericMax, parsedValue))
+    : numericMin
+  const range = numericMax - numericMin
+  const progress = range > 0 ? ((numericValue - numericMin) / range) * 100 : 0
 
   function handleChange(event) {
-    onChange(Number(event.target.value))
+    const nextValue = Number(event.currentTarget.value)
+    if (Number.isFinite(nextValue)) onChange(Math.max(numericMin, Math.min(numericMax, nextValue)))
   }
 
   return (
@@ -24,16 +32,16 @@ export function Slider({ description, label, min = 0, max, maxLabel, value, unit
       {label}
       {description && <small className="field-description">{description}</small>}
       <input
-        max={max}
-        min={min}
+        max={numericMax}
+        min={numericMin}
+        step={1}
         style={{ '--range-progress': `${progress}%` }}
         type="range"
-        value={value}
+        value={numericValue}
         onChange={handleChange}
-        onInput={handleChange}
       />
       <span>
-        {maxLabel && value === max ? maxLabel : `${value}${unit ?? ''}`}
+        {maxLabel && numericValue === numericMax ? maxLabel : `${numericValue}${unit ?? ''}`}
       </span>
     </label>
   )

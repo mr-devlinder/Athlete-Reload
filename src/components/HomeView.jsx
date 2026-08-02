@@ -2,7 +2,7 @@ import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from
 import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
-import { getCheckoutForEvent, hasEventStarted, parseEventDateTime } from '../utils/events'
+import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
 import { getBaselineComparison, getPersonalBaseline } from '../utils/baselines'
 import { PainShareModal } from './PainShareModal'
@@ -579,11 +579,12 @@ function getTodayPlan(schedule, history, checkouts, now) {
     .filter((event) => event.date === todayIso)
     .sort((first, second) => parseEventDateTime(first) - parseEventDateTime(second))
   const activeEvent = todayEvents.find((event) =>
-    !checkouts.some((checkout) => checkout.eventId === event.id)
+    isEventActionable(event) && !checkouts.some((checkout) => checkout.eventId === event.id)
   )
 
   return todayEvents
     .map((event) => {
+      if (isAllDayEvent(event)) return { ...event, action: null, status: `${isRestDayEvent(event) ? 'Planned rest' : 'Planned recovery'} · All day`, statusTone: 'complete' }
       const hasPre = history.some((entry) => entry.eventId === event.id)
       const hasPost = checkouts.some((checkout) => checkout.eventId === event.id)
       const eventStarted = hasEventStarted(event)
@@ -612,6 +613,7 @@ function getCheckInReminder(schedule, history, now) {
   const threeHoursFromNow = new Date(now.getTime() + 3 * 60 * 60 * 1000)
 
   return schedule.find((event) => {
+    if (!isEventActionable(event)) return false
     const eventDate = parseEventDateTime(event)
     const hasPreCheckIn = history.some((entry) => entry.eventId === event.id)
     const isToday = event.date === toIsoDate(now)

@@ -1,6 +1,6 @@
 import { format, parseISO } from 'date-fns'
 import { supabase } from './supabaseClient'
-import { estimatePlannedMinutes } from '../utils/events'
+import { estimatePlannedMinutes, isAllDayEvent, isOtherActivityEvent } from '../utils/events'
 import { normalizePainMapScale } from '../data/bodyPainMap'
 
 function normalizeFivePointValue(value, fallback = 1) {
@@ -12,43 +12,52 @@ function normalizeFivePointValue(value, fallback = 1) {
 }
 
 function fromScheduleRow(row) {
+  const eventStub = { type: row.event_type }
+  const isAllDay = isAllDayEvent(eventStub)
+  const isOtherActivity = isOtherActivityEvent(eventStub)
+  const time = isAllDay ? '' : row.event_time ?? ''
+  const customActivityName = isOtherActivity && row.title !== row.event_type ? row.title ?? '' : ''
   return {
-    association: row.association ?? 'Personal',
+    allDay: isAllDay,
+    association: isOtherActivity ? row.association ?? 'None' : row.association ?? 'Personal',
     availability: row.availability ?? 'Required',
     environment: row.environment ?? 'Outdoor',
-    expectedDuration: Number(row.expected_duration ?? row.planned_minutes ?? 60),
+    customActivityName,
+    expectedDuration: isAllDay ? null : Number(row.expected_duration ?? row.planned_minutes ?? 60),
     id: row.id,
     date: row.event_date,
-    load: row.load_level,
+    load: row.load_level ?? (isAllDay ? 'Low' : 'Medium'),
     location: row.location ?? '',
     note: row.note ?? '',
     opponent: row.opponent ?? '',
-    plannedMinutes: Number(row.planned_minutes ?? 0) || undefined,
+    plannedMinutes: isAllDay ? undefined : Number(row.planned_minutes ?? 0) || undefined,
     surface: row.surface ?? 'Grass',
-    time: row.event_time ?? '',
-    title: row.event_type,
+    time,
+    title: customActivityName || (isAllDay ? row.event_type : row.title ?? row.event_type),
     tournamentId: row.tournament_id ?? null,
-    type: row.event_type,
+    type: row.event_type ?? 'Training',
     venue: row.venue ?? '',
   }
 }
 
 function toScheduleRow(event) {
+  const isAllDay = isAllDayEvent(event)
+  const isOtherActivity = isOtherActivityEvent(event)
   return {
-    association: event.association ?? 'Personal',
+    association: isOtherActivity ? event.association ?? 'None' : event.association ?? 'Personal',
     availability: event.availability ?? 'Required',
     environment: event.environment ?? 'Outdoor',
-    expected_duration: Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
+    expected_duration: isAllDay ? 0 : Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
     event_date: event.date,
-    event_time: event.time ?? '',
+    event_time: isAllDay ? '' : event.time ?? '',
     event_type: event.type,
     load_level: event.load,
     location: event.location ?? '',
     note: event.note ?? '',
     opponent: event.opponent ?? '',
-    planned_minutes: Number(event.plannedMinutes ?? 0) || null,
+    planned_minutes: isAllDay ? null : Number(event.plannedMinutes ?? 0) || null,
     surface: event.surface ?? 'Grass',
-    title: event.type,
+    title: isOtherActivity ? event.customActivityName?.trim() || event.title || event.type : isAllDay ? event.type : event.title || event.type,
     tournament_id: event.tournamentId ?? null,
     updated_at: new Date().toISOString(),
     venue: event.venue ?? '',
@@ -132,7 +141,7 @@ function fromCheckInRow(row) {
     soreness: normalizeFivePointValue(row.soreness, 0),
     stress: row.stress,
     yesterdayLoad: row.yesterday_load,
-    expectedDifficulty: row.expected_difficulty ?? 5,
+    expectedDifficulty: Math.max(1, Math.min(10, Math.round(Number(row.expected_difficulty) || 5))),
   }
 }
 
@@ -204,6 +213,7 @@ function fromCheckoutRow(row) {
     title: row.session_title,
     sessionContent: row.session_content ?? [],
     sessionLoad: row.session_load ?? Number(row.actual_minutes ?? 0) * Number(row.difficulty ?? 0),
+    sportWorkload: row.recommendation_json?._sportWorkload ?? {},
   }
 }
 
@@ -239,7 +249,9 @@ function toCheckoutRow(event, checkout, options = {}) {
   }
 
   if (options.includeRecommendation !== false) {
-    row.recommendation_json = checkout.recommendation ?? null
+    row.recommendation_json = checkout.recommendation
+      ? { ...checkout.recommendation, _sportWorkload: checkout.sportWorkload ?? {} }
+      : null
   }
 
   return row

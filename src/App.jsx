@@ -61,12 +61,15 @@ import {
   updateTournament,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
+import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { getPainReportsFromMap, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
 import { loadSavedState, saveState } from './utils/storage'
+import { getEventDisplayName, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
+import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import './App.css'
 
 const views = [
@@ -128,20 +131,27 @@ function normalizeScheduleItem(item, index) {
     String(fallback.getDate()).padStart(2, '0'),
   ].join('-')
 
+  const isAllDay = isAllDayEvent(item)
+  const isOtherActivity = item.type === 'Other activity'
+  const time = isAllDay ? '' : item.time ?? ''
+  const customActivityName = isOtherActivity ? item.customActivityName ?? (item.title !== item.type ? item.title : '') : ''
+
   return {
+    allDay: isAllDay,
     id: item.id ?? `event-${Date.now()}-${index}`,
     date: /^\d{4}-\d{2}-\d{2}$/.test(item.date ?? '') ? item.date : fallbackDate,
-    load: item.load ?? 'Medium',
+    load: item.load ?? (isAllDay ? 'Low' : 'Medium'),
     note: item.note ?? '',
-    association: item.association ?? 'Personal',
+    association: isOtherActivity ? item.association ?? 'None' : item.association ?? 'Personal',
+    customActivityName,
     environment: item.environment ?? 'Outdoor',
-    expectedDuration: Number(item.expectedDuration ?? item.plannedMinutes ?? 60),
+    expectedDuration: isAllDay ? null : Number(item.expectedDuration ?? item.plannedMinutes ?? 60),
     location: item.location ?? '',
     surface: item.surface ?? 'Grass',
-    time: item.time ?? '',
-    title: item.type ?? item.title ?? 'Training',
+    time,
+    title: customActivityName || (isAllDay ? item.type : item.title ?? item.type ?? 'Training'),
     type: item.type ?? 'Team practice',
-    plannedMinutes: Number(item.plannedMinutes ?? 0) || undefined,
+    plannedMinutes: isAllDay ? undefined : Number(item.plannedMinutes ?? 0) || undefined,
   }
 }
 
@@ -153,6 +163,7 @@ function getSessionFromSchedule(events) {
   const eventType = events[0]?.type
 
   if (!eventType) return 'Rest day'
+  if (['Rest Day', 'Rest day'].includes(eventType)) return 'Rest day'
   if (eventType === 'Game') return 'Game day'
   if (eventType === 'Recovery') return 'Recovery day'
 
@@ -161,6 +172,7 @@ function getSessionFromSchedule(events) {
 
 function getSessionFromEvent(event) {
   if (!event) return 'Rest day'
+  if (isRestDayEvent(event)) return 'Rest day'
   if (event.type === 'Game') return 'Game day'
   if (event.type === 'Recovery') return 'Recovery day'
 
@@ -168,12 +180,12 @@ function getSessionFromEvent(event) {
 }
 
 function getCheckInEventOptions(schedule) {
-  return sortScheduleEvents(schedule)
+  return sortScheduleEvents(schedule.filter(isEventActionable))
 }
 
 function getDefaultLoadForEvent(type) {
   if (['Game', 'Tournament', 'Conditioning'].includes(type)) return 'High'
-  if (['Recovery', 'Rest day'].includes(type)) return 'Low'
+  if (['Recovery', 'Rest Day', 'Rest day'].includes(type)) return 'Low'
 
   return 'Medium'
 }
@@ -199,8 +211,10 @@ function normalizeCheckInScales(checkIn) {
   return {
     ...checkIn,
     energy: normalizeFivePointValue(checkIn.energy, 5),
+    expectedDifficulty: Math.max(1, Math.min(10, Math.round(Number(checkIn.expectedDifficulty) || 5))),
     fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
     legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
+    sleep: Math.max(3, Math.min(10, Math.round(Number(checkIn.sleep) || 10))),
     sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, 5),
     soreness: normalizeFivePointValue(checkIn.soreness, 0),
     painMap: normalizePainMapScale(checkIn.painMap, checkIn.pain),
@@ -239,17 +253,20 @@ function checkInFromHistoryEntry(entry, fallback) {
   return normalizeCheckInScales({
     ...fallback,
     energy: entry.energy,
+    expectedDifficulty: entry.expectedDifficulty,
     fatigue: entry.fatigue,
     hurtsWhen: entry.hurtsWhen,
     hydration: entry.hydration,
     hydrationOz: entry.hydrationOz ?? 0,
     injuryType: entry.injuryType,
+    legHeaviness: entry.legHeaviness,
     location: entry.location,
     notes: entry.note ?? '',
     pain: entry.pain,
     painMap: entry.painMap ?? fallback.painMap,
     painType: entry.painType,
     sleep: entry.sleep,
+    sleepQuality: entry.sleepQuality,
     soreness: entry.soreness,
     stress: entry.stress,
   })
@@ -334,7 +351,7 @@ function getSharedSleepContext(history, date) {
 }
 
 function getNextTodayEventAfter(schedule, eventId, todayIso, completedEventIds = new Set()) {
-  const todaySchedule = sortScheduleEvents(schedule.filter((event) => event.date === todayIso))
+  const todaySchedule = sortScheduleEvents(schedule.filter((event) => event.date === todayIso && isEventActionable(event)))
   const currentIndex = todaySchedule.findIndex((event) => event.id === eventId)
   const laterEvents = todaySchedule.slice(Math.max(0, currentIndex + 1))
 
@@ -371,6 +388,25 @@ function getPreviousCheckout(checkouts, schedule, currentEvent) {
       const secondTime = getEventDateTime(second.event)?.getTime() ?? 0
       return secondTime - firstTime
     })[0]?.checkout ?? null
+}
+
+function getRecommendationScheduleContext(schedule, event) {
+  const eventDate = event?.date ?? getTodayIso()
+  const nearbyEvents = sortScheduleEvents(schedule.filter((item) => Math.abs(
+    new Date(`${item.date}T00:00:00`) - new Date(`${eventDate}T00:00:00`),
+  ) <= 2 * 24 * 60 * 60 * 1000))
+
+  return {
+    nearbyEvents: nearbyEvents.map((item) => ({
+      allDay: Boolean(item.allDay),
+      date: item.date,
+      durationMinutes: item.plannedMinutes ?? item.expectedDuration,
+      load: item.load,
+      name: getEventDisplayName(item),
+      type: item.type,
+    })),
+    plannedRestDays: nearbyEvents.filter(isRestDayEvent).map((item) => item.date),
+  }
 }
 
 function getEventDateTime(event) {
@@ -497,6 +533,8 @@ function sortScheduleEvents(events) {
 }
 
 function isInsideCheckInWindow(event) {
+  if (!isEventActionable(event)) return false
+  if (event.allDay) return event.date === getTodayIso()
   if (!event?.date || !event?.time) return false
   const minutes = getScheduleTimeValue(event.time)
   if (minutes >= 24 * 60) return false
@@ -600,7 +638,7 @@ function App() {
   )
   const currentTodayCheckInEvent = useMemo(
     () => {
-      const nextRequiredEvent = todayEvents.find((event) => !completedCheckoutEventIds.has(event.id))
+      const nextRequiredEvent = todayEvents.find((event) => isEventActionable(event) && !completedCheckoutEventIds.has(event.id))
       return nextRequiredEvent && isInsideCheckInWindow(nextRequiredEvent) ? nextRequiredEvent : null
     },
     [completedCheckoutEventIds, todayEvents],
@@ -643,6 +681,15 @@ function App() {
     targets: getNutritionTargets(athleteProfile, schedule, todayIso),
     totals: getNutritionTotals(dailyWellness?.nutritionEntries ?? []),
   }), [athleteProfile, dailyWellness?.nutritionEntries, schedule, todayIso])
+  const eventPreparationContext = useMemo(() => getCheckInPreparationContext({
+    checkInTime: new Date(),
+    checkouts,
+    dailyWellness,
+    event: selectedCheckInEvent,
+    nutritionContext,
+    nutritionHistory,
+    schedule,
+  }), [checkouts, dailyWellness, nutritionContext, nutritionHistory, schedule, selectedCheckInEvent])
   const hasEarlierEventToday = Boolean(selectedCheckInEvent && todayEvents.some((event) =>
     event.id !== selectedCheckInEvent.id
       && getScheduleTimeValue(event.time) < getScheduleTimeValue(selectedCheckInEvent.time),
@@ -732,8 +779,9 @@ function App() {
 
       schedule.forEach((event) => {
         if (event.date !== today) return
+        if (!isEventActionable(event)) return
 
-        const eventTime = new Date(`${event.date}T${event.time || '23:59'}`).getTime()
+        const eventTime = new Date(`${event.date}T${event.time || (event.allDay ? '18:00' : '23:59')}`).getTime()
         const checkIn = history.find((entry) => entry.eventId === event.id)
         const checkout = checkouts.find((entry) => entry.eventId === event.id)
         const key = eventTime > nowTime ? `checkin-${event.id}` : `checkout-${event.id}`
@@ -1131,11 +1179,20 @@ function App() {
           athleteProfile,
           baseline: getPersonalBaseline(history, selectedCheckInEvent),
           checkIn: withoutNotes(savedCheckIn),
-          dailyWellness,
-          nutritionContext,
+          eventPreparationContext: getCheckInPreparationContext({
+            checkInTime: new Date(),
+            checkouts,
+            dailyWellness,
+            event: selectedCheckInEvent,
+            nutritionContext,
+            nutritionHistory,
+            schedule,
+          }),
           event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
+          sportContext: getSportContext({ athleteProfile, event: selectedCheckInEvent }),
           previousCheckout: withoutNotes(previousCheckout),
           requestType: 'check_in',
+          scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
         })
       } catch (error) {
         console.error('Check-in AI recommendation failed', error)
@@ -1253,8 +1310,8 @@ function App() {
   async function addScheduleItem(event) {
     const eventToSave = {
       ...event,
-      load: getDefaultLoadForEvent(event.type),
-      title: event.type,
+      load: event.type === 'Other activity' ? event.load ?? 'Medium' : getDefaultLoadForEvent(event.type),
+      title: getEventDisplayName(event),
     }
 
     if (isSupabaseSession) {
@@ -1643,6 +1700,8 @@ function App() {
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
           requestType: 'post_checkout',
+          scheduleContext: getRecommendationScheduleContext(schedule, event),
+          sportContext: getSportContext({ athleteProfile, event, workload: checkout.sportWorkload }),
         })
         finalRecommendationStatus = 'ai'
       } catch (error) {
@@ -1787,6 +1846,8 @@ function App() {
         nutritionContext,
         preCheckIn: withoutNotes(preCheckIn),
         requestType: 'recovery_plan',
+        scheduleContext: getRecommendationScheduleContext(schedule, completedEvent),
+        sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout.sportWorkload }),
         timeAvailable,
       })
 
@@ -2059,6 +2120,7 @@ function App() {
   }
 
   function openPreCheckIn(event) {
+    if (!isEventActionable(event)) return
     if (event?.id !== currentTodayCheckInEvent?.id) return
 
     setSelectedCheckInEventId(event?.id ?? null)
@@ -2069,6 +2131,11 @@ function App() {
       hydrationOz: dailyWellness.hydrationOz,
     })
     setActiveView('Check-in')
+  }
+
+  function openCheckout(event) {
+    if (!isEventActionable(event)) return
+    setCheckoutEvent(event)
   }
 
   function selectCheckInEvent(eventId) {
@@ -2668,6 +2735,7 @@ function App() {
                 checkouts={checkouts}
                 dailyWellness={dailyWellness}
                 eventOptions={checkInEventOptions}
+                eventPreparationContext={eventPreparationContext}
                 isSavedToday={isCheckInSavedToday}
                 isSaving={isSavingCheckIn}
                 nextEvent={nextEvent}
@@ -2679,12 +2747,13 @@ function App() {
                 onSave={saveCheckIn}
                 onQuickSave={saveCheckIn}
                 onEditToday={editTodayCheckIn}
-                onOpenCheckout={setCheckoutEvent}
+                onOpenCheckout={openCheckout}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
                 hasEarlierEventToday={hasEarlierEventToday}
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
                 isQuickMode={false}
+                restDayPlanned={todayEvents.some(isRestDayEvent)}
               />
             )}
 
@@ -2700,7 +2769,7 @@ function App() {
                 recommendationStatus="local"
                 schedule={schedule}
                 onGoCheckIn={openPreCheckIn}
-                onOpenCheckout={setCheckoutEvent}
+                onOpenCheckout={openCheckout}
                 onSavePainIssue={savePainIssue}
                 onSharePainIssue={recordPainIssueShare}
               />
@@ -2747,7 +2816,7 @@ function App() {
                 onRenameAssociation={renameAssociation}
                 onRemoveAssociation={removeAssociation}
                 onOpenCheckIn={openPreCheckIn}
-                onOpenCheckout={setCheckoutEvent}
+                onOpenCheckout={openCheckout}
                 onRemove={removeScheduleItem}
                 onRemoveTournament={removeTournament}
                 onUpdate={updateScheduleItem}
@@ -2810,6 +2879,7 @@ function App() {
 
       {checkoutEvent && (
         <CheckoutModal
+          athleteProfile={athleteProfile}
           checkout={checkouts.find((checkout) =>
             checkout.id === checkoutEvent.checkoutId || checkout.eventId === checkoutEvent.id
           )}

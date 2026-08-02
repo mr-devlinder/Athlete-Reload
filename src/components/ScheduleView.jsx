@@ -18,18 +18,9 @@ import {
 } from 'date-fns'
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
-import { getCheckoutForEvent } from '../utils/events'
+import { getCheckoutForEvent, getEventDisplayName, isAllDayEvent, isOtherActivityEvent, isRestDayEvent } from '../utils/events'
 import { searchUsCities } from '../lib/weather'
-
-const eventTypes = [
-  'Rest day',
-  'Recovery',
-  'Optional training',
-  'Team practice',
-  'Game',
-  'Gym session',
-  'Conditioning',
-]
+import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, getSportSurfaces, getSportWorkloadFields } from '../data/sportProfiles'
 
 const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -37,6 +28,7 @@ const today = new Date()
 const todayIso = toIsoDate(today)
 
 const emptyEvent = {
+  allDay: false,
   association: 'Personal',
   availability: 'Required',
   date: todayIso,
@@ -51,6 +43,7 @@ const emptyEvent = {
   title: 'Team practice',
   venue: '',
   type: 'Team practice',
+  customActivityName: '',
   repeat: 'Does not repeat',
   repeatCount: 4,
 }
@@ -100,11 +93,18 @@ export function ScheduleView({
   }
 
   function openCreateModal(date = selectedDate) {
+    const eventTypes = getSportEventTypes(athleteProfile?.sport)
+    const type = eventTypes.find((item) => !['Recovery', 'Recovery Day', 'Rest Day'].includes(item)) ?? eventTypes[0]
+    const surface = getSportSurfaces(athleteProfile?.sport)[0] ?? emptyEvent.surface
     setDraftEvent({
       ...emptyEvent,
       association: onboardingAssociation,
       date,
       id: `event-${Date.now()}`,
+      environment: getEnvironmentForSurface(surface),
+      surface,
+      title: type,
+      type,
     })
     setModalMode('create')
   }
@@ -142,22 +142,47 @@ export function ScheduleView({
   }
 
   function updateDraft(field, value) {
-    setDraftEvent((current) => ({
-      ...current,
-      environment: field === 'surface' ? getEnvironmentForSurface(value) : current.environment,
-      load: field === 'type' ? getDefaultLoadForEvent(value) : current.load,
-      title: field === 'type' ? value : current.title,
-      [field]: value,
-    }))
+    setDraftEvent((current) => {
+      if (field === 'type') {
+        const isAllDay = isAllDayEvent({ type: value })
+        const isOtherActivity = value === 'Other activity'
+        return {
+          ...current,
+          allDay: isAllDay,
+          association: isOtherActivity ? 'None' : current.association === 'None' ? 'Personal' : current.association,
+          availability: isAllDay ? 'Recovery' : current.availability,
+          customActivityName: isOtherActivity ? current.customActivityName ?? '' : '',
+          expectedDuration: isAllDay ? null : current.expectedDuration ?? 60,
+          load: getDefaultLoadForEvent(value),
+          time: isAllDay ? '' : current.time,
+          title: value,
+          type: value,
+        }
+      }
+
+      return {
+        ...current,
+        environment: field === 'surface' ? getEnvironmentForSurface(value) : current.environment,
+        [field]: value,
+      }
+    })
   }
 
   async function saveDraft() {
+    const isAllDay = isAllDayEvent(draftEvent)
+    const isOtherActivity = isOtherActivityEvent(draftEvent)
+    const displayName = isOtherActivity ? draftEvent.customActivityName.trim() : draftEvent.type
     const event = {
       ...draftEvent,
+      allDay: isAllDay,
+      association: isOtherActivity ? 'None' : draftEvent.association,
+      customActivityName: isOtherActivity ? draftEvent.customActivityName.trim() : '',
       environment: getEnvironmentForSurface(draftEvent.surface),
-      load: getDefaultLoadForEvent(draftEvent.type),
-      plannedMinutes: Number(draftEvent.expectedDuration ?? 60),
-      title: draftEvent.type,
+      expectedDuration: isAllDay ? null : Number(draftEvent.expectedDuration ?? 60),
+      load: isOtherActivity ? draftEvent.load : getDefaultLoadForEvent(draftEvent.type),
+      plannedMinutes: isAllDay ? undefined : Number(draftEvent.expectedDuration ?? 60),
+      time: isAllDay ? '' : draftEvent.time,
+      title: displayName,
     }
 
     if (modalMode === 'edit') {
@@ -304,8 +329,8 @@ export function ScheduleView({
                       </button>
                     ))}
                     {events.slice(0, Math.max(0, 2 - dayTournaments.length)).map((event) => (
-                      <small className={event.load.toLowerCase()} key={event.id}>
-                        {event.type}
+                      <small className={`${event.load.toLowerCase()}${isAllDayEvent(event) ? ' rest-day' : ''}`} key={event.id}>
+                        {getEventDisplayName(event)}{event.allDay ? ' · All day' : ''}
                       </small>
                     ))}
                     {events.length + dayTournaments.length > 2 && <small>+{events.length + dayTournaments.length - 2} more</small>}
@@ -346,14 +371,14 @@ export function ScheduleView({
                 const checkIn = getCheckInForEvent(checkIns, event.id)
 
                 return (
-                  <article className="event-card" key={event.id}>
+                  <article className={`event-card${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id}>
                     <span className={`load ${event.load.toLowerCase()}`}>
                       {event.association || 'Personal'}
                     </span>
-                    <h4>{event.type}</h4>
+                    <h4>{getEventDisplayName(event)}</h4>
                   <p>
                     {event.association || 'Personal'}
-                    {event.time ? ` at ${formatTimeLabel(event.time)}` : ''}
+                    {event.allDay ? ' · All day' : event.time ? ` at ${formatTimeLabel(event.time)}` : ''}
                   </p>
                     {checkout && (
                       <p>
@@ -416,9 +441,9 @@ export function ScheduleView({
                   </button>
                   <div className="week-day-events">
                     {events.length === 0 ? <small>No event</small> : events.map((event) => (
-                      <button className={`week-event ${event.load?.toLowerCase() ?? 'medium'}`} key={event.id} onClick={() => openEditModal(event)} type="button">
-                        <strong>{event.time ? formatTimeLabel(event.time) : 'Time TBA'}</strong>
-                        <span>{event.type}</span>
+                      <button className={`week-event ${event.load?.toLowerCase() ?? 'medium'}${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id} onClick={() => openEditModal(event)} type="button">
+                        <strong>{event.allDay ? 'All day' : event.time ? formatTimeLabel(event.time) : 'Time TBA'}</strong>
+                        <span>{getEventDisplayName(event)}</span>
                         <em>{event.association || 'Personal'}</em>
                       </button>
                     ))}
@@ -436,8 +461,8 @@ export function ScheduleView({
             .sort((first, second) => `${first.date} ${first.time}`.localeCompare(`${second.date} ${second.time}`))
             .map((event) => (
               <article className="schedule-list-row" key={event.id}>
-                <div><strong>{formatDisplayDate(event.date)}</strong><span>{event.time ? formatTimeLabel(event.time) : 'Time not set'}</span></div>
-                <div><strong>{event.type}</strong><span>{event.association || 'Personal'}{event.opponent ? ` · vs ${event.opponent}` : ''}</span></div>
+                <div><strong>{formatDisplayDate(event.date)}</strong><span>{event.allDay ? 'All day' : event.time ? formatTimeLabel(event.time) : 'Time not set'}</span></div>
+                <div><strong>{getEventDisplayName(event)}</strong><span>{event.association || 'Personal'}{event.opponent ? ` · vs ${event.opponent}` : ''}</span></div>
                 <em>{event.availability ?? 'Required'}</em>
                 <button className="secondary-button compact-action" onClick={() => openEditModal(event)} type="button">Edit</button>
               </article>
@@ -447,6 +472,7 @@ export function ScheduleView({
 
       {modalMode && createPortal(
         <EventModal
+          athleteProfile={athleteProfile}
           associations={associations}
           draftEvent={draftEvent}
           mode={modalMode}
@@ -496,7 +522,9 @@ export function ScheduleView({
 }
 
 function TournamentModal({ associations, athleteProfile, existingGames = [], mode = 'create', tournament, onClose, onDelete, onSave }) {
-  const defaultGameMinutes = athleteProfile?.sport === 'Soccer' ? 90 : 60
+  const competitionLabel = getCompetitionLabel(athleteProfile?.sport)
+  const defaultGameMinutes = getDefaultCompetitionMinutes(athleteProfile?.sport)
+  const defaultSurface = getSportSurfaces(athleteProfile?.sport)[0] ?? 'Other'
   const [draft, setDraft] = useState({
     association: tournament?.association ?? 'Personal',
     endDate: tournament?.endDate ?? todayIso,
@@ -564,17 +592,17 @@ function TournamentModal({ associations, athleteProfile, existingGames = [], mod
       association: draft.association,
       availability: 'Required max effort',
       date: game.date,
-      environment: 'Outdoor',
+      environment: getEnvironmentForSurface(defaultSurface),
       expectedDuration: Number(game.expectedDuration),
       load: 'High',
       location: draft.location,
       note: draft.notes,
       opponent: game.opponent,
       plannedMinutes: Number(game.expectedDuration),
-      surface: 'Grass',
+      surface: defaultSurface,
       time: game.time,
-      title: 'Game',
-      type: 'Game',
+      title: competitionLabel,
+      type: competitionLabel,
       venue: game.venue,
     })))
     setIsSaving(false)
@@ -600,11 +628,11 @@ function TournamentModal({ associations, athleteProfile, existingGames = [], mod
             {citySearchError && cityQuery.trim().length >= 2 && <small className="city-validation">{citySearchError}</small>}
           </div>
         </div>
-        <div className="tournament-games-header"><div><p className="eyebrow">Games</p><p>Add each match so the app can track time between games, workload, and pain changes.</p></div><button className="secondary-button compact-action" onClick={addGame} type="button">Add game</button></div>
+        <div className="tournament-games-header"><div><p className="eyebrow">Competition events</p><p>Add each {competitionLabel.toLowerCase()} so the app can track turnaround time, workload, and pain changes.</p></div><button className="secondary-button compact-action" onClick={addGame} type="button">Add {competitionLabel.toLowerCase()}</button></div>
         <div className="tournament-games-list">
           {games.map((game, index) => (
             <div className="tournament-game-fields" key={`${game.date}-${index}`}>
-              <strong>Game {index + 1}</strong>
+              <strong>{competitionLabel} {index + 1}</strong>
               <label>Date<input max={draft.endDate} min={draft.startDate} type="date" value={game.date} onChange={(event) => updateGame(index, 'date', event.target.value)} /></label>
               <label>Time<input type="time" value={game.time} onChange={(event) => updateGame(index, 'time', event.target.value)} /></label>
               <label>Opponent<input value={game.opponent} onChange={(event) => updateGame(index, 'opponent', event.target.value)} placeholder="Optional" /></label>
@@ -629,6 +657,12 @@ function buildCalendarExport(schedule) {
 
   for (const event of schedule) {
     const date = String(event.date ?? '').replaceAll('-', '')
+    if (event.allDay) {
+      const end = format(addDays(parseISO(event.date), 1), 'yyyyMMdd')
+      const description = [event.association, event.availability, event.note].filter(Boolean).join(' | ').replaceAll('\n', ' ')
+      lines.push('BEGIN:VEVENT', `UID:${event.id}@athlete-reload`, `DTSTART;VALUE=DATE:${date}`, `DTEND;VALUE=DATE:${end}`, `SUMMARY:${escapeIcs(getEventDisplayName(event))}`, `DESCRIPTION:${escapeIcs(description)}`, event.location ? `LOCATION:${escapeIcs(event.location)}` : '', 'END:VEVENT')
+      continue
+    }
     const time = getTimeParts(event.time)
     const hour = Number(time.hour) % 12 + (time.period === 'PM' ? 12 : 0)
     const start = `${date}T${String(hour).padStart(2, '0')}${time.minute}00`
@@ -638,7 +672,7 @@ function buildCalendarExport(schedule) {
     const end = format(endDate, "yyyyMMdd'T'HHmmss")
     const description = [event.association, event.availability, event.note].filter(Boolean).join(' | ').replaceAll('\n', ' ')
 
-    lines.push('BEGIN:VEVENT', `UID:${event.id}@athlete-reload`, `DTSTART:${start}`, `DTEND:${end}`, `SUMMARY:${escapeIcs(event.type)}`, `DESCRIPTION:${escapeIcs(description)}`, event.location ? `LOCATION:${escapeIcs(event.location)}` : '', 'END:VEVENT')
+    lines.push('BEGIN:VEVENT', `UID:${event.id}@athlete-reload`, `DTSTART:${start}`, `DTEND:${end}`, `SUMMARY:${escapeIcs(getEventDisplayName(event))}`, `DESCRIPTION:${escapeIcs(description)}`, event.location ? `LOCATION:${escapeIcs(event.location)}` : '', 'END:VEVENT')
   }
 
   lines.push('END:VCALENDAR')
@@ -663,7 +697,7 @@ function isTournamentSummaryVisible(tournament) {
   return today >= visibleFrom && today <= visibleUntil
 }
 
-function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode, onClose, onSave, onUpdate }) {
+function EventModal({ associations, athleteProfile, draftEvent, isOnboardingEventCreation, mode, onClose, onSave, onUpdate }) {
   const [cityQuery, setCityQuery] = useState(draftEvent.location ?? '')
   const [cityResults, setCityResults] = useState([])
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
@@ -706,6 +740,19 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
   }, [cityQuery, draftEvent.location])
 
   const cityIsValid = !cityQuery.trim() || cityQuery === draftEvent.location
+  const eventTypes = getSportEventTypes(athleteProfile?.sport)
+  const surfaces = getSportSurfaces(athleteProfile?.sport)
+  const workloadFields = getSportWorkloadFields(athleteProfile?.sport, {
+    phase: 'event',
+    position: athleteProfile?.position,
+    eventType: draftEvent.type,
+  })
+  const competitionLabel = getCompetitionLabel(athleteProfile?.sport)
+  const isAllDay = isAllDayEvent(draftEvent)
+  const isRestDay = isRestDayEvent(draftEvent)
+  const isOtherActivity = isOtherActivityEvent(draftEvent)
+  const activitySurfaces = ['Trail', 'Road', 'Grass', 'Court', 'Water', 'Indoor', 'Outdoor', 'Other']
+  const visibleSurfaces = isOtherActivity ? activitySurfaces : surfaces
 
   function updateCity(value) {
     setCityQuery(value)
@@ -756,32 +803,32 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
               onChange={(event) => onUpdate('date', event.target.value)}
             />
           </label>
-          <TimePicker
-            value={draftEvent.time}
-            onChange={(value) => onUpdate('time', value)}
-          />
           <Select
             label="Event type"
             value={draftEvent.type}
-            options={eventTypes}
+            options={eventTypes.includes(draftEvent.type) ? eventTypes : [draftEvent.type, ...eventTypes]}
             onChange={(value) => onUpdate('type', value)}
           />
-          <label className="compact-field">
-            Expected duration (minutes)
-            <input
-              min="15"
-              step="15"
-              type="number"
-              value={draftEvent.expectedDuration ?? 60}
-              onChange={(event) => onUpdate('expectedDuration', event.target.value)}
-            />
-          </label>
+          {isOtherActivity && (
+            <label className="compact-field">
+              Activity name
+              <input required value={draftEvent.customActivityName ?? ''} onChange={(event) => onUpdate('customActivityName', event.target.value)} placeholder="Hike, bike ride, pickup game..." />
+            </label>
+          )}
+          {!isAllDay && <TimePicker value={draftEvent.time} onChange={(value) => onUpdate('time', value)} />}
+          {!isAllDay && (
+            <label className="compact-field">
+              Expected duration (minutes)
+              <input min="15" step="15" type="number" value={draftEvent.expectedDuration ?? 60} onChange={(event) => onUpdate('expectedDuration', event.target.value)} />
+            </label>
+          )}
           <label className="compact-field">
             Association
             <select
               value={draftEvent.association ?? 'Personal'}
               onChange={(event) => onUpdate('association', event.target.value)}
             >
+              {isOtherActivity && <option value="None">None</option>}
               <option value="Personal">Personal</option>
               {associations.map((association) => (
                 <option key={association.id} value={association.name}>
@@ -790,13 +837,9 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
               ))}
             </select>
           </label>
-          <Select
-            label="Event importance"
-            value={draftEvent.availability ?? 'Required'}
-            options={['Required max effort', 'Required', 'Optional', 'Recovery']}
-            onChange={(value) => onUpdate('availability', value)}
-          />
-          {draftEvent.type === 'Game' && (
+          {!isAllDay && <Select label="Event importance" value={draftEvent.availability ?? 'Required'} options={['Required max effort', 'Required', 'Optional', 'Recovery']} onChange={(value) => onUpdate('availability', value)} />}
+          {isOtherActivity && <Select label="Planned load" value={draftEvent.load ?? 'Medium'} options={['Low', 'Medium', 'High']} onChange={(value) => onUpdate('load', value)} />}
+          {draftEvent.type === competitionLabel && (
             <>
               <label className="compact-field">
                 Opponent
@@ -813,13 +856,21 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
               </label>
             </>
           )}
-          <Select
-            label="Surface"
-            value={draftEvent.surface ?? 'Grass'}
-            options={['Grass', 'Turf', 'Court', 'Track', 'Gym', 'Other']}
+          {!isAllDay && <Select
+            label={isOtherActivity ? 'Surface or environment' : 'Surface'}
+            value={draftEvent.surface ?? visibleSurfaces[0]}
+            options={visibleSurfaces.includes(draftEvent.surface) ? visibleSurfaces : [draftEvent.surface, ...visibleSurfaces].filter(Boolean)}
             onChange={(value) => onUpdate('surface', value)}
-          />
-          <div className="compact-field city-autocomplete">
+          />}
+          {!isAllDay && !isOtherActivity && workloadFields.map((field) => (
+            <SportWorkloadField
+              field={field}
+              key={field.key}
+              value={draftEvent.sportWorkload?.[field.key] ?? ''}
+              onChange={(value) => onUpdate('sportWorkload', { ...(draftEvent.sportWorkload ?? {}), [field.key]: value })}
+            />
+          ))}
+          {!isAllDay && <div className="compact-field city-autocomplete">
             <span>U.S. city</span>
             <input
               aria-autocomplete="list"
@@ -841,7 +892,7 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
             )}
             {!cityIsValid && <small className="city-validation">Choose a city from the suggestions.</small>}
             {citySearchError && cityQuery.trim().length >= 2 && <small className="city-validation">{citySearchError}</small>}
-          </div>
+          </div>}
           {mode === 'create' && (
             <>
               <Select
@@ -874,11 +925,28 @@ function EventModal({ associations, draftEvent, isOnboardingEventCreation, mode,
           </label>
         </div>
 
-        <button className="primary-button" disabled={!cityIsValid} onClick={onSave} type="button">
+        {isAllDay && <p className="field-description">{isRestDay ? 'Rest Day' : 'Recovery Day'} is all day and will not request an event check-in or checkout. It provides schedule context but does not confirm recovery status.</p>}
+        <button className="primary-button" disabled={(!isAllDay && (!cityIsValid || !draftEvent.time)) || (isOtherActivity && !draftEvent.customActivityName?.trim())} onClick={onSave} type="button">
           {mode === 'edit' ? 'Save changes' : 'Create event'}
         </button>
       </section>
     </div>
+  )
+}
+
+function SportWorkloadField({ field, onChange, value }) {
+  return (
+    <label className="compact-field">
+      {field.label}{field.unit ? ` (${field.unit})` : ''}
+      {field.type === 'select' ? (
+        <select value={value} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Not set</option>
+          {field.options.map((option) => <option key={option}>{option}</option>)}
+        </select>
+      ) : (
+        <input min="0" step={field.unit === 'miles' ? '0.1' : '1'} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+      )}
+    </label>
   )
 }
 
@@ -1071,13 +1139,13 @@ function getCheckInForEvent(checkIns, eventId) {
 
 function getDefaultLoadForEvent(type) {
   if (['Game', 'Tournament', 'Conditioning'].includes(type)) return 'High'
-  if (['Recovery', 'Rest day'].includes(type)) return 'Low'
+  if (['Recovery', 'Recovery Day', 'Rest Day', 'Rest day'].includes(type)) return 'Low'
 
   return 'Medium'
 }
 
 function getEnvironmentForSurface(surface) {
-  return ['Court', 'Gym'].includes(surface) ? 'Indoor' : 'Outdoor'
+  return /court|gym|indoor|simulator|platform|pool/i.test(surface) && !/outdoor|open water/i.test(surface) ? 'Indoor' : 'Outdoor'
 }
 
 function createRecurringEvents(event) {
@@ -1094,14 +1162,11 @@ function createRecurringEvents(event) {
         : date
 
     return {
+      ...event,
       date: toIsoDate(nextDate),
       id: index === 0 ? event.id : `event-${Date.now()}-${index}`,
-      association: event.association ?? 'Personal',
-      load: getDefaultLoadForEvent(event.type),
-      note: event.note,
-      time: event.time,
-      title: event.type,
-      type: event.type,
+      load: isOtherActivityEvent(event) ? event.load : getDefaultLoadForEvent(event.type),
+      title: getEventDisplayName(event),
     }
   })
 }

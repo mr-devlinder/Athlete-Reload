@@ -1,3 +1,5 @@
+import { createClient } from 'npm:@supabase/supabase-js@2.110.9'
+
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Origin': '*',
@@ -16,15 +18,42 @@ Deno.serve(async (request) => {
     if (search.length < 2) return json({ foods: [] })
 
     const foods = await Promise.all([
+      loadVerifiedFoods(search),
       searchUsda(search),
       searchOpenFoodFacts(search),
     ])
-
-    return json({ foods: rank([...foods[0], ...foods[1]], search).filter(isPlausibleFood).slice(0, 24) })
+    const candidates = rank([...foods[0], ...foods[1], ...foods[2]], search).filter(isPlausibleFood).slice(0, 30)
+    const ranked = await rerankWithGemini(search, candidates)
+    return json({ foods: ranked.slice(0, 24) })
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : 'Food search failed' }, 502)
   }
 })
+
+async function loadVerifiedFoods(query: string): Promise<Food[]> {
+  const client = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
+  const { data } = await client.from('verified_foods').select('food').limit(100)
+  return (data ?? []).map((row: any) => ({ ...row.food, foodSource: 'Athlete Reload verified', isVerified: 1 })).filter((food: Food) => nameMatches(food, query))
+}
+
+async function rerankWithGemini(query: string, candidates: Food[]): Promise<Food[]> {
+  if (candidates.length < 2) return candidates
+  const apiKey = Deno.env.get('GEMINI_API_KEY')
+  if (!apiKey) return candidates
+  const compact = candidates.map((food, index) => ({ id: index, name: food.name, brand: food.brand, servingSize: food.servingSize, source: food.foodSource, verified: Boolean(food.isVerified) }))
+  const prompt = `You rank food search candidates. Query: ${JSON.stringify(query)}\nReturn ONLY a JSON array of candidate id numbers, best match first. Use every id exactly once. Prefer exact food identity and normal edible forms. Prefer Athlete Reload verified and USDA generic foods when relevance is comparable. Do not favor keyword-stuffed, implausible, or unrelated branded products. Candidates: ${JSON.stringify(compact)}`
+  try {
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }) })
+    if (!response.ok) return candidates
+    const payload = await response.json()
+    const text = payload?.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('') ?? ''
+    const order = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ''))
+    if (!Array.isArray(order)) return candidates
+    const used = new Set<number>()
+    const ranked = order.map(Number).filter((id: number) => Number.isInteger(id) && id >= 0 && id < candidates.length && !used.has(id) && used.add(id)).map((id: number) => candidates[id])
+    return [...ranked, ...candidates.filter((_, id) => !used.has(id))]
+  } catch { return candidates }
+}
 
 async function searchUsda(query: string): Promise<Food[]> {
   const apiKey = Deno.env.get('USDA_FOODDATA_API_KEY')
@@ -96,7 +125,7 @@ function rank(foods: Food[], query: string) {
 
 function score(food: Food, query: string) {
   const name = String(food.name).toLowerCase()
-  const sourceBoost = food.foodSource === 'USDA FoodData Central' ? 45 : 0
+  const sourceBoost = food.foodSource === 'Athlete Reload verified' ? 80 : food.foodSource === 'USDA FoodData Central' ? 45 : 0
   if (name === query.toLowerCase()) return 100 + sourceBoost
   if (name.startsWith(`${query.toLowerCase()},`) || name.startsWith(`${query.toLowerCase()} `)) return 90 + sourceBoost
   if (name.includes(query.toLowerCase())) return 65 + sourceBoost
