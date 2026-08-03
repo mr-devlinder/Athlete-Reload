@@ -50,8 +50,31 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
   }
 
   useEffect(() => {
+    const scrollY = window.scrollY
+    const previousBodyStyles = {
+      left: document.body.style.left,
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      right: document.body.style.right,
+      top: document.body.style.top,
+      width: document.body.style.width,
+    }
+
     document.body.classList.add('modal-open')
-    return () => document.body.classList.remove('modal-open')
+    Object.assign(document.body.style, {
+      left: '0',
+      overflow: 'hidden',
+      position: 'fixed',
+      right: '0',
+      top: `-${scrollY}px`,
+      width: '100%',
+    })
+
+    return () => {
+      document.body.classList.remove('modal-open')
+      Object.assign(document.body.style, previousBodyStyles)
+      window.scrollTo(0, scrollY)
+    }
   }, [])
 
   async function save(event) {

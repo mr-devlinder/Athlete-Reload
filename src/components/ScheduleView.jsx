@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   addDays,
@@ -76,6 +76,10 @@ export function ScheduleView({
   const [isTournamentOpen, setIsTournamentOpen] = useState(false)
   const [tournamentModalMode, setTournamentModalMode] = useState('create')
   const [editingTournament, setEditingTournament] = useState(null)
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false)
+  const [actionsMenuPosition, setActionsMenuPosition] = useState({ left: 12, top: 12 })
+  const actionsMenuRef = useRef(null)
+  const actionsMenuButtonRef = useRef(null)
 
   const days = useMemo(() => getCalendarDays(visibleMonth), [visibleMonth])
   const visibleWeek = useMemo(() => eachDayOfInterval({
@@ -86,6 +90,54 @@ export function ScheduleView({
   const selectedTournaments = tournaments.filter((tournament) => isTournamentDate(tournament, selectedDate))
   const activeTournamentSummaries = tournaments.filter(isTournamentSummaryVisible)
   const monthLabel = format(visibleMonth, 'MMMM yyyy')
+
+  useEffect(() => {
+    if (!isActionsMenuOpen) return undefined
+
+    function updatePosition() {
+      const rect = actionsMenuButtonRef.current?.getBoundingClientRect()
+      if (!rect) return
+
+      const menuWidth = 220
+      const menuHeight = 148
+      setActionsMenuPosition({
+        left: Math.max(12, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 12)),
+        top: rect.bottom + 8 + menuHeight > window.innerHeight
+          ? Math.max(12, rect.top - menuHeight - 8)
+          : rect.bottom + 8,
+      })
+    }
+
+    function closeOnOutsidePress(event) {
+      if (!actionsMenuButtonRef.current?.contains(event.target) && !actionsMenuRef.current?.contains(event.target)) {
+        setIsActionsMenuOpen(false)
+      }
+    }
+
+    function closeOnEscape(event) {
+      if (event.key !== 'Escape') return
+      setIsActionsMenuOpen(false)
+      actionsMenuButtonRef.current?.focus()
+    }
+
+    updatePosition()
+    document.addEventListener('pointerdown', closeOnOutsidePress)
+    document.addEventListener('keydown', closeOnEscape)
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePress)
+      document.removeEventListener('keydown', closeOnEscape)
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [isActionsMenuOpen])
+
+  function runScheduleAction(action) {
+    setIsActionsMenuOpen(false)
+    action()
+  }
 
   function showToday() {
     setVisibleMonth(startOfMonth(today))
@@ -208,23 +260,42 @@ export function ScheduleView({
         />
         <div className="schedule-actions">
           <button
-            className="secondary-button"
-            onClick={() => setIsAssociationsOpen(true)}
+            aria-expanded={isActionsMenuOpen}
+            aria-haspopup="menu"
+            aria-label="More schedule actions"
+            className="secondary-button schedule-more-button"
+            onClick={() => setIsActionsMenuOpen((current) => !current)}
+            ref={actionsMenuButtonRef}
             type="button"
           >
-            View associations
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <circle cx="5" cy="12" r="1.75" />
+              <circle cx="12" cy="12" r="1.75" />
+              <circle cx="19" cy="12" r="1.75" />
+            </svg>
           </button>
-          <button className="secondary-button" onClick={exportCalendar} type="button">Export calendar</button>
-          <button className="secondary-button" onClick={openCreateTournament} type="button">Add tournament</button>
           <button
             data-tour="add-event"
             className="secondary-button"
             onClick={() => openCreateModal()}
             type="button"
           >
-            Add event
+            Add Event
           </button>
         </div>
+        {isActionsMenuOpen && createPortal(
+          <div
+            className="schedule-action-menu"
+            ref={actionsMenuRef}
+            role="menu"
+            style={{ left: actionsMenuPosition.left, top: actionsMenuPosition.top }}
+          >
+            <button onClick={() => runScheduleAction(() => setIsAssociationsOpen(true))} role="menuitem" type="button">Add Associations</button>
+            <button onClick={() => runScheduleAction(openCreateTournament)} role="menuitem" type="button">Create Tournament</button>
+            <button onClick={() => runScheduleAction(exportCalendar)} role="menuitem" type="button">Export Calendar</button>
+          </div>,
+          document.body,
+        )}
       </div>
 
       {activeTournamentSummaries.length > 0 && (
