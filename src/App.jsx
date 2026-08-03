@@ -340,6 +340,22 @@ function withoutNotes(value) {
   return rest
 }
 
+function getPreviousCheckoutRecommendationContext(previousCheckout, currentCheckIn) {
+  if (!previousCheckout) return previousCheckout
+  const currentPainMap = normalizePainMapScale(currentCheckIn?.painMap ?? {}, currentCheckIn?.pain)
+  const hasCurrentPain = Object.values(currentPainMap).some((severity) => Number(severity) > 0)
+  if (hasCurrentPain) return withoutNotes(previousCheckout)
+
+  const {
+    newPain: _newPain,
+    painChange: _painChange,
+    painDetails: _painDetails,
+    painMap: _painMap,
+    ...resolvedContext
+  } = withoutNotes(previousCheckout)
+  return resolvedContext
+}
+
 function getSharedSleepContext(history, date) {
   const firstCheckIn = history
     .filter((entry) => (entry.checkInType ?? 'pre_event') === 'pre_event' && entry.date === date)
@@ -1195,7 +1211,7 @@ function App() {
           }),
           event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
           sportContext: getSportContext({ athleteProfile, event: selectedCheckInEvent }),
-          previousCheckout: withoutNotes(previousCheckout),
+          previousCheckout: getPreviousCheckoutRecommendationContext(previousCheckout, savedCheckIn),
           requestType: 'check_in',
           scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
         })
@@ -1837,6 +1853,15 @@ function App() {
     const completedEvent = schedule.find((event) => event.id === latestCheckout.eventId)
     const preCheckIn = history.find((entry) => entry.eventId === latestCheckout.eventId)
     const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : null
+    const currentPainMap = normalizePainMapScale(checkIn.painMap ?? {}, checkIn.pain)
+    const activePain = Object.fromEntries(Object.entries(currentPainMap).filter(([, severity]) => Number(severity) > 0))
+    const currentRecoveryContext = {
+      fatigue: Number(checkIn.fatigue ?? 0),
+      pain: Math.max(0, ...Object.values(activePain).map(Number)),
+      painMap: activePain,
+      restrictions: Object.keys(activePain),
+      soreness: Number(checkIn.soreness ?? 0),
+    }
 
     setRecoveryPlanStatus('loading')
     setIsReplayingSavedRoutine(false)
@@ -1846,6 +1871,7 @@ function App() {
         athleteProfile,
         checkout: withoutNotes(latestCheckout),
         completedEvent: attachTournamentContext(completedEvent, tournaments, schedule),
+        currentRecoveryContext,
         dailyWellness,
         equipment,
         generatedAt: new Date().toISOString(),

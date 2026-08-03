@@ -145,6 +145,8 @@ Return ONLY valid JSON. No markdown. No extra commentary.
 
 Use the athlete's current check-in, the selected scheduled event in event, the athlete profile, and previousCheckout to create a recommendation for this specific event. The event is the main unit, not the calendar day. previousCheckout is the only historical session context: use only that single immediately previous completed event when present, and do not infer or reference older sessions. This is not a medical diagnosis. Be practical: do not default to "no training" for very low pain unless the symptoms are red flags. If there are red flags like head injury symptoms, numbness, severe pain, worsening swelling, instability, or pain at rest, recommend adult/medical/athletic trainer help.
 
+Current pain rule: checkIn.painMap and checkIn.pain are the sole source of truth for active pain and restrictions. If they contain no value above 0, do not protect, limit, monitor, or alter activity for any historically painful body part. previousCheckout is historical workload context only and must never turn resolved pain into a current restriction.
+
 Calibration rules:
 - If energy is 5/5, soreness is 1/5, fatigue is 1/5, leg heaviness is 1/5, sleep is 9-10 hours, sleep quality is 4-5/5, stress is 1-2/5, hydration is adequate, and pain is 0 with no pain areas selected, readiness should be 92-100 and the label should be Full Training unless the schedule/history includes an obvious red flag.
 - Do not punish an athlete for having a normal practice or gym session scheduled when all readiness inputs are excellent.
@@ -277,10 +279,11 @@ You are Athlete Reload's recovery planning assistant for student athletes.
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
-Build an actionable recovery plan from the athlete's latest completed checkout, its pre-event check-in, the completed event, athlete profile, selected planType, targetedAreas, equipment choice, available time, current local time in generatedAt, recentPainReports, recoveryCompletions, and the next scheduled event. This is not medical advice or injury diagnosis.
+Build an actionable recovery plan from the athlete's latest completed checkout, its pre-event check-in, the completed event, athlete profile, selected planType, targetedAreas, equipment choice, available time, current local time in generatedAt, currentRecoveryContext, historical recentPainReports, recoveryCompletions, and the next scheduled event. This is not medical advice or injury diagnosis.
 
 Important behavior:
 - PRIMARY ROUTINE CONTRACT (${planType}): ${planTypeDirective}
+- currentRecoveryContext is the sole source of truth for current pain and restrictions. A missing body part or severity 0 is not active pain and must not cause protection language, altered exercises, painAware=true, or a restriction. recentPainReports are history only and must never override currentRecoveryContext.
 - The PRIMARY ROUTINE CONTRACT controls the routine goal, exercise selection and order, recovery steps, timeline, action, summary, and insights. Athlete context may personalize this contract or remove unsafe movements, but must not replace it with a generic recovery plan.
 - The recovery plan is for the completed event. Do not decide whether the athlete is cleared for the next event.
 - Honor planType as the plan's primary goal: last-checkout responds directly to the completed session; full-body balances major regions; flexibility emphasizes comfortable range over intensity; targeted prioritizes targetedAreas while still including adjacent joints; quick is a focused 5-10 minute plan; competition prioritizes turnaround and avoids unnecessary fatigue; recovery-day provides a practical day plan; mobility uses only comfortable mobility work.
@@ -344,7 +347,7 @@ function getRecoveryPlanTypeDirective(planType: string, targetedAreas: unknown) 
     competition: 'Create post-match or tournament recovery. Prioritize downshifting after competition, food and fluids, symptom monitoring, sleep, and the next competitive turnaround; use only gentle movement that does not add fatigue.',
     'recovery-day': 'Create a low-intensity off-day plan spread across the current day. Emphasize easy circulation, comfortable movement, nutrition, hydration, and sleep without treating the day like a post-match cooldown.',
     mobility: 'Create a controlled joint-mobility sequence focused on movement quality, active range, rotations, and smooth repetitions. Minimize passive stretching and do not turn it into a generic cooldown.',
-    flexibility: 'Create a flexibility-first routine, not a generic mobility or post-checkout routine. Use mostly recognizable sustained stretches and gentle flexibility movements for hamstrings, hip flexors, adductors, calves, glutes, then back and neck where safe. Order from a brief comfortable preparation into lower-body muscle-group stretches, then trunk/neck. The action, timeline, insights, titles, reasons, and at least two-thirds of exercises must explicitly support flexibility development. Use mobility only as short preparation, never as the main content.',
+    flexibility: 'Create a flexibility-first routine, never label it as mobility. Use mostly recognizable sustained stretches held 20-45 seconds for hamstrings, hip flexors, adductors, calves, glutes, chest, back, and neck where safe. Include progressive mild-to-moderate tension guidance. The title, summary, timing, and at least two-thirds of exercises must explicitly develop flexibility; mobility may appear only as brief preparation.',
   }
 
   return directives[planType] ?? directives['last-checkout']
@@ -493,14 +496,26 @@ function normalizeRoutine(value: any, payload?: any) {
     }))
     : []
 
+  const hasCurrentPain = Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
   return {
     durationMinutes: getRequestedRoutineMinutes(payload?.timeAvailable) ?? Math.max(5, Math.min(30, Math.round(Number(value?.durationMinutes) || 10))),
     exercises,
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
-    painAware: Boolean(value?.painAware),
+    painAware: hasCurrentPain && Boolean(value?.painAware),
     summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
-    title: stringOrFallback(value?.title, 'Cooldown and mobility'),
+    title: stringOrFallback(value?.title, getRoutineTitle(payload?.planType)),
   }
+}
+
+function getRoutineTitle(planType: unknown) {
+  const titles: Record<string, string> = {
+    flexibility: 'Full-body flexibility',
+    mobility: 'Full-body mobility',
+    quick: 'Quick recovery reset',
+    competition: 'Competition recovery',
+    'recovery-day': 'Recovery day routine',
+  }
+  return titles[String(planType ?? '')] ?? 'Post-session recovery'
 }
 
 function getRequestedRoutineMinutes(value: unknown) {

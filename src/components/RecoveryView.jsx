@@ -27,6 +27,18 @@ const fallbackRoutine = [
   { area: 'Calves', durationSeconds: 30, instruction: 'Keep the heel down and feel gentle tension through the calf.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
 ]
 
+const fallbackRoutines = {
+  flexibility: [
+    { area: 'Hamstrings', durationSeconds: 40, instruction: 'Hold steady at mild tension, then ease slightly farther only if comfortable.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Hip flexors', durationSeconds: 40, instruction: 'Keep ribs stacked and hold a sustained stretch without arching your back.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Adductors', durationSeconds: 40, instruction: 'Settle into mild inner-thigh tension and breathe normally throughout the hold.', name: 'Seated adductor stretch', side: 'Both sides', type: 'Flexibility' },
+    { area: 'Glutes', durationSeconds: 40, instruction: 'Hold a comfortable glute stretch without forcing the knee toward your chest.', name: 'Figure-four stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Calves', durationSeconds: 40, instruction: 'Keep the heel grounded and sustain mild calf tension.', name: 'Standing calf stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Chest', durationSeconds: 35, instruction: 'Hold a gentle chest opening with relaxed shoulders.', name: 'Doorway chest stretch', side: 'Each side', type: 'Flexibility' },
+  ],
+  mobility: fallbackRoutine.filter((exercise) => exercise.type === 'Mobility'),
+}
+
 export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', nextEvent, onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, onUpdateRecoveryStep, recentCompletion, savedRoutines = [], schedule = [] }) {
   const latestCheckout = useMemo(
     () => [...checkouts].sort((first, second) => getDateValue(second) - getDateValue(first))[0] ?? null,
@@ -60,10 +72,13 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const plan = generatedPlan
   const recoverySteps = plan?.recoverySteps?.length ? plan.recoverySteps : plan ? getFallbackSteps(plan) : []
   const timeline = plan?.timeline?.length ? plan.timeline : plan ? getFallbackTimeline(plan) : []
+  const combinedTimeline = combineRecoveryTimeline(recoverySteps, timeline)
+  const fallbackForGoal = getFallbackRoutine(plan?.planType)
   const routine = buildRoutine(
-    plan?.routine?.exercises?.length ? plan.routine.exercises : fallbackRoutine,
+    plan?.routine?.exercises?.length ? plan.routine.exercises : fallbackForGoal,
     getTimeAvailableMinutes(timeAvailable),
     excludedExercises,
+    fallbackForGoal,
   )
   const currentExercise = routine[routineIndex]
   const isPainAware = Boolean(plan?.routine?.painAware || plan?.painAware)
@@ -409,14 +424,14 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
           <section className="recovery-plan-panel recovery-do-now glass-panel">
             <div className="recovery-section-heading">
               <div>
-                <p className="eyebrow">Do now</p>
-                <h2>Complete tonight</h2>
+                <p className="eyebrow">Recovery timeline</p>
+                <h2>What to do next</h2>
               </div>
-              <span>{getRecoveryLabel(plan)}</span>
+              {nextEvent ? <span>Next: {nextEvent.title ?? nextEvent.type}</span> : <span>{getRecoveryLabel(plan)}</span>}
             </div>
             {plan.action && <p className="recovery-action-copy">{plan.action}</p>}
-            <div className="recovery-step-list">
-              {recoverySteps.map((step, index) => {
+            {combinedTimeline.map((phase) => <div key={phase.title}><strong>{phase.title}</strong><div className="recovery-step-list">
+              {phase.steps.map((step, index) => {
                 const stepId = step.id ?? `${index}-${step.title}`
                 const skipped = skippedSteps.has(stepId)
                 return (
@@ -435,25 +450,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                   </article>
                 )
               })}
-            </div>
-          </section>
-
-          <section className="recovery-timeline-panel recovery-plan-panel glass-panel">
-            <div className="recovery-section-heading">
-              <div>
-                <p className="eyebrow">Recovery timeline</p>
-                <h2>What happens next</h2>
-              </div>
-              {nextEvent && <span>Next: {nextEvent.title ?? nextEvent.type}</span>}
-            </div>
-            <div className="recovery-timeline">
-              {timeline.map((phase) => (
-                <article key={phase.title}>
-                  <span>{phase.title}</span>
-                  <ul>{(phase.items ?? []).map((item) => <li key={item}>{item}</li>)}</ul>
-                </article>
-              ))}
-            </div>
+            </div></div>)}
           </section>
 
           <section className="recovery-routine-panel recovery-plan-panel glass-panel">
@@ -573,6 +570,34 @@ function getFallbackTimeline(plan) {
   ]
 }
 
+function getFallbackRoutine(planType) {
+  return fallbackRoutines[planType] ?? fallbackRoutine
+}
+
+function combineRecoveryTimeline(steps, timeline) {
+  const used = new Set()
+  return timeline.map((phase, phaseIndex) => {
+    const phaseSteps = steps.filter((step) => getTimelineStage(step.when) === phaseIndex).map((step) => {
+      used.add(step.title.toLowerCase())
+      return step
+    })
+    const timelineSteps = (phase.items ?? []).filter((item) => !used.has(item.toLowerCase())).map((item, index) => ({
+      id: `timeline-${phaseIndex}-${index}`,
+      title: item,
+      when: phase.title,
+    }))
+    return { title: phase.title, steps: [...phaseSteps, ...timelineSteps] }
+  }).filter((phase) => phase.steps.length > 0)
+}
+
+function getTimelineStage(when = '') {
+  const value = String(when).toLowerCase()
+  if (/tomorrow|next event|next workout/.test(value)) return 3
+  if (/later|tonight|sleep|before bed/.test(value)) return 2
+  if (/hour|meal|snack/.test(value)) return 1
+  return 0
+}
+
 function getRecoveryLabel(plan) {
   return plan.label ?? 'Personalized recovery'
 }
@@ -599,7 +624,7 @@ function formatCompletionRecency(value) {
   return `${Math.round(hours / 24)}d ago`
 }
 
-function buildRoutine(routine, availableMinutes, excludedExercises = []) {
+function buildRoutine(routine, availableMinutes, excludedExercises = [], fallback = fallbackRoutine) {
   const excluded = new Set(excludedExercises)
   const individualSteps = routine.flatMap((exercise) => {
     const side = String(exercise.side ?? '').toLowerCase()
@@ -615,7 +640,7 @@ function buildRoutine(routine, availableMinutes, excludedExercises = []) {
     })).filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
   })
 
-  const alternatives = fallbackRoutine.filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)) && !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
+  const alternatives = fallback.filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)) && !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
   return constrainRoutine(individualSteps, availableMinutes, alternatives)
 }
 
