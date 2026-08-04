@@ -84,13 +84,13 @@ export function getEventFuelContext({
   }
 }
 
-export function getEventHydrationContext({ checkInTime = new Date(), event, hydrationOz, hydrationTargetOz } = {}) {
+export function getEventHydrationContext({ checkInTime = new Date(), event, hydrationMl, hydrationTargetMl } = {}) {
   if (isRecoveryOnlyEvent(event)) return notApplicable('Event hydration analysis is not needed for a Rest Day or Recovery Day.')
 
   const expectation = getTimeOfDayExpectation(checkInTime)
   const timing = getEventTiming(event, checkInTime)
-  const loggedOz = Number(hydrationOz)
-  const targetOz = Number(hydrationTargetOz)
+  const loggedOz = Number(hydrationMl)
+  const targetOz = Number(hydrationTargetMl)
 
   if (!(loggedOz > 0) || !(targetOz > 0)) {
     return {
@@ -161,8 +161,8 @@ export function getCheckInPreparationContext({
     hydration: getEventHydrationContext({
       checkInTime,
       event,
-      hydrationOz: dailyWellness.hydrationOz,
-      hydrationTargetOz: nutritionContext.hydrationTargetOz,
+      hydrationMl: dailyWellness.hydrationMl,
+      hydrationTargetMl: nutritionContext.hydrationTargetMl,
     }),
     earlierCompletedEvents: earlierCompletedEvents.map((item) => {
       const checkout = checkouts.find((entry) => entry.eventId === item.id)

@@ -18,16 +18,14 @@ export const mealOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Custom']
 
 export function getNutritionTargets(profile = {}, schedule = [], date = getLocalDate()) {
   profile = profile ?? {}
-  const weightLbs = Number(profile.weightLbs)
-  const heightInches = Number(profile.heightInches)
+  const weightKg = Number(profile.weightKg)
+  const heightCm = Number(profile.heightCm)
   const age = Number(profile.age)
 
-  if (!weightLbs || !heightInches || !age) {
+  if (!weightKg || !heightCm || !age) {
     return { calories: null, carbohydrates: null, fats: null, protein: null, isEstimate: true, reason: 'Add age, height, and weight in your profile to estimate daily targets.' }
   }
 
-  const weightKg = weightLbs * 0.453592
-  const heightCm = heightInches * 2.54
   const sexOffset = profile.genderIdentity === 'Male' ? 5 : profile.genderIdentity === 'Female' ? -161 : -78
   const baseline = (10 * weightKg) + (6.25 * heightCm) - (5 * age) + sexOffset
   const activity = activityMultipliers[profile.trainingStyle] ?? 1.6
@@ -68,8 +66,8 @@ export function getLocalDate() {
 
 export function getHydrationTarget(profile = {}, schedule = [], date = getLocalDate()) {
   profile = profile ?? {}
-  const weightLbs = Number(profile.weightLbs)
-  const baseline = weightLbs ? Math.round(weightLbs * 0.55) : 80
+  const weightKg = Number(profile.weightKg)
+  const baseline = weightKg ? Math.round(weightKg * 35) : 2366
   const eventMinutes = schedule.filter((event) => event.date === date).reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
-  return Math.max(64, Math.min(180, baseline + Math.round(eventMinutes * 0.25)))
+  return Math.max(1893, Math.min(5323, baseline + Math.round(eventMinutes * 7.4)))
 }

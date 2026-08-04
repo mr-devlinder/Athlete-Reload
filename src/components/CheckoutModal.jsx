@@ -7,6 +7,7 @@ import { estimatePlannedMinutes } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
 import { getSportWorkloadFields } from '../data/sportProfiles'
+import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
 
 const painChanges = ['Improved', 'Unchanged', 'Slightly worse', 'Much worse']
 const participationLevels = ['Full', 'Modified', 'Partial', 'Did not participate']
@@ -112,6 +113,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
               <SportWorkloadField
                 field={field}
                 key={field.key}
+                unitSystem={athleteProfile?.unitSystem}
                 value={draft.sportWorkload?.[field.key] ?? ''}
                 onChange={(value) => updateDraft('sportWorkload', { ...(draft.sportWorkload ?? {}), [field.key]: value })}
               />
@@ -252,17 +254,18 @@ function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
   }
 }
 
-function SportWorkloadField({ field, onChange, value }) {
+function SportWorkloadField({ field, onChange, unitSystem = 'imperial', value }) {
+  const display = getWorkloadFieldDisplay(field, value, unitSystem)
   return (
     <label className="compact-field">
-      {field.label}{field.unit ? ` (${field.unit})` : ''}
+      {field.label}{display.label ? ` (${display.label})` : ''}
       {field.type === 'select' ? (
         <select value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">Not recorded</option>
           {field.options.map((option) => <option key={option}>{option}</option>)}
         </select>
       ) : (
-        <input min="0" step={field.unit === 'miles' ? '0.1' : '1'} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+        <input min="0" step={display.step} type="number" value={display.value} onChange={(event) => onChange(workloadInputToCanonical(field, event.target.value, unitSystem))} />
       )}
     </label>
   )

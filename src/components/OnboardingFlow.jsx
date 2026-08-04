@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { SectionHeading } from './SectionHeading'
-import { getPositionOptions, sportOptions } from '../data/sportProfiles'
+import { getPositionOptions, isDominantSideRelevant, sportOptions } from '../data/sportProfiles'
 import { dietaryOptions, goalOptions } from '../data/profileOptions'
+import { ProfileMeasurements } from './ProfileMeasurements'
 
 export function OnboardingFlow({ associations = [], initialDisplayName = '', onComplete, onCreateAssociation }) {
   const [step, setStep] = useState('profile')
@@ -13,9 +14,10 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     position: '',
     trainingStyle: 'Team and individual',
     dominantSide: 'Right',
+    unitSystem: 'imperial',
     genderIdentity: '',
-    heightInches: '',
-    weightLbs: '',
+    heightCm: null,
+    weightKg: null,
     age: '',
     goals: [],
     dietaryPreferences: [],
@@ -126,13 +128,13 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
               placeholder="First name or nickname"
             />
           </label>
-          <label className="select-field">
+          {getPositionOptions(profile.sport).length > 0 && <label className="select-field">
             Sport
             <select value={profile.sport} onChange={(event) => updateProfile('sport', event.target.value)}>
               <option value="">I’ll add this later</option>
               {sportOptions.map((sport) => <option key={sport}>{sport}</option>)}
             </select>
-          </label>
+          </label>}
           <label className="select-field">
             Position or event specialty
             <select
@@ -153,14 +155,14 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
                 <option>Mostly individual</option>
               </select>
             </label>
-            <label className="select-field">
+            {isDominantSideRelevant(profile.sport) && <label className="select-field">
               Dominant side
               <select value={profile.dominantSide} onChange={(event) => updateProfile('dominantSide', event.target.value)}>
                 <option>Right</option>
                 <option>Left</option>
                 <option>Both / unsure</option>
               </select>
-            </label>
+            </label>}
           </div>
           <button className="primary-button" type="submit">Continue</button>
         </form>
@@ -175,15 +177,8 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
               Age
               <input inputMode="numeric" max="120" min="13" type="number" value={profile.age} onChange={(event) => updateProfile('age', event.target.value)} placeholder="Optional" />
             </label>
-            <label className="select-field">
-              Height (inches)
-              <input inputMode="decimal" min="0" type="number" value={profile.heightInches} onChange={(event) => updateProfile('heightInches', event.target.value)} placeholder="Optional" />
-            </label>
-            <label className="select-field">
-              Weight (lb)
-              <input inputMode="decimal" min="0" type="number" value={profile.weightLbs} onChange={(event) => updateProfile('weightLbs', event.target.value)} placeholder="Optional" />
-            </label>
           </div>
+          <ProfileMeasurements profile={profile} onChange={updateProfile} />
           <label className="select-field">
             Gender
             <select value={profile.genderIdentity} onChange={(event) => updateProfile('genderIdentity', event.target.value)}>

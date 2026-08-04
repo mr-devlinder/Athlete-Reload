@@ -1,13 +1,15 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
 import { SectionHeading } from './SectionHeading'
-import { getPositionOptions, sportOptions } from '../data/sportProfiles'
+import { getPositionOptions, isDominantSideRelevant, sportOptions } from '../data/sportProfiles'
 import { dietaryOptions, goalOptions } from '../data/profileOptions'
+import { ProfileMeasurements } from './ProfileMeasurements'
 
 export function AthleteProfileModal({ profile, onClose, onSave }) {
   const [draft, setDraft] = useState(profile ?? {})
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const positionOptions = getPositionOptions(draft.sport)
 
   function toggleListValue(field, value) {
     setDraft((current) => {
@@ -114,14 +116,14 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
               {sportOptions.map((sport) => <option key={sport}>{sport}</option>)}
             </select>
           </label>
-          <label className="select-field">
+          {positionOptions.length > 0 && <label className="select-field">
             Position or specialty
             <select value={draft.position ?? ''} onChange={(event) => setDraft((current) => ({ ...current, position: event.target.value }))}>
               <option value="">{draft.sport ? 'Select a position or specialty' : 'Choose a sport first'}</option>
-              {getPositionOptions(draft.sport).map((position) => <option key={position}>{position}</option>)}
+              {positionOptions.map((position) => <option key={position}>{position}</option>)}
               <option value="Other">Other / not listed</option>
             </select>
-          </label>
+          </label>}
           <label className="select-field">
             Training style
             <select value={draft.trainingStyle ?? 'Team and individual'} onChange={(event) => setDraft((current) => ({ ...current, trainingStyle: event.target.value }))}>
@@ -130,14 +132,14 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
               <option>Mostly individual</option>
             </select>
           </label>
-          <label className="select-field">
+          {isDominantSideRelevant(draft.sport) && <label className="select-field">
             Dominant side
             <select value={draft.dominantSide ?? 'Right'} onChange={(event) => setDraft((current) => ({ ...current, dominantSide: event.target.value }))}>
               <option>Right</option>
               <option>Left</option>
               <option>Both / unsure</option>
             </select>
-          </label>
+          </label>}
           <div className="onboarding-two-col">
             <label className="select-field">
               Gender (optional)
@@ -149,15 +151,8 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
                 <option>Self-described</option>
               </select>
             </label>
-            <label className="select-field">
-              Height in inches (optional)
-              <input inputMode="decimal" min="0" type="number" value={draft.heightInches ?? ''} onChange={(event) => setDraft((current) => ({ ...current, heightInches: event.target.value }))} />
-            </label>
           </div>
-          <label className="select-field">
-            Weight in pounds (optional)
-            <input inputMode="decimal" min="0" type="number" value={draft.weightLbs ?? ''} onChange={(event) => setDraft((current) => ({ ...current, weightLbs: event.target.value }))} />
-          </label>
+          <ProfileMeasurements profile={draft} onChange={(field, value) => setDraft((current) => ({ ...current, [field]: value }))} />
           <label className="select-field">
             Age (optional)
             <input inputMode="numeric" max="120" min="13" type="number" value={draft.age ?? ''} onChange={(event) => setDraft((current) => ({ ...current, age: event.target.value }))} />

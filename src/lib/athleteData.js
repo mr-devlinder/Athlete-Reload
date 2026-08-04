@@ -2,6 +2,7 @@ import { format, parseISO } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { estimatePlannedMinutes, isAllDayEvent, isOtherActivityEvent } from '../utils/events'
 import { normalizePainMapScale } from '../data/bodyPainMap'
+import { fluidOuncesToMilliliters, inchesToCentimeters, milesToMeters, poundsToKilograms, yardsToMeters } from '../utils/units'
 
 function normalizeFivePointValue(value, fallback = 1) {
   const number = Number(value)
@@ -50,6 +51,7 @@ function fromScheduleRow(row) {
     time,
     title: customActivityName || (isAllDay ? row.event_type : row.title ?? row.event_type),
     tournamentId: row.tournament_id ?? null,
+    sportWorkload: row.sport_workload ?? {},
     type: row.event_type ?? 'Training',
     venue: row.venue ?? '',
   }
@@ -74,6 +76,7 @@ function toScheduleRow(event) {
     surface: event.surface ?? 'Grass',
     title: isOtherActivity ? event.customActivityName?.trim() || event.title || event.type : isAllDay ? event.type : event.title || event.type,
     tournament_id: event.tournamentId ?? null,
+    sport_workload: event.sportWorkload ?? {},
     updated_at: new Date().toISOString(),
     venue: event.venue ?? '',
   }
@@ -136,7 +139,7 @@ function fromCheckInRow(row) {
     legHeaviness: normalizeFivePointValue(row.leg_heaviness, 0),
     hurtsWhen: row.hurts_when,
     hydration: row.hydration,
-    hydrationOz: row.hydration_oz ?? 0,
+    hydrationMl: Number(row.hydration_ml ?? fluidOuncesToMilliliters(row.hydration_oz) ?? 0),
     id: row.id,
     injuryType: row.injury_type,
     location: row.pain_location,
@@ -172,7 +175,7 @@ function toCheckInRow(checkIn, recommendation) {
     leg_heaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
     hurts_when: checkIn.hurtsWhen,
     hydration: checkIn.hydration,
-    hydration_oz: Number(checkIn.hydrationOz ?? 0),
+    hydration_ml: Number(checkIn.hydrationMl ?? fluidOuncesToMilliliters(checkIn.hydrationOz) ?? 0),
     injury_type: checkIn.injuryType,
     notes: checkIn.notes ?? '',
     pain: checkIn.pain,
@@ -228,7 +231,7 @@ function fromCheckoutRow(row) {
     title: row.session_title,
     sessionContent: row.session_content ?? [],
     sessionLoad: row.session_load ?? Number(row.actual_minutes ?? 0) * Number(row.difficulty ?? 0),
-    sportWorkload: row.recommendation_json?._sportWorkload ?? {},
+    sportWorkload: normalizeLegacySportWorkload(row.recommendation_json?._sportWorkload, row.recommendation_json?._workloadUnits),
   }
 }
 
@@ -265,7 +268,7 @@ function toCheckoutRow(event, checkout, options = {}) {
 
   if (options.includeRecommendation !== false) {
     row.recommendation_json = checkout.recommendation
-      ? { ...checkout.recommendation, _sportWorkload: checkout.sportWorkload ?? {} }
+      ? { ...checkout.recommendation, _sportWorkload: checkout.sportWorkload ?? {}, _workloadUnits: 'canonical-v1' }
       : null
   }
 
@@ -320,13 +323,14 @@ function fromAthleteProfileRow(row) {
     dietaryPreferences: row.dietary_preferences ?? [],
     genderIdentity: row.gender_identity ?? '',
     goals: row.goals ?? [],
-    heightInches: row.height_inches ?? null,
+    heightCm: Number(row.height_cm ?? inchesToCentimeters(row.height_inches)) || null,
     onboardingCompleted: Boolean(row.onboarding_completed),
     position: row.position ?? '',
     sport: row.sport ?? '',
     sportProfiles: row.sport_profiles ?? [],
     trainingStyle: row.training_style ?? 'Team and individual',
-    weightLbs: row.weight_lbs ?? null,
+    unitSystem: row.unit_system ?? 'imperial',
+    weightKg: Number(row.weight_kg ?? poundsToKilograms(row.weight_lbs)) || null,
   }
 }
 
@@ -338,21 +342,22 @@ function toAthleteProfileRow(profile) {
     dietary_preferences: profile.dietaryPreferences ?? [],
     gender_identity: profile.genderIdentity ?? '',
     goals: profile.goals ?? [],
-    height_inches: profile.heightInches ? Number(profile.heightInches) : null,
+    height_cm: profile.heightCm === '' ? null : Number(profile.heightCm) || null,
     onboarding_completed: Boolean(profile.onboardingCompleted),
     position: profile.position ?? '',
     sport: profile.sport ?? '',
     sport_profiles: profile.sportProfiles ?? [],
     training_style: profile.trainingStyle ?? 'Team and individual',
     updated_at: new Date().toISOString(),
-    weight_lbs: profile.weightLbs ? Number(profile.weightLbs) : null,
+    unit_system: profile.unitSystem ?? 'imperial',
+    weight_kg: profile.weightKg === '' ? null : Number(profile.weightKg) || null,
   }
 }
 
 function fromDailyWellnessRow(row) {
   return {
     date: row.wellness_date,
-    hydrationOz: Number(row.hydration_oz ?? 0),
+    hydrationMl: Number(row.hydration_ml ?? fluidOuncesToMilliliters(row.hydration_oz) ?? 0),
     id: row.id,
     mealTiming: row.meal_timing_json ?? {},
     nutritionEntries: row.nutrition_entries ?? [],
@@ -414,7 +419,7 @@ function toPainIssueRow(issue) {
 
 function toDailyWellnessRow(wellness) {
   return {
-    hydration_oz: Math.max(0, Number(wellness.hydrationOz ?? 0)),
+    hydration_ml: Math.max(0, Number(wellness.hydrationMl ?? fluidOuncesToMilliliters(wellness.hydrationOz) ?? 0)),
     meal_timing_json: wellness.mealTiming ?? {},
     nutrition_entries: wellness.nutritionEntries ?? [],
     nutrition_goal_override: wellness.nutritionGoalOverride ?? {},
@@ -486,8 +491,7 @@ export async function loadAthleteData() {
     supabase
       .from('recovery_routine_completions')
       .select('*')
-      .order('completed_at', { ascending: false })
-      .limit(12),
+      .order('completed_at', { ascending: false }),
     supabase
       .from('tournaments')
       .select('*')
@@ -712,6 +716,11 @@ export async function upsertAthleteProfile(profile) {
     delete legacyProfile.dietary_preferences
     delete legacyProfile.goals
     delete legacyProfile.tracking_preferences
+    delete legacyProfile.height_cm
+    delete legacyProfile.weight_kg
+    delete legacyProfile.unit_system
+    legacyProfile.height_inches = profile.heightCm ? Number(profile.heightCm) / 2.54 : null
+    legacyProfile.weight_lbs = profile.weightKg ? Number(profile.weightKg) / 0.45359237 : null
     const fallback = await supabase
       .from('athlete_profiles')
       .upsert(legacyProfile, { onConflict: 'user_id' })
@@ -805,6 +814,19 @@ export async function createCheckIn(checkIn, recommendation) {
   const { data, error } = await supabase
     .from('check_ins')
     .insert(toCheckInRow(checkIn, recommendation))
+    .select('*')
+    .single()
+
+  if (error) throw error
+
+  return fromCheckInRow(data)
+}
+
+export async function updateCheckIn(id, checkIn, recommendation) {
+  const { data, error } = await supabase
+    .from('check_ins')
+    .update(toCheckInRow(checkIn, recommendation))
+    .eq('id', id)
     .select('*')
     .single()
 
@@ -967,6 +989,16 @@ function isMissingRecommendationColumn(error) {
     .includes('recommendation_json')
 }
 
+function normalizeLegacySportWorkload(workload = {}, units) {
+  if (units === 'canonical-v1') return workload
+  return Object.fromEntries(Object.entries(workload ?? {}).map(([key, value]) => [
+    key,
+    /yardage/i.test(key) && value !== ''
+      ? yardsToMeters(value)
+      : /distance/i.test(key) && value !== '' ? milesToMeters(value) : value,
+  ]))
+}
+
 export async function createPainReports(reports) {
   if (reports.length === 0) return []
 
@@ -989,5 +1021,11 @@ export async function deletePainReportsForSource(sourceType, sourceId) {
     .eq('source_type', sourceType)
     .eq('source_id', sourceId)
 
+  if (error) throw error
+}
+
+export async function deletePainReportsForSourceId(sourceId) {
+  if (!sourceId) return
+  const { error } = await supabase.from('pain_reports').delete().eq('source_id', sourceId)
   if (error) throw error
 }

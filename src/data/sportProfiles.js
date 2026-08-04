@@ -1,5 +1,6 @@
 const genericProfile = {
   positions: [],
+  dominantSideRelevant: false,
   competitionLabel: 'Competition',
   defaultCompetitionMinutes: 60,
   eventTypes: ['Competition', 'Team training', 'Individual training', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
@@ -12,6 +13,7 @@ const selectField = (key, label, phases, options, conditions = {}) => ({ key, la
 
 export const sportProfiles = {
   Baseball: {
+    dominantSideRelevant: true,
     positions: ['Pitcher', 'Catcher', 'First baseman', 'Second baseman', 'Third baseman', 'Shortstop', 'Left fielder', 'Center fielder', 'Right fielder'],
     competitionLabel: 'Game',
     defaultCompetitionMinutes: 180,
@@ -43,6 +45,7 @@ export const sportProfiles = {
     workloadFields: [selectField('contactLevel', 'Contact level', ['event', 'checkout'], ['None', 'Limited', 'Controlled', 'Full'], { eventTypes: ['Game', 'Team practice', 'Position work'] })],
   },
   Golf: {
+    dominantSideRelevant: true,
     positions: ['Player'],
     competitionLabel: 'Round',
     defaultCompetitionMinutes: 240,
@@ -51,6 +54,7 @@ export const sportProfiles = {
     workloadFields: [numberField('holesPlayed', 'Holes played', ['checkout'], 'holes', { eventTypes: ['Round'] })],
   },
   'General fitness': {
+    showPosition: false,
     positions: ['General training'],
     competitionLabel: 'Session',
     defaultCompetitionMinutes: 60,
@@ -65,33 +69,40 @@ export const sportProfiles = {
     eventTypes: ['Meet', 'Track practice', 'Field practice', 'Road session', 'Strength training', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
     surfaces: ['Track', 'Grass', 'Road', 'Trail', 'Indoor track', 'Gym'],
     workloadFields: [
-      numberField('plannedDistance', 'Planned distance', ['event'], 'miles', { positions: ['Middle distance', 'Distance'], eventTypes: ['Track practice', 'Road session'] }),
-      numberField('actualDistance', 'Actual distance', ['checkout'], 'miles', { positions: ['Middle distance', 'Distance'], eventTypes: ['Track practice', 'Road session', 'Meet'] }),
+      numberField('plannedDistance', 'Planned distance', ['event'], 'meters', { measurement: 'distance', positions: ['Middle distance', 'Distance'], eventTypes: ['Track practice', 'Road session'] }),
+      numberField('actualDistance', 'Actual distance', ['checkout'], 'meters', { measurement: 'distance', positions: ['Middle distance', 'Distance'], eventTypes: ['Track practice', 'Road session', 'Meet'] }),
       numberField('jumpCount', 'Jumping exposure', ['checkout'], 'jumps', { positions: ['Jumps', 'Multi-events'] }),
       numberField('throwCount', 'Throwing exposure', ['checkout'], 'throws', { positions: ['Throws', 'Multi-events'] }),
       numberField('sprintReps', 'Sprint reps', ['checkout'], 'reps', { positions: ['Sprints', 'Hurdles', 'Multi-events'] }),
     ],
   },
   'Weight training': {
+    showPosition: false,
     positions: ['Upper body', 'Lower body', 'Full body', 'Powerlifting', 'Olympic lifting'],
     competitionLabel: 'Meet',
     defaultCompetitionMinutes: 120,
     eventTypes: ['Strength session', 'Meet', 'Technique session', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
     surfaces: ['Gym', 'Home gym', 'Competition platform'],
-    workloadFields: [numberField('workingSets', 'Working sets', ['checkout'], 'sets', { eventTypes: ['Strength session', 'Meet', 'Technique session'] })],
+    workloadFields: [
+      numberField('plannedLiftingLoad', 'Planned lifting load', ['event'], 'kilograms', { measurement: 'load', eventTypes: ['Strength session', 'Meet', 'Technique session'] }),
+      numberField('actualLiftingLoad', 'Heaviest working load', ['checkout'], 'kilograms', { measurement: 'load', eventTypes: ['Strength session', 'Meet', 'Technique session'] }),
+      numberField('workingSets', 'Working sets', ['checkout'], 'sets', { eventTypes: ['Strength session', 'Meet', 'Technique session'] }),
+    ],
   },
   Running: {
+    showPosition: false,
     positions: ['Road', 'Trail', 'Cross country', 'Marathon', 'Sprint training'],
     competitionLabel: 'Race',
     defaultCompetitionMinutes: 60,
     eventTypes: ['Race', 'Easy run', 'Long run', 'Speed session', 'Tempo run', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
     surfaces: ['Road', 'Track', 'Trail', 'Grass', 'Treadmill'],
     workloadFields: [
-      numberField('plannedDistance', 'Planned distance', ['event'], 'miles', { eventTypes: ['Race', 'Easy run', 'Long run', 'Speed session', 'Tempo run'] }),
-      numberField('actualDistance', 'Actual distance', ['checkout'], 'miles', { eventTypes: ['Race', 'Easy run', 'Long run', 'Speed session', 'Tempo run'] }),
+      numberField('plannedDistance', 'Planned distance', ['event'], 'meters', { measurement: 'distance', eventTypes: ['Race', 'Easy run', 'Long run', 'Speed session', 'Tempo run'] }),
+      numberField('actualDistance', 'Actual distance', ['checkout'], 'meters', { measurement: 'distance', eventTypes: ['Race', 'Easy run', 'Long run', 'Speed session', 'Tempo run'] }),
     ],
   },
   Soccer: {
+    dominantSideRelevant: true,
     positions: ['Striker', 'Winger', 'Attacking midfielder', 'Central midfielder', 'Defensive midfielder', 'Outside back', 'Center back', 'Goalkeeper'],
     competitionLabel: 'Match',
     defaultCompetitionMinutes: 90,
@@ -100,14 +111,15 @@ export const sportProfiles = {
     workloadFields: [],
   },
   Swimming: {
+    dominantSideRelevant: false,
     positions: ['Freestyle', 'Backstroke', 'Breaststroke', 'Butterfly', 'Individual medley', 'Distance'],
     competitionLabel: 'Meet',
     defaultCompetitionMinutes: 120,
     eventTypes: ['Meet', 'Pool practice', 'Open-water session', 'Dryland training', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
     surfaces: ['25-yard pool', '25-meter pool', '50-meter pool', 'Open water', 'Gym'],
     workloadFields: [
-      numberField('plannedYardage', 'Planned yardage', ['event'], 'yards', { eventTypes: ['Pool practice'] }),
-      numberField('actualYardage', 'Actual yardage', ['checkout'], 'yards', { eventTypes: ['Pool practice', 'Meet'] }),
+      numberField('plannedYardage', 'Planned distance', ['event'], 'meters', { measurement: 'distance', eventTypes: ['Pool practice'] }),
+      numberField('actualYardage', 'Actual distance', ['checkout'], 'meters', { measurement: 'distance', eventTypes: ['Pool practice', 'Meet'] }),
       selectField('shoulderLoad', 'Shoulder load', ['checkout'], ['Low', 'Moderate', 'High'], { eventTypes: ['Pool practice', 'Meet', 'Open-water session'] }),
     ],
   },
@@ -123,6 +135,7 @@ export const sportProfiles = {
     ],
   },
   Wrestling: {
+    dominantSideRelevant: true,
     positions: ['Wrestler'],
     competitionLabel: 'Bout',
     defaultCompetitionMinutes: 10,
@@ -139,7 +152,12 @@ export function getSportProfile(sport) {
 }
 
 export function getPositionOptions(sport) {
-  return getSportProfile(sport).positions
+  const profile = getSportProfile(sport)
+  return profile.showPosition === false ? [] : profile.positions
+}
+
+export function isDominantSideRelevant(sport) {
+  return Boolean(getSportProfile(sport).dominantSideRelevant)
 }
 
 export function getSportEventTypes(sport) {
@@ -188,5 +206,6 @@ export function getSportContext({ athleteProfile, event, workload = {} } = {}) {
     plannedLoad: event?.load,
     sessionRpe: Number(workload.difficulty ?? 0) || undefined,
     workload: relevantWorkload,
+    workloadUnits: { distance: 'meters', liftingLoad: 'kilograms' },
   }
 }

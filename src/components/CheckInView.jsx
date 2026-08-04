@@ -394,7 +394,7 @@ function isInsideCheckInWindow(event) {
 }
 
 function DailyFuelContext({ dailyWellness, eventPreparationContext }) {
-  const hydrationOz = Number(dailyWellness?.hydrationOz ?? 0)
+  const hydrationMl = Number(dailyWellness?.hydrationMl ?? 0)
   const meals = dailyWellness?.nutritionEntries ?? []
   const fuel = eventPreparationContext?.fuel
   const hydration = eventPreparationContext?.hydration
@@ -410,7 +410,7 @@ function DailyFuelContext({ dailyWellness, eventPreparationContext }) {
     <div className="daily-fuel-context">
       <span>Event fuel context</span>
       <strong>Fuel: {statusLabel(fuel?.status)} · Hydration: {statusLabel(hydration?.status)}</strong>
-      <small>{fuel?.message ?? `${meals.length} food items and ${hydrationOz} fl oz logged before check-in.`}</small>
+      <small>{fuel?.message ?? `${meals.length} food items and ${Math.round(hydrationMl)} mL logged before check-in.`}</small>
       {hydration?.message && <small>{hydration.message}</small>}
       <small className="daily-fuel-context-note">Update hydration and meals in Nutrition.</small>
     </div>

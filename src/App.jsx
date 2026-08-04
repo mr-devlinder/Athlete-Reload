@@ -41,9 +41,9 @@ import {
   deleteCheckIn,
   deleteCheckInsForEvent,
   deletePainReportsForSource,
+  deletePainReportsForSourceId,
   deleteScheduleEvent,
   deleteShareAuditLog,
-  deleteCheckInsForDate,
   deleteTrainingCheckout,
   deleteTrainingCheckoutsForEvent,
   deleteTournament,
@@ -51,6 +51,7 @@ import {
   loadAthleteProfile,
   loadPrivacyPreferences,
   updateAssociation,
+  updateCheckIn,
   updatePainIssue,
   updateSavedRecoveryRoutine,
   upsertPrivacyPreferences,
@@ -70,6 +71,7 @@ import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './l
 import { loadSavedState, saveState } from './utils/storage'
 import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
+import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
 import './App.css'
 
 const views = [
@@ -107,6 +109,23 @@ const privacyDefaults = {
   coachIncludeNutrition: false,
   localCopy: false,
   remindersEnabled: false,
+}
+
+function normalizeWellnessUnits(wellness = {}) {
+  return {
+    ...wellness,
+    hydrationMl: Number(wellness.hydrationMl ?? fluidOuncesToMilliliters(wellness.hydrationOz) ?? 0),
+  }
+}
+
+function normalizeProfileUnits(profile) {
+  if (!profile) return profile
+  return {
+    ...profile,
+    heightCm: profile.heightCm ?? inchesToCentimeters(profile.heightInches),
+    unitSystem: profile.unitSystem ?? 'imperial',
+    weightKg: profile.weightKg ?? poundsToKilograms(profile.weightLbs),
+  }
 }
 
 function getAuthDisplayName(session) {
@@ -190,8 +209,8 @@ function getDefaultLoadForEvent(type) {
   return 'Medium'
 }
 
-function getHydrationStatus(hydrationOz = 0) {
-  const progress = Number(hydrationOz) / 101.4
+function getHydrationStatus(hydrationMl = 0) {
+  const progress = Number(hydrationMl) / 3000
 
   if (progress >= 0.9) return 'Good'
   if (progress >= 0.5) return 'Okay'
@@ -274,7 +293,7 @@ function checkInFromHistoryEntry(entry, fallback) {
     fatigue: entry.fatigue,
     hurtsWhen: entry.hurtsWhen,
     hydration: entry.hydration,
-    hydrationOz: entry.hydrationOz ?? 0,
+    hydrationMl: entry.hydrationMl ?? 0,
     injuryType: entry.injuryType,
     legHeaviness: entry.legHeaviness,
     location: entry.location,
@@ -300,7 +319,7 @@ function getComparableCheckIn(checkIn) {
     fatigue: Number(checkIn.fatigue),
     hurtsWhen: checkIn.hurtsWhen ?? '',
     hydration: checkIn.hydration ?? '',
-    hydrationOz: Number(checkIn.hydrationOz ?? 0),
+    hydrationMl: Number(checkIn.hydrationMl ?? 0),
     illnessSymptoms: Number(checkIn.illnessSymptoms ?? 0),
     injuryType: checkIn.injuryType ?? '',
     legHeaviness: Number(checkIn.legHeaviness ?? 0),
@@ -453,7 +472,7 @@ function getRecommendationScheduleContext(schedule, event) {
 function getCheckoutWellnessContext(dailyWellness, nutritionContext) {
   return {
     date: dailyWellness?.date,
-    hydrationOz: Number(dailyWellness?.hydrationOz ?? 0),
+    hydrationMl: Number(dailyWellness?.hydrationMl ?? 0),
     nutritionEntryCount: dailyWellness?.nutritionEntries?.length ?? 0,
     nutritionTotals: nutritionContext?.totals,
     nutritionTargets: nutritionContext?.targets,
@@ -623,7 +642,7 @@ function attachTournamentContext(event, tournaments, schedule) {
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
-  const [athleteProfile, setAthleteProfile] = useState(savedState?.athleteProfile ?? null)
+  const [athleteProfile, setAthleteProfile] = useState(normalizeProfileUnits(savedState?.athleteProfile ?? null))
   const [isProfileReady, setIsProfileReady] = useState(!hasSupabaseConfig)
   const [onboardingTour, setOnboardingTour] = useState(null)
   const [onboardingCompleteOpen, setOnboardingCompleteOpen] = useState(false)
@@ -668,8 +687,8 @@ function App() {
   const [tournaments, setTournaments] = useState(savedState?.tournaments ?? [])
   const [isReplayingSavedRoutine, setIsReplayingSavedRoutine] = useState(false)
   const [replayingRoutineId, setReplayingRoutineId] = useState(null)
-  const [dailyWellness, setDailyWellness] = useState(() => savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationOz: 0, nutritionEntries: [] }))
-  const [nutritionHistory, setNutritionHistory] = useState(() => savedState?.nutritionHistory ?? [])
+  const [dailyWellness, setDailyWellness] = useState(() => normalizeWellnessUnits(savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationMl: 0, nutritionEntries: [] })))
+  const [nutritionHistory, setNutritionHistory] = useState(() => (savedState?.nutritionHistory ?? []).map(normalizeWellnessUnits))
   const [privacyPreferences, setPrivacyPreferences] = useState(
     savedState?.privacyPreferences ?? privacyDefaults,
   )
@@ -729,7 +748,7 @@ function App() {
     [checkIn, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
   const nutritionContext = useMemo(() => ({
-    hydrationTargetOz: getHydrationTarget(athleteProfile, schedule, todayIso),
+    hydrationTargetMl: getHydrationTarget(athleteProfile, schedule, todayIso),
     targets: getNutritionTargets(athleteProfile, schedule, todayIso),
     totals: getNutritionTotals(dailyWellness?.nutritionEntries ?? []),
   }), [athleteProfile, dailyWellness?.nutritionEntries, schedule, todayIso])
@@ -772,7 +791,7 @@ function App() {
       stress: checkIn.stress,
       yesterdayLoad: scheduleDrivenCheckIn.yesterdayLoad,
       hydration: checkIn.hydration,
-      hydrationOz: checkIn.hydrationOz,
+      hydrationMl: checkIn.hydrationMl,
       injuryType: checkIn.injuryType,
       painType: checkIn.painType,
       painMap: checkIn.painMap,
@@ -784,12 +803,13 @@ function App() {
     }),
     [
       checkIn.energy,
+      checkIn.expectedDifficulty,
       checkIn.fatigue,
       checkIn.illnessSymptoms,
       checkIn.legHeaviness,
       checkIn.hurtsWhen,
       checkIn.hydration,
-      checkIn.hydrationOz,
+      checkIn.hydrationMl,
       checkIn.injuryType,
       checkIn.location,
       checkIn.notes,
@@ -981,7 +1001,7 @@ function App() {
         setRecoveryCompletions(data.recoveryCompletions ?? [])
         setShareAuditLogs(data.shareAuditLogs)
         setTournaments(data.tournaments)
-        setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+        setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
         setNutritionHistory(data.wellnessHistory ?? [])
         setPrivacyPreferences(preferences)
         setAthleteProfile(await loadAthleteProfile())
@@ -1014,7 +1034,7 @@ function App() {
               setRecoveryCompletions(data.recoveryCompletions ?? [])
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
-              setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+              setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
               setNutritionHistory(data.wellnessHistory ?? [])
               setPrivacyPreferences(preferences)
               setAthleteProfile(await loadAthleteProfile())
@@ -1056,7 +1076,7 @@ function App() {
               setRecoveryCompletions(data.recoveryCompletions ?? [])
               setShareAuditLogs(data.shareAuditLogs)
               setTournaments(data.tournaments)
-              setDailyWellness(data.wellness ?? { date: todayIso, hydrationOz: 0, nutritionEntries: [] })
+              setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
               setNutritionHistory(data.wellnessHistory ?? [])
               setPrivacyPreferences(preferences)
               setAthleteProfile(await loadAthleteProfile())
@@ -1143,13 +1163,13 @@ function App() {
       return
     }
 
-    if (field === 'hydrationOz') {
-      const hydrationOz = Math.max(0, Number(value) || 0)
+    if (field === 'hydrationMl') {
+      const hydrationMl = Math.max(0, Number(value) || 0)
 
       setCheckIn((current) => ({
         ...current,
-        hydration: getHydrationStatus(hydrationOz),
-        hydrationOz,
+        hydration: getHydrationStatus(hydrationMl),
+        hydrationMl,
       }))
       return
     }
@@ -1270,30 +1290,12 @@ function App() {
 
     if (supabase) {
       try {
-        if (isEditingToday) {
-          if (previousEntry?.id) {
-            await deletePainReportsForSource('check_in', previousEntry.id)
-          }
-
-          if (selectedCheckInEvent?.id) {
-            await deleteCheckInsForEvent(selectedCheckInEvent.id)
-          } else {
-            await deleteCheckInsForDate(todayIso)
-          }
-
-          setHistory((current) =>
-            current.filter((entry) =>
-              selectedCheckInEvent?.id
-                ? entry.eventId !== selectedCheckInEvent.id
-                : entry.date !== todayIso,
-            ),
-          )
-          setPainReports((current) =>
-            current.filter((report) => report.sourceId !== previousEntry?.id),
-          )
+        const savedEntry = isEditingToday && previousEntry?.id
+          ? await updateCheckIn(previousEntry.id, savedCheckIn, finalRecommendation)
+          : await createCheckIn(savedCheckIn, finalRecommendation)
+        if (isEditingToday && previousEntry?.id) {
+          await deletePainReportsForSource('check_in', previousEntry.id)
         }
-
-        const savedEntry = await createCheckIn(savedCheckIn, finalRecommendation)
         const savedPainReports = await createPainReports(getPainReportsWithResolutions(
           savedCheckIn.painMap,
           {
@@ -1313,7 +1315,10 @@ function App() {
               : entry.date !== savedEntry.date,
           ),
         ])
-        setPainReports((current) => [...savedPainReports, ...current])
+        setPainReports((current) => [
+          ...savedPainReports,
+          ...current.filter((report) => report.sourceId !== savedEntry.id),
+        ])
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -1524,7 +1529,7 @@ function App() {
           .map((entry) => deletePainReportsForSource('check_in', entry.id)),
         ...relatedCheckouts
           .filter((checkout) => checkout.id)
-          .map((checkout) => deletePainReportsForSource('checkout', checkout.id)),
+          .map((checkout) => deletePainReportsForSourceId(checkout.id)),
       ])
       await deleteCheckInsForEvent(id)
       await deleteTrainingCheckoutsForEvent(id)
@@ -1568,7 +1573,7 @@ function App() {
   async function saveDailyWellness(nextWellness) {
     const wellness = {
       date: nextWellness.date ?? todayIso,
-      hydrationOz: Math.max(0, Number(nextWellness.hydrationOz ?? 0)),
+      hydrationMl: Math.max(0, Number(nextWellness.hydrationMl ?? 0)),
       nutritionEntries: nextWellness.nutritionEntries ?? [],
       mealTiming: nextWellness.mealTiming ?? {},
       nutritionGoalOverride: nextWellness.nutritionGoalOverride ?? {},
@@ -1650,7 +1655,7 @@ function App() {
 
       if (isSupabaseSession) {
         try {
-          await deletePainReportsForSource('checkout', entry.id)
+          await deletePainReportsForSourceId(entry.id)
           await deleteTrainingCheckout(entry.id)
         } catch (error) {
           console.error(error)
@@ -2205,7 +2210,7 @@ function App() {
       }
     }
 
-    setRecoveryCompletions((current) => [completion, ...current].slice(0, 12))
+    setRecoveryCompletions((current) => [completion, ...current])
 
     setIsReplayingSavedRoutine(false)
     setReplayingRoutineId(null)
@@ -2234,8 +2239,8 @@ function App() {
           : {
               ...getFreshCheckInDefaults(),
               ...getSharedSleepContext(history, todayIso),
-              hydration: getHydrationStatus(dailyWellness.hydrationOz),
-              hydrationOz: dailyWellness.hydrationOz,
+              hydration: getHydrationStatus(dailyWellness.hydrationMl),
+              hydrationMl: dailyWellness.hydrationMl,
             },
       )
     }
@@ -2249,8 +2254,8 @@ function App() {
     setIsEditingToday(false)
     setCheckIn({
       ...getFreshCheckInDefaults(),
-      hydration: getHydrationStatus(dailyWellness.hydrationOz),
-      hydrationOz: dailyWellness.hydrationOz,
+      hydration: getHydrationStatus(dailyWellness.hydrationMl),
+      hydrationMl: dailyWellness.hydrationMl,
     })
     setActiveView('Check-in')
   }
@@ -2281,8 +2286,8 @@ function App() {
         : {
             ...getFreshCheckInDefaults(),
             ...getSharedSleepContext(history, todayIso),
-            hydration: getHydrationStatus(dailyWellness.hydrationOz),
-            hydrationOz: dailyWellness.hydrationOz,
+            hydration: getHydrationStatus(dailyWellness.hydrationMl),
+            hydrationMl: dailyWellness.hydrationMl,
           },
     )
   }
@@ -2948,6 +2953,7 @@ function App() {
 
             {activeView === 'History' && (
               <HistoryView
+                athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 history={history}
                 insights={trendInsights}

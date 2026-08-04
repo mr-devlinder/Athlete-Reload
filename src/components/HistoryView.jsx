@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { format, parseISO, startOfMonth, startOfWeek, startOfYear } from 'date-fns'
+import { format, parseISO, startOfWeek, startOfYear } from 'date-fns'
 import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
+import { formatHydration } from '../utils/units'
 
 const clearOptions = [
   { label: 'Today', days: 0 },
@@ -18,13 +19,12 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, savedRoutines = [] }) {
+export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, savedRoutines = [] }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey()]))
-  const [expandedMonths, setExpandedMonths] = useState(() => new Set([getCurrentMonthKey()]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
   const archive = getHistoryArchive(history, checkouts)
@@ -59,20 +59,6 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
         next.delete(weekKey)
       } else {
         next.add(weekKey)
-      }
-
-      return next
-    })
-  }
-
-  function toggleMonth(monthKey) {
-    setExpandedMonths((current) => {
-      const next = new Set(current)
-
-      if (next.has(monthKey)) {
-        next.delete(monthKey)
-      } else {
-        next.add(monthKey)
       }
 
       return next
@@ -133,45 +119,27 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
 
               {expandedYears.has(year.key) && (
                 <div className="history-archive-content">
-                  {year.months.map((month) => (
-                    <section className="history-archive-group history-month-group" key={month.key}>
-                      <button className="history-archive-toggle month-toggle" onClick={() => toggleMonth(month.key)} type="button">
-                        <span>{expandedMonths.has(month.key) ? 'Hide' : 'Show'}</span>
-                        <strong>{month.label}</strong>
-                        <em>{month.itemCount} item{month.itemCount === 1 ? '' : 's'}</em>
-                      </button>
+                  {year.weeks.map((week) => (
+                    <section className="history-week" key={week.key}>
+                      <div className="history-week-header">
+                        <button className="history-week-toggle" onClick={() => toggleWeek(week.key)} type="button">
+                          <span>{expandedWeeks.has(week.key) ? 'Hide' : 'Show'}</span>
+                          <strong>Week of {week.label}</strong>
+                          <em>{week.items.length} item{week.items.length === 1 ? '' : 's'}</em>
+                        </button>
+                        <button className="secondary-button compact-action" onClick={() => setSelectedWeek(week)} type="button">
+                          Weekly report
+                        </button>
+                      </div>
 
-                      {expandedMonths.has(month.key) && (
-                        <div className="history-archive-content">
-                          {month.weeks.map((week) => (
-                            <section className="history-week" key={week.key}>
-                              <div className="history-week-header">
-                                <button className="history-week-toggle" onClick={() => toggleWeek(week.key)} type="button">
-                                  <span>{expandedWeeks.has(week.key) ? 'Hide' : 'Show'}</span>
-                                  <strong>Week of {week.label}</strong>
-                                  <em>{week.items.length} item{week.items.length === 1 ? '' : 's'}</em>
-                                </button>
-                                <button
-                                  className="secondary-button compact-action"
-                                  onClick={() => setSelectedWeek(week)}
-                                  type="button"
-                                >
-                                  Weekly report
-                                </button>
-                              </div>
-
-                              {expandedWeeks.has(week.key) && (
-                                <div className="history-week-items">
-                                  <HistoryGroup
-                                    checkouts={week.items.filter((item) => item.kind === 'checkout')}
-                                    checkIns={week.items.filter((item) => item.kind === 'check-in')}
-                                    onDeleteEntry={onDeleteEntry}
-                                    onSelectEntry={setSelectedEntry}
-                                  />
-                                </div>
-                              )}
-                            </section>
-                          ))}
+                      {expandedWeeks.has(week.key) && (
+                        <div className="history-week-items">
+                          <HistoryGroup
+                            checkouts={week.items.filter((item) => item.kind === 'checkout')}
+                            checkIns={week.items.filter((item) => item.kind === 'check-in')}
+                            onDeleteEntry={onDeleteEntry}
+                            onSelectEntry={setSelectedEntry}
+                          />
                         </div>
                       )}
                     </section>
@@ -186,6 +154,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
       {selectedEntry && createPortal(
         <HistoryModal
           entry={selectedEntry}
+          unitSystem={athleteProfile?.unitSystem}
           onFavoriteRoutine={onFavoriteRoutine}
           onClose={() => setSelectedEntry(null)}
           savedRoutines={savedRoutines}
@@ -444,7 +413,7 @@ function ClearHistoryModal({ onClear, onClose }) {
   )
 }
 
-function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
+function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSystem }) {
   if (entry.historyKind === 'checkout') {
     return <CheckoutHistoryModal entry={entry} onClose={onClose} />
   }
@@ -453,7 +422,7 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
     return <RecoveryHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
   }
 
-  const detailSections = getCheckInDetailSections(entry)
+  const detailSections = getCheckInDetailSections(entry, unitSystem)
   const painSections = getPainDetailSections(entry)
 
   return (
@@ -742,7 +711,7 @@ function valueWithUnit(value, unit) {
   return `${value}${unit}`
 }
 
-function getCheckInDetailSections(entry) {
+function getCheckInDetailSections(entry, unitSystem = 'imperial') {
   return [
     {
       title: 'Event',
@@ -768,7 +737,7 @@ function getCheckInDetailSections(entry) {
         ['Sleep', valueWithUnit(entry.sleep, 'h')],
         ['Sleep quality', valueWithUnit(entry.sleepQuality, '/5')],
         ['Stress', valueWithUnit(entry.stress, '/5')],
-        ['Today\'s hydration', entry.hydrationOz === undefined ? undefined : `${entry.hydrationOz} fl oz`],
+        ['Today\'s hydration', entry.hydrationMl === undefined ? undefined : formatHydration(entry.hydrationMl, unitSystem)],
         ['Recovery actions', entry.recoveryActions?.length ? entry.recoveryActions.join(', ') : undefined],
       ]),
     },
@@ -899,33 +868,23 @@ function getHistoryArchive(history, checkouts) {
   items.forEach((item) => {
     const itemDate = parseISO(item.date)
     const yearStart = startOfYear(itemDate)
-    const monthStart = startOfMonth(itemDate)
     const weekStart = startOfWeek(itemDate)
     const yearKey = format(yearStart, 'yyyy')
-    const monthKey = format(monthStart, 'yyyy-MM')
     const weekKey = format(weekStart, 'yyyy-MM-dd')
     const year = years.get(yearKey) ?? {
       itemCount: 0,
       key: yearKey,
       label: format(yearStart, 'yyyy'),
-      months: new Map(),
-    }
-    const month = year.months.get(monthKey) ?? {
-      itemCount: 0,
-      key: monthKey,
-      label: format(monthStart, 'MMMM yyyy'),
       weeks: new Map(),
     }
-    const week = month.weeks.get(weekKey) ?? {
+    const week = year.weeks.get(weekKey) ?? {
       items: [],
       key: weekKey,
       label: format(weekStart, 'MMM d'),
     }
 
     week.items.push(item)
-    month.weeks.set(weekKey, week)
-    month.itemCount += 1
-    year.months.set(monthKey, month)
+    year.weeks.set(weekKey, week)
     year.itemCount += 1
     years.set(yearKey, year)
   })
@@ -933,15 +892,10 @@ function getHistoryArchive(history, checkouts) {
   return [...years.values()]
     .map((year) => ({
       ...year,
-      months: [...year.months.values()]
-        .map((month) => ({
-          ...month,
-          weeks: [...month.weeks.values()]
-            .map((week) => ({
-              ...week,
-              items: week.items.sort((first, second) => getHistoryItemSortValue(second).localeCompare(getHistoryItemSortValue(first))),
-            }))
-            .sort((first, second) => second.key.localeCompare(first.key)),
+      weeks: [...year.weeks.values()]
+        .map((week) => ({
+          ...week,
+          items: week.items.sort((first, second) => getHistoryItemSortValue(second).localeCompare(getHistoryItemSortValue(first))),
         }))
         .sort((first, second) => second.key.localeCompare(first.key)),
     }))
@@ -956,10 +910,6 @@ function getHistoryItemSortValue(item) {
 
 function getCurrentWeekKey() {
   return format(startOfWeek(new Date()), 'yyyy-MM-dd')
-}
-
-function getCurrentMonthKey() {
-  return format(startOfMonth(new Date()), 'yyyy-MM')
 }
 
 function getCurrentYearKey() {

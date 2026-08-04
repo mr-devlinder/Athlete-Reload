@@ -23,7 +23,7 @@ export const checkInDefaults = {
   stress: 0,
   yesterdayLoad: 'Rest',
   hydration: 'Good',
-  hydrationOz: 0,
+  hydrationMl: 0,
   expectedDifficulty: 5,
   location: 'Hamstring',
   injuryType: 'Unknown',

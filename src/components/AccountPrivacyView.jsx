@@ -330,9 +330,9 @@ export function AccountPrivacyView({
       protein_g: entry.protein ?? 0,
       carbohydrates_g: entry.carbohydrates ?? 0,
       fats_g: entry.fats ?? 0,
-      hydration_oz: day.hydrationOz ?? 0,
+      hydration_ml: day.hydrationMl ?? 0,
     })))
-    const headers = ['date', 'meal', 'food', 'brand', 'serving', 'calories', 'protein_g', 'carbohydrates_g', 'fats_g', 'hydration_oz']
+    const headers = ['date', 'meal', 'food', 'brand', 'serving', 'calories', 'protein_g', 'carbohydrates_g', 'fats_g', 'hydration_ml']
     const csv = [headers.join(','), ...rows.map((row) => headers.map((header) => `"${String(row[header] ?? '').replaceAll('"', '""')}"`).join(','))].join('\n')
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')

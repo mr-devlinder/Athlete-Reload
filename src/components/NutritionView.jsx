@@ -5,8 +5,10 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadSavedFoods, removeSavedFood, saveFood, searchFoods, verifyFood } from '../lib/foodApi'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { SectionHeading } from './SectionHeading'
+import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 
-const quickWaterAmounts = [8, 16, 20, 32, 64]
+const imperialWaterAmounts = [8, 16, 20, 32, 64]
+const metricWaterAmounts = [250, 500, 750, 1000]
 const mealCards = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
 
 export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWellness, schedule }) {
@@ -17,18 +19,21 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
   const [selectedFood, setSelectedFood] = useState(null)
   const [openMeal, setOpenMeal] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const wellness = nutritionHistory.find((entry) => entry.date === selectedDate) ?? { date: selectedDate, hydrationOz: 0, nutritionEntries: [] }
+  const wellness = nutritionHistory.find((entry) => entry.date === selectedDate) ?? { date: selectedDate, hydrationMl: 0, nutritionEntries: [] }
   const entries = wellness.nutritionEntries ?? []
   const totals = getNutritionTotals(entries)
   const targets = useMemo(() => getNutritionTargets(athleteProfile, schedule, selectedDate), [athleteProfile, schedule, selectedDate])
   const hydrationTarget = getHydrationTarget(athleteProfile, schedule, selectedDate)
+  const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
+  const quickWaterAmounts = unitSystem === 'metric' ? metricWaterAmounts : imperialWaterAmounts
 
   function save(next) {
     onSaveWellness?.({ ...wellness, ...next, date: selectedDate })
   }
 
   function changeWater(amount) {
-    save({ hydrationOz: Math.max(0, Number(wellness.hydrationOz ?? 0) + amount) })
+    const amountMl = unitSystem === 'metric' ? amount : fluidOuncesToMilliliters(amount)
+    save({ hydrationMl: Math.max(0, Number(wellness.hydrationMl ?? 0) + amountMl) })
   }
 
   function removeFood(id) {
@@ -63,8 +68,8 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
       </section>
 
       <section className="nutrition-water-strip">
-        <div><span>Water</span><strong>{wellness.hydrationOz} / {hydrationTarget} fl oz</strong></div>
-        <div className="nutrition-water-actions"><button onClick={() => changeWater(-1)} type="button" aria-label="Subtract one fluid ounce">−</button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}</button>)}<button onClick={() => changeWater(1)} type="button" aria-label="Add one fluid ounce">+</button></div>
+        <div><span>Water</span><strong>{formatHydration(wellness.hydrationMl, unitSystem)} / {formatHydration(hydrationTarget, unitSystem)}</strong></div>
+        <div className="nutrition-water-actions"><button onClick={() => changeWater(unitSystem === 'metric' ? -50 : -1)} type="button" aria-label="Subtract water">−</button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ''}</button>)}<button onClick={() => changeWater(unitSystem === 'metric' ? 50 : 1)} type="button" aria-label="Add water">+</button></div>
       </section>
 
       <section className="nutrition-meals-section">
@@ -77,7 +82,7 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
       {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food, meal) => setSelectedFood({ food, meal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {selectedFood && <NutritionModalPortal><ServingModal canSaveReusable={Boolean(selectedFood.entryId)} food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: selectedFood.entryId ? entries.map((entry) => entry.id === selectedFood.entryId ? { ...food, id: entry.id, loggedAt: entry.loggedAt } : entry) : [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {openMeal && <NutritionModalPortal><MealDetailModal date={selectedDate} entries={entries} meal={openMeal} onClose={() => setOpenMeal(null)} onDateChange={setSelectedDate} onDelete={removeFood} onEdit={(entry) => { setOpenMeal(null); setSelectedFood({ food: entry, meal: openMeal, entryId: entry.id }) }} /></NutritionModalPortal>}
-      {detailsOpen && <NutritionModalPortal><NutritionDetailsModal entries={entries} hydrationOz={wellness.hydrationOz} onClose={() => setDetailsOpen(false)} targets={targets} totals={totals} /></NutritionModalPortal>}
+      {detailsOpen && <NutritionModalPortal><NutritionDetailsModal entries={entries} hydrationMl={wellness.hydrationMl} onClose={() => setDetailsOpen(false)} targets={targets} totals={totals} unitSystem={unitSystem} /></NutritionModalPortal>}
     </div>
   )
 }
@@ -426,9 +431,9 @@ function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete,
   return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => { const serving = parseStoredServing(entry); return <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{serving.servingSize} · {serving.servings} serving{serving.servings === 1 ? '' : 's'}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article> })}</div></section></div>
 }
 
-function NutritionDetailsModal({ entries, hydrationOz, onClose, targets, totals }) {
+function NutritionDetailsModal({ entries, hydrationMl, onClose, targets, totals, unitSystem }) {
   const mealTotals = Object.entries(entries.reduce((result, entry) => { const meal = entry.meal || 'Other'; result[meal] = (result[meal] || 0) + Number(entry.calories || 0); return result }, {})).map(([name, calories]) => ({ name, calories })).filter((item) => item.calories > 0)
   const colors = ['#2f8cff', '#6aa76d', '#e8b04f', '#f08b46', '#a878d8', '#6b879f']
   const nutrients = [['Fiber', totals.fiber, 'g'], ['Sugar', totals.sugar, 'g'], ['Saturated fat', totals.saturatedFat, 'g'], ['Polyunsaturated fat', totals.polyunsaturatedFat, 'g'], ['Monounsaturated fat', totals.monounsaturatedFat, 'g'], ['Trans fat', totals.transFat, 'g'], ['Cholesterol', totals.cholesterol, 'mg'], ['Sodium', totals.sodium, 'mg'], ['Potassium', totals.potassium, 'mg'], ['Vitamin A', totals.vitaminA, 'mcg'], ['Vitamin C', totals.vitaminC, 'mg'], ['Vitamin D', totals.vitaminD, 'mcg'], ['Vitamin E', totals.vitaminE, 'mg'], ['Vitamin K', totals.vitaminK, 'mcg'], ['Calcium', totals.calcium, 'mg'], ['Iron', totals.iron, 'mg']]
-  return <div className="modal-backdrop" onClick={onClose}><section className="nutrition-details-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Nutrition details" title="Your day at a glance." /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="nutrition-detail-list"><span>Calories<strong>{totals.calories} / {targets.calories ?? '—'}</strong></span><span>Protein<strong>{totals.protein}g / {targets.protein ?? '—'}g</strong></span><span>Carbohydrates<strong>{totals.carbohydrates}g / {targets.carbohydrates ?? '—'}g</strong></span><span>Fat<strong>{totals.fats}g / {targets.fats ?? '—'}g</strong></span><span>Water<strong>{hydrationOz} fl oz</strong></span><span>Foods logged<strong>{entries.length}</strong></span></div><div className="nutrition-meal-chart"><h3>Calories by meal</h3>{mealTotals.length ? <ResponsiveContainer height={210} width="100%"><PieChart><Pie data={mealTotals} dataKey="calories" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3}>{mealTotals.map((item, index) => <Cell fill={colors[index % colors.length]} key={item.name} />)}</Pie><Tooltip formatter={(value) => [`${value} calories`, '']} /></PieChart></ResponsiveContainer> : <p>No calorie breakdown yet.</p>}<div className="nutrition-chart-legend">{mealTotals.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.calories} cal</span>)}</div></div><div className="nutrition-detail-list expanded">{nutrients.map(([label, value, unit]) => <span key={label}>{label}<strong>{Math.round(Number(value || 0) * 10) / 10}{unit}</strong></span>)}</div></section></div>
+  return <div className="modal-backdrop" onClick={onClose}><section className="nutrition-details-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Nutrition details" title="Your day at a glance." /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="nutrition-detail-list"><span>Calories<strong>{totals.calories} / {targets.calories ?? '—'}</strong></span><span>Protein<strong>{totals.protein}g / {targets.protein ?? '—'}g</strong></span><span>Carbohydrates<strong>{totals.carbohydrates}g / {targets.carbohydrates ?? '—'}g</strong></span><span>Fat<strong>{totals.fats}g / {targets.fats ?? '—'}g</strong></span><span>Water<strong>{formatHydration(hydrationMl, unitSystem)}</strong></span><span>Foods logged<strong>{entries.length}</strong></span></div><div className="nutrition-meal-chart"><h3>Calories by meal</h3>{mealTotals.length ? <ResponsiveContainer height={210} width="100%"><PieChart><Pie data={mealTotals} dataKey="calories" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3}>{mealTotals.map((item, index) => <Cell fill={colors[index % colors.length]} key={item.name} />)}</Pie><Tooltip formatter={(value) => [`${value} calories`, '']} /></PieChart></ResponsiveContainer> : <p>No calorie breakdown yet.</p>}<div className="nutrition-chart-legend">{mealTotals.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.calories} cal</span>)}</div></div><div className="nutrition-detail-list expanded">{nutrients.map(([label, value, unit]) => <span key={label}>{label}<strong>{Math.round(Number(value || 0) * 10) / 10}{unit}</strong></span>)}</div></section></div>
 }

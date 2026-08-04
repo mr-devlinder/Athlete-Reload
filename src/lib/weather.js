@@ -5,7 +5,7 @@ export async function getEventWeather(city) {
   const result = place.results?.[0]
   if (!result) throw new Error('Enter a valid U.S. city.')
 
-  const forecast = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${result.latitude}&longitude=${result.longitude}&temperature_unit=fahrenheit&current=temperature_2m,apparent_temperature,precipitation,weather_code`).then((response) => response.json())
+  const forecast = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${result.latitude}&longitude=${result.longitude}&temperature_unit=celsius&current=temperature_2m,apparent_temperature,precipitation,weather_code`).then((response) => response.json())
   const current = forecast.current
   if (!current) return null
 

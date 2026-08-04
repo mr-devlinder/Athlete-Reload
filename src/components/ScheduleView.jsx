@@ -21,6 +21,7 @@ import { SectionHeading } from './SectionHeading'
 import { getCheckoutForEvent, getEventDisplayName, isAllDayEvent, isOtherActivityEvent, isRestDayEvent } from '../utils/events'
 import { searchUsCities } from '../lib/weather'
 import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, getSportSurfaces, getSportWorkloadFields } from '../data/sportProfiles'
+import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
 
 const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -937,6 +938,7 @@ function EventModal({ associations, athleteProfile, draftEvent, isOnboardingEven
             <SportWorkloadField
               field={field}
               key={field.key}
+              unitSystem={athleteProfile?.unitSystem}
               value={draftEvent.sportWorkload?.[field.key] ?? ''}
               onChange={(value) => onUpdate('sportWorkload', { ...(draftEvent.sportWorkload ?? {}), [field.key]: value })}
             />
@@ -1005,17 +1007,18 @@ function EventModal({ associations, athleteProfile, draftEvent, isOnboardingEven
   )
 }
 
-function SportWorkloadField({ field, onChange, value }) {
+function SportWorkloadField({ field, onChange, unitSystem = 'imperial', value }) {
+  const display = getWorkloadFieldDisplay(field, value, unitSystem)
   return (
     <label className="compact-field">
-      {field.label}{field.unit ? ` (${field.unit})` : ''}
+      {field.label}{display.label ? ` (${display.label})` : ''}
       {field.type === 'select' ? (
         <select value={value} onChange={(event) => onChange(event.target.value)}>
           <option value="">Not set</option>
           {field.options.map((option) => <option key={option}>{option}</option>)}
         </select>
       ) : (
-        <input min="0" step={field.unit === 'miles' ? '0.1' : '1'} type="number" value={value} onChange={(event) => onChange(event.target.value)} />
+        <input min="0" step={display.step} type="number" value={display.value} onChange={(event) => onChange(workloadInputToCanonical(field, event.target.value, unitSystem))} />
       )}
     </label>
   )

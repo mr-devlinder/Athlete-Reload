@@ -605,6 +605,7 @@ function getRecentPainEntries(history, painReports) {
       date: report.date,
       dateLabel: formatPainDate(report.date),
       label: getPainLabel(report.bodyPart, report.side),
+      areaKey: `${normalizePainLabel(report.bodyPart)}:${String(report.side ?? 'center').toLowerCase()}`,
       score: normalizePainSeverity(report.severity),
       source: getPainSourceLabel(report.sourceType),
       sourceId: report.sourceId,
@@ -624,6 +625,7 @@ function getRecentPainEntries(history, painReports) {
             date: entry.date,
             dateLabel: formatPainDate(entry.date),
             label: area.label,
+            areaKey: `${normalizePainLabel(area.recommendationLocation ?? area.label)}:${area.side}`,
             score: normalizePainSeverity(severity),
             source: 'Check-in',
             sourceId: entry.id,
@@ -639,6 +641,7 @@ function getRecentPainEntries(history, painReports) {
       date: entry.date,
       dateLabel: formatPainDate(entry.date),
       label: entry.location ?? 'Pain area',
+      areaKey: `${normalizePainLabel(entry.location ?? 'Pain area')}:center`,
       score: Number(entry.pain),
       source: 'Check-in',
       sourceId: entry.id,
@@ -653,7 +656,9 @@ function getPainTimelines(history, painReports) {
   const byArea = new Map()
 
   getRecentPainEntries(history, painReports).forEach((entry) => {
-    const dayEntries = byArea.get(entry.label) ?? new Map()
+    const areaKey = entry.areaKey ?? normalizePainLabel(entry.label)
+    const area = byArea.get(areaKey) ?? { dayEntries: new Map(), label: entry.label }
+    const dayEntries = area.dayEntries
     const current = dayEntries.get(entry.date)
 
     const entryTime = `${entry.date}:${entry.createdAt ?? ''}`
@@ -661,12 +666,12 @@ function getPainTimelines(history, painReports) {
     if (!current || entryTime > currentTime || (entryTime === currentTime && entry.score > current.score)) {
       dayEntries.set(entry.date, entry)
     }
-    byArea.set(entry.label, dayEntries)
+    byArea.set(areaKey, area)
   })
 
-  return [...byArea.entries()]
-    .map(([label, entries]) => {
-      const reportedPoints = [...entries.values()]
+  return [...byArea.values()]
+    .map(({ label, dayEntries }) => {
+      const reportedPoints = [...dayEntries.values()]
         .sort((first, second) => first.date.localeCompare(second.date))
         .slice(-6)
       const latestPoint = reportedPoints[reportedPoints.length - 1]
@@ -678,7 +683,7 @@ function getPainTimelines(history, painReports) {
         resolvedForMoreThanTwoDays,
       }
     })
-    .filter((timeline) => timeline.points.length >= 2 && !timeline.resolvedForMoreThanTwoDays)
+    .filter((timeline) => timeline.points.length >= 1 && !timeline.resolvedForMoreThanTwoDays)
     .sort((first, second) => second.points[second.points.length - 1].date.localeCompare(first.points[first.points.length - 1].date))
     .slice(0, 4)
 }
