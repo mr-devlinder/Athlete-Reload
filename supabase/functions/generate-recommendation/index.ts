@@ -323,7 +323,8 @@ Important behavior:
 - PRIMARY ROUTINE CONTRACT (${planType}): ${planTypeDirective}
 - currentRecoveryContext is the sole source of truth for current pain and restrictions. A missing body part or severity 0 is not active pain and must not cause protection language, altered exercises, painAware=true, or a restriction. recentPainReports are history only and must never override currentRecoveryContext.
 - The PRIMARY ROUTINE CONTRACT controls the routine goal, exercise selection and order, recovery steps, timeline, action, summary, and insights. Athlete context may personalize this contract or remove unsafe movements, but must not replace it with a generic recovery plan.
-- The recovery plan is for the completed event. Do not decide whether the athlete is cleared for the next event.
+- When planType is last-checkout or competition, connect the plan to the supplied completed event. For every other plan type, do not imply that a completed event caused the request and do not invent why the athlete selected it. Build the requested routine outcome, then personalize it with athleteProfile, weeklyWorkloadContext, recentEvents, recoveryCompletions, currentRecoveryContext, nutritionContext, and future schedule.
+- Do not decide whether the athlete is cleared for the next event.
 - Honor planType as the plan's primary goal: last-checkout responds directly to the completed session; full-body balances major regions; flexibility emphasizes comfortable range over intensity; targeted prioritizes targetedAreas while still including adjacent joints; quick is a focused 5-10 minute plan; competition prioritizes turnaround and avoids unnecessary fatigue; recovery-day provides a practical day plan; mobility uses only comfortable mobility work.
 - Use generatedAt and nextScheduledEvent to make timing labels truthful. Morning plans should address the current morning and later day; evening plans should prioritize what remains before sleep. Never say "tonight" when it is already morning unless referring to the coming night.
 - Compare the next event time with generatedAt. A short turnaround should prioritize the few highest-value actions; a longer window can spread actions across meals, hydration, sleep, and mobility. Use next-event type and planned workload, not just its title.
@@ -338,14 +339,14 @@ Important behavior:
 - Do not imply stretching prevents soreness or injury or that temporary looseness proves healing. Present it as optional comfortable mobility or relaxation.
 - Treat the supplied timeAvailable as an exact routine time budget, not merely a maximum. Set routine.durationMinutes to exactly that selected whole-minute duration. The sum of the individual timed exercise steps must land within about one minute of that duration, with enough distinct exercises for the selected plan type. Adjust the content to effort, duration, participation, and the next event. The equipment array describes what is available, but the routine does not need to use every item. Always include a no-equipment option.
 - Never require equipment that is absent from the supplied equipment array. Selected equipment enables an option; it does not obligate its use. Every exercise must include "equipment":"None" or the exact name of one selected item.
-- Build a real stretching and mobility routine, not generic filler. The routine must contain enough distinct stretches and movements to use the full exact time budget. For 5 minutes, return 5-8 individual exercise steps; for 10 minutes, return 10-14; for 15 minutes, 14-18; for 20 minutes, 18-24; for 30 minutes, 24-32. Each step should usually be a 20-45 second hold or 6-12 controlled repetitions; do not rely on long holds to fill time. Never prescribe a three-minute hold or a multi-minute single movement.
-- Only split a movement into separate left and right exercise steps when it is genuinely unilateral. For example, output "Half-kneeling hip-flexor stretch - Left" and then a separate "Half-kneeling hip-flexor stretch - Right" instead of one "each side" entry. Keep truly bilateral or full-body movements, such as cat-cow, child's pose, wall slides, or a symmetrical squat hold, as one exercise labeled "Both sides" or "Full body". Do not force a left/right split where it does not make sense.
+- Build a real routine with enough distinct, useful steps to fill exactly 5, 10, 15, 20, 25, or 30 selected minutes. Let the athlete context and routine flow determine exercise count: added time may add exercises, extend appropriate holds, or add controlled repetitions. Short plans should be concise and longer plans should contain enough variety, but never pad the plan with filler or multi-minute static holds.
+- Only split a movement into separate left and right steps when it is genuinely unilateral. Keep bilateral and full-body movements as one step. In every step, put laterality in either side or area without duplicating it: use side "Left" with area "Hip", or side "Both sides" with area "Hips"; never side "Left" with area "Left Hip".
 - Unless planType is targeted, flexibility, quick, or mobility, build a full-body recovery routine that includes the major regions relevant after activity. For specialized plan types, stay focused on the selected outcome while keeping adjacent joints and basic whole-body balance where useful. Keep painful or concerning areas protected rather than forcing direct stretching.
 - Do not include standalone walking, breathing, or generic ankle rolls as routine exercises. They are not acceptable filler. Only include a short cooldown movement when it is specific to the completed sport or a symptom/safety concern, and it must never replace the stretching and mobility work.
 - Use sportContext workload when present to select sport-relevant recovery priorities, but never diagnose or predict injury risk from workload. All symptom and red-flag safety rules override workload-based guidance.
 - For an Other activity, scale recovery from generic duration, session-RPE, participation, load, and surface/environment. A nearby planned Rest Day is context only and is not evidence that recovery has occurred.
 - Prefer useful movement variety: dynamic range work, joint-specific mobility, controlled rotations, tissue-friendly flexibility, and side-specific stretches. Every routine should feel like something an athlete can actually follow exercise by exercise.
-- Prefer widely recognized, high-quality recovery and mobility movements with clear form cues: for example, cat-cow, open books, child's pose, thread-the-needle, wall slides, shoulder circles, chest doorway stretches, hip flexor stretches, 90/90 hip switches, adductor rock-backs, hamstring flosses, calf stretches, ankle dorsiflexion mobility, and gentle quad stretches when appropriate. Use niche or specialty exercises only when they clearly fit a specific sport, position, painful area, equipment choice, or movement limitation. Do not choose unusual movements just to create variety.
+- Prefer conventional, widely recognized exercise and stretch names with clear form cues. Do not treat any example list or familiar pair as a template, and do not routinely begin with the same two movements. Use niche movements sparingly and only when the athlete context makes them more useful than a familiar option.
 - Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
 - For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
 - Use each exercise's instruction, side, feel, and avoid fields well. Include a mix of reps and holds, clear body-area labels, and enough useful work to fill the selected time without exceeding it.
@@ -359,7 +360,7 @@ Important behavior:
 - Hydration Guidance must never estimate exact sweat or fluid loss. Distinguish between returning to normal steady hydration after a light session and deliberately replacing fluids after longer, hotter, or harder work, using symptoms and logged hydration when available.
 - Sleep and Rest Guidance must fit generatedAt and the next event. Do not say only "get sleep"; explain the useful rest priority for the remaining recovery window.
 - Include pain-guidance only when currentRecoveryContext shows current pain. Historical pain alone never enables it.
-- Personalize every routine sequence. Use variationKey as a diversity cue and recentRoutineExerciseNames to avoid returning the same exercise order or exact routine repeatedly. Do not force novelty when a familiar stretch is clearly the safest or best choice; change the surrounding sequence, emphasis, sides, or timing instead.
+- Personalize every routine sequence. Use variationKey, recentRoutineSequences, and recentRoutineExerciseNames to avoid returning the same opening pair, exercise order, or exact routine repeatedly. Familiar exercises may return when useful, but vary the sequence, emphasis, dosage, and supporting movements so the complete routine responds to this request.
 - Prefer recognizable stretches and mobility work. Use niche movements sparingly and only when profile, sport, target area, or current body state makes them more useful than a familiar option.
 
 JSON shape:
@@ -387,7 +388,7 @@ ${JSON.stringify(payload, null, 2)}
 
 function getRecoveryPlanTypeDirective(planType: string, targetedAreas: unknown) {
   const directives: Record<string, string> = {
-    'full-body': 'Create a balanced head-to-toe recovery sequence. Distribute work across upper body, trunk, hips, legs, and ankles without allowing the last checkout to dominate one region.',
+    'full-body': 'Create a balanced head-to-toe recovery sequence. Distribute work across upper body, trunk, hips, legs, and ankles, then adapt emphasis to the athlete profile, weekly workload, recovery history, current body state, and future events.',
     targeted: `Focus primarily on these selected areas: ${stringArray(targetedAreas).join(', ') || 'none supplied'}. Put their safe movements first, include directly related joints, and omit unrelated filler. Pain safety can remove an area but must not redirect the routine to a different body region.`,
     'last-checkout': 'Build directly from the latest checkout. Exercise order and recovery actions must respond to session type, workload, soreness, pain changes, and the next event.',
     quick: 'Create a condensed routine containing only the highest-value actions for the selected 5-10 minute budget. Start immediately with useful movement and avoid repeated or low-priority steps.',
@@ -644,12 +645,15 @@ function normalizeRecoveryTimeline(value: any, preparation: string[], during: st
 
 function normalizeRoutine(value: any, payload?: any) {
   const availableEquipment = new Set(stringArray(payload?.equipment).map((item) => item.toLowerCase()))
-  const exercises = Array.isArray(value?.exercises)
+  const generatedExercises = Array.isArray(value?.exercises)
     ? value.exercises.filter((exercise: any) => {
       const required = String(exercise?.equipment ?? 'None').trim().toLowerCase()
       const exerciseText = `${exercise?.name ?? ''} ${exercise?.instruction ?? ''}`.toLowerCase()
       const inferredRequirement = [
-        ['foam roller', /foam roll/], ['resistance band', /resistance band|banded/], ['massage ball', /massage ball|lacrosse ball/],
+        ['exercise mat', /exercise mat/], ['foam roller', /foam roll/], ['stretching strap', /stretching strap|yoga strap/],
+        ['yoga blocks', /yoga block/], ['resistance band', /resistance band|long band|banded/], ['mini band', /mini band|loop band/],
+        ['massage ball', /massage ball|lacrosse ball/], ['massage stick', /massage stick/], ['towel', /\btowel\b/],
+        ['chair or bench', /\bchair\b|\bbench\b/], ['stability ball', /stability ball|swiss ball/],
         ['stationary bike', /stationary bike|cycling/], ['pool', /pool|swim|aquatic/], ['compression equipment', /compression boot|compression sleeve/],
       ].find(([, pattern]) => (pattern as RegExp).test(exerciseText))?.[0]
       if (inferredRequirement && !availableEquipment.has(inferredRequirement as string)) return false
@@ -669,9 +673,10 @@ function normalizeRoutine(value: any, payload?: any) {
         : 0,
       side: stringOrFallback(exercise?.side, 'Both sides'),
       type: stringOrFallback(exercise?.type, 'Mobility'),
-      why: stringOrFallback(exercise?.why, 'This fits the recovery plan for the session you completed.'),
+      why: stringOrFallback(exercise?.why, 'This movement supports the selected routine goal.'),
     }))
     : []
+  const exercises = avoidRepeatedRoutineOpening(generatedExercises, payload?.recentRoutineSequences, payload?.variationKey)
 
   const hasCurrentPain = Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
   return {
@@ -682,6 +687,28 @@ function normalizeRoutine(value: any, payload?: any) {
     summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
     title: stringOrFallback(value?.title, getRoutineTitle(payload?.planType)),
   }
+}
+
+function avoidRepeatedRoutineOpening(exercises: any[], recentSequences: unknown, variationKey: unknown) {
+  if (exercises.length < 4 || !Array.isArray(recentSequences)) return exercises
+  const opening = exercises.slice(0, 2).map((exercise) => getExerciseFamilyName(exercise?.name)).join('|')
+  const previousOpenings = new Set(recentSequences.map((sequence: any) => Array.isArray(sequence)
+    ? sequence.slice(0, 2).map(getExerciseFamilyName).join('|')
+    : ''))
+  if (!previousOpenings.has(opening)) return exercises
+
+  const seed = String(variationKey ?? '').split('').reduce((sum, character) => sum + character.charCodeAt(0), 0)
+  const candidates = Array.from({ length: exercises.length - 2 }, (_, index) => index + 1)
+  const offset = candidates.find((index) => {
+    const pair = [exercises[index], exercises[(index + 1) % exercises.length]]
+      .map((exercise) => getExerciseFamilyName(exercise?.name)).join('|')
+    return !previousOpenings.has(pair)
+  }) ?? (1 + (seed % (exercises.length - 2)))
+  return [...exercises.slice(offset), ...exercises.slice(0, offset)]
+}
+
+function getExerciseFamilyName(value: unknown) {
+  return String(value ?? '').replace(/\s*-\s*(left|right)$/i, '').trim().toLowerCase()
 }
 
 function getRoutineTitle(planType: unknown) {

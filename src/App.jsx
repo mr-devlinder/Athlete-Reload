@@ -1902,7 +1902,7 @@ function App() {
     const contextCheckout = usesCheckoutContext ? latestCheckout : null
     const completedEvent = contextCheckout ? schedule.find((event) => event.id === contextCheckout.eventId) : null
     const preCheckIn = contextCheckout ? history.find((entry) => entry.eventId === contextCheckout.eventId) : null
-    const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : null
+    const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : nextEvent
     const latestSavedCheckIn = [...history].sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
     const checkoutTime = latestCheckout ? new Date(latestCheckout.createdAt ?? `${latestCheckout.date}T12:00:00`).getTime() : 0
     const checkInTime = latestSavedCheckIn ? new Date(latestSavedCheckIn.createdAt ?? `${latestSavedCheckIn.date}T12:00:00`).getTime() : 0
@@ -1918,10 +1918,22 @@ function App() {
       sourceCreatedAt: currentBodyReport?.createdAt ?? currentBodyReport?.date ?? null,
       sourceType: currentBodyReport === latestCheckout ? 'checkout' : 'check-in',
     }
-    const recentRoutineExerciseNames = [
-      ...savedRoutines.flatMap((item) => item?.routine?.routine?.exercises ?? item?.routine?.exercises ?? []),
-      ...checkouts.flatMap((item) => item?.recommendation?.recoveryPlan?.routine?.exercises ?? []),
-    ].map((exercise) => exercise?.name).filter(Boolean).slice(0, 60)
+    const recentRoutineSequences = [
+      ...savedRoutines.map((item) => item?.routine?.routine?.exercises ?? item?.routine?.exercises ?? []),
+      ...checkouts.map((item) => item?.recommendation?.recoveryPlan?.routine?.exercises ?? []),
+    ].map((routine) => routine.map((exercise) => exercise?.name).filter(Boolean)).filter((routine) => routine.length > 0).slice(0, 6)
+    const recentRoutineExerciseNames = recentRoutineSequences.flat().slice(0, 60)
+    const weekStart = Date.now() - (7 * 24 * 60 * 60 * 1000)
+    const weeklySessions = checkouts.filter((item) => new Date(item.createdAt ?? `${item.date}T12:00:00`).getTime() >= weekStart)
+    const weeklyWorkloadContext = {
+      activities: [...new Set(weeklySessions.map((item) => item.eventType ?? item.sessionType ?? item.title).filter(Boolean))],
+      averageIntensity: weeklySessions.length
+        ? Math.round((weeklySessions.reduce((sum, item) => sum + Number(item.difficulty ?? item.actualIntensity ?? 0), 0) / weeklySessions.length) * 10) / 10
+        : 0,
+      sessions: weeklySessions.length,
+      totalMinutes: weeklySessions.reduce((sum, item) => sum + Number(item.actualMinutes ?? item.duration ?? 0), 0),
+      totalSessionLoad: weeklySessions.reduce((sum, item) => sum + (Number(item.actualMinutes ?? item.duration ?? 0) * Number(item.difficulty ?? item.actualIntensity ?? 0)), 0),
+    }
 
     setRecoveryPlanStatus('loading')
     setIsReplayingSavedRoutine(false)
@@ -1942,13 +1954,15 @@ function App() {
         recentPainReports: painReports.slice(0, 12).map(withoutNotes),
         recentEvents: checkouts.slice(0, 4).map(withoutNotes),
         recentRoutineExerciseNames,
+        recentRoutineSequences,
         recoveryCompletions: recoveryCompletions.slice(0, 5),
         requestType: 'recovery_plan',
-        scheduleContext: getRecommendationScheduleContext(schedule, completedEvent),
+        scheduleContext: getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent),
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
         targetedAreas,
         timeAvailable,
         variationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        weeklyWorkloadContext,
       })
 
       setGeneratedRecoveryPlan(plan)

@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 
-const equipmentOptions = ['Exercise mat', 'Foam roller', 'Resistance band', 'Massage ball', 'Stationary bike', 'Pool', 'Compression equipment']
+const equipmentOptions = [
+  'Exercise mat', 'Foam roller', 'Stretching strap', 'Yoga blocks', 'Resistance band', 'Mini band',
+  'Massage ball', 'Massage stick', 'Towel', 'Chair or bench', 'Stability ball', 'Stationary bike',
+  'Pool', 'Compression equipment',
+]
 const planTypeOptions = [
   { id: 'last-checkout', label: 'Based on Last Checkout', description: 'Respond to the session you just completed.' },
   { id: 'full-body', label: 'Full Body Recovery', description: 'Balanced mobility and recovery across major areas.' },
@@ -318,7 +322,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               <label>
                 <span>Time available</span>
                 <select value={timeAvailable} onChange={(event) => setTimeAvailable(event.target.value)}>
-                  {(planType === 'quick' ? ['5 minutes', '10 minutes'] : ['5 minutes', '10 minutes', '15 minutes', '20 minutes', '30 minutes']).map((option) => <option key={option}>{option}</option>)}
+                  {(planType === 'quick' ? ['5 minutes', '10 minutes'] : ['5 minutes', '10 minutes', '15 minutes', '20 minutes', '25 minutes', '30 minutes']).map((option) => <option key={option}>{option}</option>)}
                 </select>
               </label>
               <div className="equipment-field" ref={equipmentPickerRef}>
@@ -400,11 +404,16 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
             {!routineComplete && (
               <details className="routine-preview">
                 <summary>View routine plan ({routine.length} exercises)</summary>
-                <ol>
+                <ol className="routine-plan-list">
                   {routine.map((exercise, index) => (
-                    <li key={`${exercise.name}-${exercise.side}-${index}`}>
+                    <li className="routine-plan-step" key={`${exercise.name}-${exercise.side}-${index}`}>
                       <strong>{exercise.name}</strong>
-                      <span>{exercise.side ?? 'Both sides'} · {exercise.area ?? 'Comfortable range'} · {exercise.durationSeconds ? `${exercise.durationSeconds}s` : `${exercise.reps ?? 6} reps`}</span>
+                      <span className="routine-step-meta">{formatExerciseBodyArea(exercise)} · {formatExerciseDose(exercise)}</span>
+                      <p>{exercise.instruction}</p>
+                      <div className="routine-step-cues">
+                        <span><b>You should feel:</b> {exercise.feel ?? 'Mild, comfortable tension or controlled movement.'}</span>
+                        <span><b>Avoid:</b> {exercise.avoid ?? 'Sharp pain, bouncing, or forcing the range.'}</span>
+                      </div>
                       {exercise.why && <em>{exercise.why}</em>}
                     </li>
                   ))}
@@ -427,10 +436,15 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <span style={{ width: `${((routineIndex + 1) / Math.max(1, routine.length)) * 100}%` }} />
               </div>
               <h3>{currentExercise?.name}</h3>
-              <p className="routine-side">{currentExercise?.side ?? 'Both sides'} · {currentExercise?.area ?? 'Comfortable range'}</p>
-              <p>{currentExercise?.instruction}</p>
-              {currentExercise?.feel && <small>Feel: {currentExercise.feel}</small>}
-              {currentExercise?.avoid && <small>Do not feel: {currentExercise.avoid}</small>}
+              <div className="routine-current-meta">
+                <span><small>Body area</small><strong>{formatExerciseBodyArea(currentExercise)}</strong></span>
+                <span><small>Duration or repetitions</small><strong>{formatExerciseDose(currentExercise)}</strong></span>
+              </div>
+              <p className="routine-instruction">{currentExercise?.instruction}</p>
+              <div className="routine-current-cues">
+                <p><strong>You should feel</strong>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p>
+                <p><strong>Avoid</strong>{currentExercise?.avoid ?? 'Sharp pain, bouncing, or forcing the range.'}</p>
+              </div>
               {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
               <div className="routine-player-actions">
                   {!routineStarted ? (
@@ -537,6 +551,24 @@ function buildRoutine(routine, availableMinutes, excludedExercises = [], fallbac
 
 function getExerciseFamily(name = '') {
   return String(name).replace(/\s*-\s*(left|right)$/i, '').trim().toLowerCase()
+}
+
+function formatExerciseBodyArea(exercise) {
+  const area = String(exercise?.area ?? 'Comfortable range').trim()
+  const rawSide = String(exercise?.side ?? '').trim()
+  const side = rawSide.replace(/\s+side$/i, '')
+
+  if (!side || /^(both|both sides|full body|each side)$/i.test(rawSide)) return area
+  if (area.toLowerCase().includes(side.toLowerCase())) return area
+  const sidedArea = area.replace(/^(hips|shoulders|hamstrings|quadriceps|calves|ankles|feet)$/i, (match) => ({
+    ankles: 'ankle', calves: 'calf', feet: 'foot', hamstrings: 'hamstring', hips: 'hip', quadriceps: 'quadriceps', shoulders: 'shoulder',
+  })[match.toLowerCase()] ?? match)
+  return `${side} ${sidedArea}`
+}
+
+function formatExerciseDose(exercise) {
+  if (exercise?.durationSeconds) return `${exercise.durationSeconds} seconds`
+  return `${exercise?.reps ?? 6} controlled reps`
 }
 
 function constrainRoutine(routine, availableMinutes, alternatives = []) {

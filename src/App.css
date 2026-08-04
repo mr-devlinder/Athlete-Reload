@@ -2766,6 +2766,22 @@ textarea {
   display: block;
 }
 
+.routine-plan-step > p {
+  margin: 7px 0 0;
+  color: #4f5865;
+  line-height: 1.45;
+}
+
+.routine-step-cues {
+  display: grid;
+  gap: 3px;
+  margin-top: 7px;
+}
+
+.routine-step-cues span {
+  color: #5f6875 !important;
+}
+
 .routine-preview li span,
 .routine-preview li em {
   margin-top: 2px;
@@ -2985,9 +3001,46 @@ textarea {
   line-height: 1.5;
 }
 
-.routine-side {
-  font-size: 13px;
+.routine-current-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.routine-current-meta span,
+.routine-current-cues p {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(47, 140, 255, 0.06);
+}
+
+.routine-current-meta small {
+  color: #78818d;
+  font-size: 10px;
   font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.routine-current-meta strong {
+  color: #303945;
+  font-size: 13px;
+}
+
+.routine-current-cues {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.routine-current-cues p {
+  font-size: 12px;
+}
+
+.routine-current-cues strong {
+  color: #315f96;
 }
 
 .routine-player small {
