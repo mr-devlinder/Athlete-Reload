@@ -40,7 +40,7 @@ async function rerankWithGemini(query: string, candidates: Food[]): Promise<Food
   if (candidates.length < 2) return candidates
   const apiKey = Deno.env.get('GEMINI_API_KEY')
   if (!apiKey) return candidates
-  const compact = candidates.map((food, index) => ({ id: index, name: food.name, brand: food.brand, servingSize: food.servingSize, source: food.foodSource, verified: Boolean(food.isVerified) }))
+  const compact = candidates.map((food, index) => ({ id: index, name: food.name, brand: food.brand, servingSize: food.standardServingSize ?? food.servingSize, source: food.foodSource, verified: Boolean(food.isVerified) }))
   const prompt = `You rank food search candidates. Query: ${JSON.stringify(query)}\nReturn ONLY a JSON array of candidate id numbers, best match first. Use every id exactly once. Prefer exact food identity and normal edible forms. Prefer Athlete Reload verified and USDA generic foods when relevance is comparable. Do not favor keyword-stuffed, implausible, or unrelated branded products. Candidates: ${JSON.stringify(compact)}`
   try {
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }) })
@@ -94,7 +94,7 @@ function normalizeUsda(food: any): Food {
   const scaled = (value: number) => Math.round(value * factor * 10) / 10
   return {
     name: food.description ?? 'Unnamed food', brand: food.brandOwner ?? food.brandName ?? '', barcode: food.gtinUpc ?? '', foodSource: 'USDA FoodData Central',
-    servingSize, calories: Math.round(energyKcal * factor), protein: scaled(find('protein')), carbohydrates: scaled(find('carbohydrate, by difference')), fats: scaled(find('total lipid (fat)')), fiber: scaled(find('fiber, total dietary')), sugar: scaled(find('sugars, total including nlea')), saturatedFat: scaled(find('fatty acids, total saturated')), polyunsaturatedFat: scaled(find('fatty acids, total polyunsaturated')), monounsaturatedFat: scaled(find('fatty acids, total monounsaturated')), transFat: scaled(find('fatty acids, total trans')), cholesterol: scaled(find('cholesterol')), sodium: scaled(find('sodium, na')), potassium: scaled(find('potassium, k')), calcium: scaled(find('calcium, ca')), iron: scaled(find('iron, fe')), vitaminA: scaled(find('vitamin a, rae')), vitaminC: scaled(find('vitamin c, total ascorbic acid')), vitaminD: scaled(find('vitamin d (d2 + d3)')), vitaminE: scaled(find('vitamin e (alpha-tocopherol)')), vitaminK: scaled(find('vitamin k (phylloquinone)')),
+    servingSize, standardServingSize: servingSize, servingWeight: servingGrams || 100, servingWeightUnit: 'g', calories: Math.round(energyKcal * factor), protein: scaled(find('protein')), carbohydrates: scaled(find('carbohydrate, by difference')), fats: scaled(find('total lipid (fat)')), fiber: scaled(find('fiber, total dietary')), sugar: scaled(find('sugars, total including nlea')), saturatedFat: scaled(find('fatty acids, total saturated')), polyunsaturatedFat: scaled(find('fatty acids, total polyunsaturated')), monounsaturatedFat: scaled(find('fatty acids, total monounsaturated')), transFat: scaled(find('fatty acids, total trans')), cholesterol: scaled(find('cholesterol')), sodium: scaled(find('sodium, na')), potassium: scaled(find('potassium, k')), calcium: scaled(find('calcium, ca')), iron: scaled(find('iron, fe')), vitaminA: scaled(find('vitamin a, rae')), vitaminC: scaled(find('vitamin c, total ascorbic acid')), vitaminD: scaled(find('vitamin d (d2 + d3)')), vitaminE: scaled(find('vitamin e (alpha-tocopherol)')), vitaminK: scaled(find('vitamin k (phylloquinone)')),
   }
 }
 
@@ -114,8 +114,18 @@ function normalizeOff(product: any): Food {
   const n = product.nutriments ?? {}
   const servingGrams = Number(product.serving_quantity) || 100
   const factor = servingGrams / 100
-  const scaled = (value: unknown) => Math.round(Number(value ?? 0) * factor * 10) / 10
-  return { name: product.product_name ?? product.product_name_en ?? '', brand: product.brands ?? '', barcode: product.code ?? '', foodSource: 'Open Food Facts', servingSize: product.serving_size ?? '100 g', calories: Math.round(Number(n['energy-kcal_100g'] ?? 0) * factor), protein: scaled(n.proteins_100g), carbohydrates: scaled(n.carbohydrates_100g), fats: scaled(n.fat_100g), fiber: scaled(n.fiber_100g), sugar: scaled(n.sugars_100g), saturatedFat: scaled(n['saturated-fat_100g']), polyunsaturatedFat: scaled(n['polyunsaturated-fat_100g']), monounsaturatedFat: scaled(n['monounsaturated-fat_100g']), transFat: scaled(n['trans-fat_100g']), cholesterol: scaled(n.cholesterol_100g), sodium: scaled(n.sodium_100g), potassium: scaled(n.potassium_100g), calcium: scaled(n.calcium_100g), iron: scaled(n.iron_100g), vitaminA: scaled(n['vitamin-a_100g']), vitaminC: scaled(n['vitamin-c_100g']), vitaminD: scaled(n['vitamin-d_100g']), vitaminE: scaled(n['vitamin-e_100g']), vitaminK: scaled(n['vitamin-k_100g']) }
+  const nutrient = (key: string, outputUnit = 'g') => {
+    let value = Number(n[`${key}_100g`] ?? 0) * factor
+    const sourceUnit = String(n[`${key}_unit`] ?? 'g').toLowerCase()
+    if (sourceUnit === 'kg') value *= 1000
+    if (sourceUnit === 'mg') value /= 1000
+    if (['µg', 'ug', 'mcg'].includes(sourceUnit)) value /= 1_000_000
+    if (outputUnit === 'mg') value *= 1000
+    if (outputUnit === 'mcg') value *= 1_000_000
+    return Math.round(value * 10) / 10
+  }
+  const standardServingSize = product.serving_size ?? '100 g'
+  return { name: product.product_name ?? product.product_name_en ?? '', brand: product.brands ?? '', barcode: product.code ?? '', foodSource: 'Open Food Facts', servingSize: standardServingSize, standardServingSize, servingWeight: servingGrams, servingWeightUnit: /\bml\b/i.test(standardServingSize) ? 'mL' : 'g', calories: Math.round(Number(n['energy-kcal_100g'] ?? 0) * factor), protein: nutrient('proteins'), carbohydrates: nutrient('carbohydrates'), fats: nutrient('fat'), fiber: nutrient('fiber'), sugar: nutrient('sugars'), saturatedFat: nutrient('saturated-fat'), polyunsaturatedFat: nutrient('polyunsaturated-fat'), monounsaturatedFat: nutrient('monounsaturated-fat'), transFat: nutrient('trans-fat'), cholesterol: nutrient('cholesterol', 'mg'), sodium: nutrient('sodium', 'mg'), potassium: nutrient('potassium', 'mg'), calcium: nutrient('calcium', 'mg'), iron: nutrient('iron', 'mg'), vitaminA: nutrient('vitamin-a', 'mcg'), vitaminC: nutrient('vitamin-c', 'mg'), vitaminD: nutrient('vitamin-d', 'mcg'), vitaminE: nutrient('vitamin-e', 'mg'), vitaminK: nutrient('vitamin-k', 'mcg') }
 }
 
 function rank(foods: Food[], query: string) {

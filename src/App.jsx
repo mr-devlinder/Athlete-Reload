@@ -102,6 +102,7 @@ const views = [
 ]
 
 const privacyDefaults = {
+  aiPersonalizationEnabled: true,
   analyticsAllowed: false,
   cloudSync: true,
   coachIncludeNotes: false,
@@ -1279,7 +1280,7 @@ function App() {
           previousRecoveryCompletion: withoutNotes(previousRecoveryCompletion),
           requestType: 'check_in',
           scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
-        })
+        }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
       } catch (error) {
         console.error('Check-in AI recommendation failed', error)
         setCheckInAiError(error?.message || 'The AI recommendation could not be generated. Please try again.')
@@ -1776,7 +1777,7 @@ function App() {
           requestType: 'post_checkout',
           scheduleContext: getRecommendationScheduleContext(schedule, event),
           sportContext: getSportContext({ athleteProfile, event, workload: checkout.sportWorkload }),
-        })
+        }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
         finalRecommendationStatus = 'ai'
       } catch (error) {
         console.error(error)
@@ -1969,7 +1970,7 @@ function App() {
         timeAvailable,
         variationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         weeklyWorkloadContext,
-      })
+      }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
 
       setGeneratedRecoveryPlan(plan)
       setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
@@ -2164,6 +2165,23 @@ function App() {
       return true
     } catch (error) {
       console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  async function updateAiPersonalizationPreference(enabled) {
+    const nextPreferences = { ...privacyPreferences, aiPersonalizationEnabled: Boolean(enabled) }
+    setPrivacyPreferences(nextPreferences)
+
+    if (!isSupabaseSession) return true
+
+    try {
+      const saved = await upsertPrivacyPreferences(nextPreferences)
+      setPrivacyPreferences(saved)
+      return true
+    } catch (error) {
+      console.error('Unable to save AI personalization preference', error)
       setDataStatus('error')
       return false
     }
@@ -2967,17 +2985,26 @@ function App() {
 
             {activeView === 'Settings' && (
               <AccountPrivacyView
+                associations={associations}
+                athleteProfile={athleteProfile}
                 checkouts={checkouts}
+                dailyWellness={dailyWellness}
                 history={history}
+                nutritionHistory={nutritionHistory}
+                painIssues={painIssues}
                 painReports={painReports}
                 preferences={privacyPreferences}
+                recoveryCompletions={recoveryCompletions}
+                savedRoutines={savedRoutines}
                 schedule={schedule}
                 session={session}
                 shareAuditLogs={shareAuditLogs}
+                tournaments={tournaments}
                 onClearAllHealthHistory={clearAllHealthHistory}
                 onAccountDeleted={resetDeletedSession}
                 onDeleteShareAuditLog={removeShareAuditLog}
                 onUpdateReminderPreference={updateReminderPreference}
+                onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
               />
             )}
           </section>
@@ -3156,7 +3183,7 @@ function LegalModal({ onClose, type }) {
               ))}
             </section>
           ))}
-          <p><strong>Last Updated:</strong> July 28, 2026</p>
+          <p><strong>Last Updated:</strong> August 4, 2026</p>
         </div>
       </section>
     </div>
@@ -3177,58 +3204,59 @@ const legalContentV2 = {
       {
         title: '2. Information We Collect',
         body: [
-          'We may collect account information such as your email address or authentication identifiers when you sign in.',
-          'We collect the information you choose to enter, including scheduled events, associations, check-ins, checkouts, soreness, pain map entries, pain triggers, sleep, fatigue, stress, hydration, notes, readiness recommendations, and history records.',
-          'We may collect basic technical information needed to operate the app, such as authentication session data, device or browser information provided by the browser, and service logs created by hosting, database, and function providers.',
+          'Account and profile data includes your name or nickname, email, authentication identifiers, age, height, weight, gender if provided, sport, position or specialty, dominant side, goals, dietary preferences, unit preference, and connected sign-in providers.',
+          'Training and wellness data includes schedules, teams or associations, tournaments, check-ins, checkouts, training history and workload, injuries you describe, pain reports and body areas, soreness, sleep, fatigue, stress, recovery routines and completions, nutrition logs, food and brand details, calories, nutrients, hydration or water intake, notes, saved foods, and voice transcripts when you choose voice entry.',
+          'Generated data includes readiness scores, trends, recovery plans, and AI-generated recommendations. Operational data may include authentication sessions, browser or device information supplied by your browser, security records, and service error logs.',
         ],
       },
       {
         title: '3. How We Use Information',
         body: [
-          'We use your information to provide app features, sync data across signed-in devices, display your schedule and history, generate event-based readiness recommendations, show trends, maintain security, debug errors, and improve app functionality.',
+          'We use account data to authenticate you and sync your records; profile, training, wellness, nutrition, hydration, and recovery data to calculate targets, display history and trends, and generate the features you request; and operational data to secure, troubleshoot, and maintain the service.',
           'We do not use your information to provide medical diagnosis, treatment, medical clearance, or emergency guidance.',
         ],
       },
       {
         title: '4. Service Providers and AI Processing',
         body: [
-          'Athlete Reload uses Supabase for authentication and database storage. Recommendation requests may be processed through a server-side function and sent to Google Gemini to generate training readiness guidance.',
+          'Athlete Reload uses Supabase for authentication, database storage, and server-side functions. Recommendation and voice-extraction requests may be sent through a server-side function to Google Gemini. Food searches may query food-data providers described by the search feature.',
           'These providers process information only as needed to operate app features. API keys and service secrets are intended to stay server-side and are not stored in the browser.',
         ],
       },
       {
         title: '5. How Information Is Shared',
         body: [
-          'We do not sell your personal information. We do not intentionally make your training or pain data public.',
-          'Information may be shared with service providers that help operate the app, when required by law, to protect rights and safety, to investigate abuse or security issues, or with your direction if future sharing features are added.',
+          'We do not sell personal information, share it for targeted advertising, or intentionally make training, nutrition, or health-related data public.',
+          'Information is disclosed only to service providers needed to operate requested features, when required by law or necessary to protect rights and safety, or at your direction when you create or share a report. Coaches and teammates do not receive account access by default.',
         ],
       },
       {
         title: '6. Data Retention and Deletion',
         body: [
-          'We keep signed-in data for as long as needed to provide the app or until you delete it, subject to backup, security, legal, or technical retention needs.',
-          'The History screen includes controls to clear saved check-ins, checkouts, and pain reports by time range. Future versions may add more account-level controls such as full account deletion, data export, and sharing settings.',
+          'We keep signed-in data while your account is active and until you delete individual records, clear health history, or delete your account. Limited security logs, provider backups, or records required by law may remain for their applicable retention periods.',
+          'Account & Privacy provides complete JSON download, nutrition CSV export, health-history deletion, individual history deletion, shared-report audit controls, and permanent account deletion. You may also correct profile and account information in the app.',
         ],
       },
       {
         title: '7. Security',
         body: [
-          'Athlete Reload is designed to separate each signed-in user\'s data with account-based access controls and server-side secrets. No online service can guarantee absolute security.',
+          'Signed-in records are stored in Supabase and protected with Row Level Security that limits user-owned rows to the authenticated account. Data is transmitted over HTTPS, and privileged secrets remain in server-side functions. Supabase manages its platform storage and transport security. No online service can guarantee absolute security.',
           'You are responsible for keeping access to your email and account secure. Do not enter emergency information that needs immediate professional attention.',
         ],
       },
       {
         title: '8. Minors and Student Athletes',
         body: [
-          'Athlete Reload may be used by student athletes. If you are a minor, you should use the app with permission and guidance from a parent or guardian.',
+          'You must be at least 16 to create or use an Athlete Reload account. Athlete Reload does not offer a verified parental-consent flow for younger users and is not directed to children under 13.',
           'Parents, guardians, coaches, athletic trainers, and healthcare providers should be involved whenever pain, injury, return-to-play, or medical concerns are present.',
         ],
       },
       {
         title: '9. Privacy Choices',
         body: [
-          'You can choose not to enter optional information. You can clear certain saved history records from inside the app. You can also stop using the app at any time.',
-          'Browser, device, and authentication settings may provide additional controls over sessions, saved credentials, cookies, and local storage.',
+          'You can choose not to enter optional information, change password or email, enable two-factor authentication, manage notifications, turn AI history personalization off, export your information, delete history, and delete your account.',
+          'Depending on where you live, you may also have rights to access, correct, erase, restrict or object to processing, receive portable data, withdraw consent, and complain to a data-protection authority. Withdrawing consent does not affect processing already completed.',
+          'Camera permission is requested only when you start barcode scanning. Microphone permission is requested only when you start voice entry or voice search, and the resulting transcript can be reviewed before use. Notification permission is requested only when you enable reminders. The app does not request photo-library, precise device-location, or health-platform permission.',
         ],
       },
       {
@@ -3240,7 +3268,7 @@ const legalContentV2 = {
       {
         title: '11. Contact',
         body: [
-          'Questions about this app can be directed to the developer through the GitHub link in the footer.',
+          'Privacy questions and rights requests can be directed to the developer through the GitHub contact link in the footer. Include enough information to verify the account, but do not send passwords or detailed health information.',
         ],
       },
     ],
@@ -3265,7 +3293,7 @@ const legalContentV2 = {
       {
         title: '3. Eligibility and Minors',
         body: [
-          'If you are a minor, you should use Athlete Reload only with permission from a parent or guardian. A responsible adult should be involved when health, pain, injury, or return-to-play decisions are involved.',
+          'You must be at least 16 to create or use an account. If you are under the age of legal majority where you live, use Athlete Reload with permission and guidance from a parent or guardian.',
           'The app should not be used to hide pain, injury, symptoms, or safety concerns from parents, guardians, coaches, athletic trainers, or healthcare providers.',
         ],
       },
@@ -3291,7 +3319,7 @@ const legalContentV2 = {
         ],
       },
       {
-        title: '7. AI and Recommendation Output',
+        title: '7. AI Disclaimer and Recommendation Output',
         body: [
           'Athlete Reload may generate recommendations using rules, user-entered data, and AI services. AI output can be incomplete, incorrect, or inappropriate for your situation.',
           'You are responsible for reviewing recommendations with common sense and involving a qualified adult, coach, athletic trainer, physician, or emergency services when appropriate.',

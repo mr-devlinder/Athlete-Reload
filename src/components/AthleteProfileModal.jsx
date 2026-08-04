@@ -155,7 +155,7 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
           <ProfileMeasurements profile={draft} onChange={(field, value) => setDraft((current) => ({ ...current, [field]: value }))} />
           <label className="select-field">
             Age (optional)
-            <input inputMode="numeric" max="120" min="13" type="number" value={draft.age ?? ''} onChange={(event) => setDraft((current) => ({ ...current, age: event.target.value }))} />
+            <input inputMode="numeric" max="120" min="16" type="number" value={draft.age ?? ''} onChange={(event) => setDraft((current) => ({ ...current, age: event.target.value }))} />
           </label>
           <fieldset className="profile-choice-field">
             <legend>Goals</legend>

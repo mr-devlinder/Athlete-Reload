@@ -4843,9 +4843,30 @@ button.event-status:hover {
 .food-modal-search input { min-width: 0; min-height: 50px; border: 0; outline: 0; background: transparent; color: #252b35; font: inherit; font-size: 15px; }
 .food-modal-search button { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 10px; background: #202933; color: #fff; cursor: pointer; }
 .food-modal-search button svg { width: 18px; }
-.food-modal-actions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin-top: 11px; }
+.food-modal-actions { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; margin-top: 11px; }
 .food-modal-actions button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; border: 1px solid rgba(47,140,255,.16); border-radius: 11px; background: rgba(47,140,255,.07); color: #2d668f; cursor: pointer; font: inherit; font-size: 12px; font-weight: 850; }
 .food-modal-actions svg { width: 19px; height: 19px; }
+.food-modal-actions button.active { border-color: rgba(47,140,255,.4); background: rgba(47,140,255,.15); color: #1f5f96; }
+.manual-food-form { display: grid; gap: 16px; margin-top: 14px; padding: 16px; border: 1px solid rgba(47,140,255,.18); border-radius: 14px; background: rgba(255,255,255,.58); }
+.manual-food-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.manual-food-heading > div { display: grid; gap: 3px; }
+.manual-food-heading strong { color: #252b35; font-size: 17px; }
+.manual-food-heading span { color: #737d89; font-size: 12px; }
+.manual-food-heading > button { border: 0; background: transparent; color: #3976aa; font: inherit; font-size: 12px; font-weight: 850; cursor: pointer; }
+.manual-food-grid { display: grid; gap: 10px; }
+.manual-food-grid.identity { grid-template-columns: 1.5fr 1fr 1fr; }
+.manual-food-grid.macros { grid-template-columns: repeat(4,minmax(0,1fr)); }
+.manual-food-grid.nutrients { grid-template-columns: repeat(3,minmax(0,1fr)); margin-top: 12px; }
+.manual-food-grid label { display: grid; gap: 6px; min-width: 0; color: #596575; font-size: 11px; font-weight: 850; }
+.manual-food-grid label > input, .manual-food-grid label > span { width: 100%; min-height: 42px; border: 1px solid rgba(23,23,23,.11); border-radius: 10px; background: rgba(255,255,255,.84); }
+.manual-food-grid label > input { padding: 0 10px; color: #252b35; font: inherit; }
+.manual-food-grid label > span { display: flex; align-items: center; overflow: hidden; }
+.manual-food-grid label > span input { width: 100%; min-width: 0; min-height: 40px; border: 0; outline: 0; padding: 0 8px; background: transparent; color: #252b35; font: inherit; }
+.manual-food-grid label > span em { padding-right: 9px; color: #88919c; font-size: 10px; font-style: normal; }
+.manual-food-grid label > span select { align-self: stretch; border: 0; border-left: 1px solid rgba(23,23,23,.08); padding: 0 8px; background: rgba(247,249,252,.9); color: #596575; font: inherit; font-size: 11px; font-weight: 850; }
+.manual-nutrients { border-top: 1px solid rgba(23,23,23,.08); padding-top: 12px; }
+.manual-nutrients summary { color: #356f9e; font-size: 12px; font-weight: 900; cursor: pointer; }
+.manual-nutrients summary span { margin-left: 5px; color: #89919b; font-weight: 700; }
 .barcode-scanner { display: grid; gap: 7px; margin-top: 12px; overflow: hidden; border: 1px solid rgba(47,140,255,.22); border-radius: 12px; background: #121a26; }
 .barcode-scanner video { display: block; width: 100%; min-height: 180px; max-height: 220px; object-fit: cover; background: #090e16; }
 .barcode-scanner p { margin: 0; padding: 0 12px 10px; color: rgba(255,255,255,.8); font-size: 12px; font-weight: 750; }
@@ -4858,6 +4879,7 @@ button.event-status:hover {
   .food-log-modal, .serving-modal, .nutrition-details-modal { width: min(100%, 620px); max-height: calc(100dvh - 20px); padding: 16px; border-radius: 22px; }
   .food-modal-actions { grid-template-columns: 1fr; gap: 8px; }
   .food-modal-actions button { width: 100%; min-height: 48px; font-size: 14px; }
+  .manual-food-grid.identity, .manual-food-grid.macros, .manual-food-grid.nutrients { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .barcode-scanner video { width: 100%; height: min(58dvh, 360px); max-height: none; object-fit: cover; }
   .barcode-scanner p { padding: 12px; font-size: 14px; }
   .food-results .food-result-main { min-height: 74px; padding: 14px; font-size: 15px; }

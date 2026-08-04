@@ -6,18 +6,26 @@ import { SectionHeading } from './SectionHeading'
 const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
 
 export function AccountPrivacyView({
+  associations = [],
+  athleteProfile,
   checkouts,
+  dailyWellness,
   history,
   nutritionHistory = [],
+  onUpdateAiPersonalizationPreference,
   onAccountDeleted,
   onClearAllHealthHistory,
   onDeleteShareAuditLog,
   onUpdateReminderPreference,
   painReports,
+  painIssues = [],
   preferences,
   schedule,
+  recoveryCompletions = [],
+  savedRoutines = [],
   session,
   shareAuditLogs = [],
+  tournaments = [],
 }) {
   const [message, setMessage] = useState('')
   const [openShareAuditAction, setOpenShareAuditAction] = useState(null)
@@ -57,14 +65,22 @@ export function AccountPrivacyView({
         email: session?.user?.email ?? '',
         id: session?.user?.id ?? '',
       },
+      associations,
+      athleteProfile,
       checkouts,
+      dailyWellness,
       history,
       painReports,
+      painIssues,
       preferences,
       nutritionHistory,
+      recoveryCompletions,
+      savedRoutines,
       schedule,
+      shareAuditLogs,
+      tournaments,
     }),
-    [checkouts, history, nutritionHistory, painReports, preferences, schedule, session?.user?.email, session?.user?.id],
+    [associations, athleteProfile, checkouts, dailyWellness, history, nutritionHistory, painIssues, painReports, preferences, recoveryCompletions, savedRoutines, schedule, session?.user?.email, session?.user?.id, shareAuditLogs, tournaments],
   )
 
   useEffect(() => {
@@ -498,6 +514,20 @@ export function AccountPrivacyView({
             <input checked={Boolean(preferences.remindersEnabled)} onChange={(event) => onUpdateReminderPreference?.(event.target.checked)} type="checkbox" />
             <span>Enable event reminders</span>
           </label>
+        </article>
+
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
+          <h2>AI personalization</h2>
+          <p className="settings-copy">When enabled, recommendations may use your profile, prior training, pain, recovery, and nutrition context. When disabled, AI receives only the current request and event details needed to generate the feature you asked for.</p>
+          <label className="settings-toggle">
+            <input checked={preferences.aiPersonalizationEnabled !== false} onChange={(event) => onUpdateAiPersonalizationPreference?.(event.target.checked)} type="checkbox" />
+            <span>Personalize AI recommendations with my history</span>
+          </label>
+        </article>
+
+        <article className="settings-panel" hidden={activeSection !== 'account'}>
+          <h2>Device permissions</h2>
+          <p className="settings-copy">Camera access is requested only when you start barcode scanning. Microphone access is requested only when you start voice entry or voice search, and the resulting transcript can be reviewed before use. Notification access is requested only when you enable event reminders. Athlete Reload does not request photo-library, precise device-location, or health-platform permissions.</p>
         </article>
 
         <article className="settings-panel" hidden={activeSection !== 'account'}>

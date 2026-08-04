@@ -32,6 +32,7 @@ export function CheckInView({
   const selectedCheckout = getCheckoutForEvent(checkouts, selectedEvent?.id)
   const canPostCheckIn = selectedEvent && hasEventStarted(selectedEvent) && !selectedCheckout
   const hasAllDayWellnessEvent = todayEvents.some(isAllDayEvent)
+  const hasScheduledEventToday = todayEvents.length > 0
 
   if (!selectedEvent) {
     return (
@@ -43,10 +44,10 @@ export function CheckInView({
           todayIso={todayIso}
           onSelectEvent={onSelectEvent}
         />
-        <SectionHeading eyebrow={todayLabel} title="No event check-in available." />
-        <p>{restDayPlanned || hasAllDayWellnessEvent
+        <SectionHeading eyebrow={todayLabel} title={hasScheduledEventToday ? 'No event check-in available.' : 'No events scheduled today.'} />
+        {hasScheduledEventToday && <p>{restDayPlanned || hasAllDayWellnessEvent
           ? 'Rest Day and Recovery Day wellness check-ins open at 12:00 PM. No checkout is required.'
-          : 'Check-ins are only available for physical events scheduled today.'}</p>
+          : 'Check-ins are available starting 3 hours before a physical event scheduled for today.'}</p>}
       </div>
     )
   }

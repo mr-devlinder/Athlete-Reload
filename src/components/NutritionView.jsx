@@ -112,6 +112,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const [message, setMessage] = useState('')
   const [scannerStatus, setScannerStatus] = useState('idle')
   const [isListening, setIsListening] = useState(false)
+  const [isManualEntryOpen, setIsManualEntryOpen] = useState(false)
   const [savedFoods, setSavedFoods] = useState([])
   const [isFoodCurator, setIsFoodCurator] = useState(false)
   const videoRef = useRef(null)
@@ -269,7 +270,58 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     } catch (error) { setMessage(error.message) }
   }
 
-  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage('') }} type="button"><Icon name="bookmark" />Saved Foods</button></div>{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && message && <p className="form-message">{message}</p>}{results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage(''); setIsManualEntryOpen(false) }} type="button"><Icon name="bookmark" />Saved Foods</button><button className={isManualEntryOpen ? 'active' : ''} onClick={() => { stopScanner(false); setIsManualEntryOpen((current) => !current); setMessage('') }} type="button"><Icon name="plus" />Manual Add</button></div>{isManualEntryOpen && <ManualFoodForm meal={meal} onCancel={() => setIsManualEntryOpen(false)} onSave={onSave} />}{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && !isManualEntryOpen && message && <p className="form-message">{message}</p>}{!isManualEntryOpen && results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+}
+
+const manualNutrientFields = [
+  ['fiber', 'Fiber', 'g'], ['sugar', 'Sugar', 'g'], ['saturatedFat', 'Saturated fat', 'g'],
+  ['polyunsaturatedFat', 'Polyunsaturated fat', 'g'], ['monounsaturatedFat', 'Monounsaturated fat', 'g'], ['transFat', 'Trans fat', 'g'],
+  ['cholesterol', 'Cholesterol', 'mg'], ['sodium', 'Sodium', 'mg'], ['potassium', 'Potassium', 'mg'],
+  ['vitaminA', 'Vitamin A', 'mcg RAE'], ['vitaminC', 'Vitamin C', 'mg'], ['vitaminD', 'Vitamin D', 'mcg'],
+  ['vitaminE', 'Vitamin E', 'mg'], ['vitaminK', 'Vitamin K', 'mcg'], ['calcium', 'Calcium', 'mg'], ['iron', 'Iron', 'mg'],
+]
+
+function ManualFoodForm({ meal, onCancel, onSave }) {
+  const [draft, setDraft] = useState({ brand: '', calories: '', carbohydrates: '', fats: '', name: '', protein: '', servingWeight: '', servingWeightUnit: 'g', standardServingSize: '1 serving' })
+
+  function update(field, value) {
+    setDraft((current) => ({ ...current, [field]: value }))
+  }
+
+  function submit(event) {
+    event.preventDefault()
+    const standardServingSize = draft.standardServingSize.trim() || '1 serving'
+    const food = { brand: draft.brand.trim(), foodSource: 'Manual entry', meal, name: draft.name.trim(), servingSize: standardServingSize, standardServingSize, servingWeightUnit: draft.servingWeightUnit, servings: 1 }
+    if (draft.servingWeight !== '') food.servingWeight = Number(draft.servingWeight)
+    ;['calories', 'protein', 'carbohydrates', 'fats', ...manualNutrientFields.map(([key]) => key)].forEach((key) => {
+      if (draft[key] !== '') food[key] = Number(draft[key])
+    })
+    onSave(food)
+  }
+
+  return (
+    <form className="manual-food-form" onSubmit={submit}>
+      <div className="manual-food-heading"><div><strong>Manual food entry</strong><span>Add the values for one serving.</span></div><button onClick={onCancel} type="button">Cancel</button></div>
+      <div className="manual-food-grid identity">
+        <label>Food name<input autoFocus required value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="e.g. Homemade granola" /></label>
+        <label>Brand (optional)<input value={draft.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Brand or restaurant" /></label>
+        <label>Standard serving size<input value={draft.standardServingSize} onChange={(event) => update('standardServingSize', event.target.value)} placeholder="e.g. 1 large egg" /></label>
+        <label>Weight for standard serving<span><input min="0" step="0.1" type="number" value={draft.servingWeight} onChange={(event) => update('servingWeight', event.target.value)} /><select aria-label="Serving weight unit" value={draft.servingWeightUnit} onChange={(event) => update('servingWeightUnit', event.target.value)}><option value="g">g</option><option value="mL">mL</option></select></span></label>
+      </div>
+      <div className="manual-food-grid macros">
+        <NutrientInput field="calories" label="Calories" required unit="kcal" value={draft.calories} onChange={update} />
+        <NutrientInput field="carbohydrates" label="Carbohydrates" unit="g" value={draft.carbohydrates} onChange={update} />
+        <NutrientInput field="fats" label="Fats" unit="g" value={draft.fats} onChange={update} />
+        <NutrientInput field="protein" label="Protein" unit="g" value={draft.protein} onChange={update} />
+      </div>
+      <details className="manual-nutrients"><summary>More nutrients <span>Optional</span></summary><div className="manual-food-grid nutrients">{manualNutrientFields.map(([field, label, unit]) => <NutrientInput field={field} key={field} label={label} unit={unit} value={draft[field] ?? ''} onChange={update} />)}</div></details>
+      <button className="primary-button" type="submit">Add to {meal === 'Snack' ? 'Snacks' : meal}</button>
+    </form>
+  )
+}
+
+function NutrientInput({ field, label, onChange, required = false, unit, value }) {
+  return <label>{label}<span><input min="0" required={required} step="0.1" type="number" value={value} onChange={(event) => onChange(field, event.target.value)} /><em>{unit}</em></span></label>
 }
 
 async function waitForVideoElement(videoRef, sessionId, sessionRef) {
@@ -310,7 +362,8 @@ function getScannerButtonLabel(status) {
 
 function FoodResult({ food, isCurator, onPromote, onSave, onSelect }) {
   const suggestions = getServingOptions(food).filter((option) => option !== food.servingSize && option !== '100 g').slice(0, 2)
-  return <div className="food-result-row"><button className="food-result-main" onClick={() => onSelect(food)} type="button"><strong>{food.name}{food.isVerified ? ' ✓' : ''}</strong><span>{[food.brand, food.servingSize].filter(Boolean).join(' · ')}</span>{suggestions.length > 0 && <small>Serving options: {suggestions.join(' or ')}</small>}<em>{food.calories} kcal · P {food.protein}g · C {food.carbohydrates}g · F {food.fats}g</em></button><div className="food-result-actions"><button onClick={() => onSave(food)} type="button">{food.isSaved ? 'Saved' : 'Save'}</button>{isCurator && !food.isVerified && <button onClick={() => onPromote(food)} type="button">Verify</button>}</div></div>
+  const servingWeight = food.servingWeight ? `${food.servingWeight} ${food.servingWeightUnit ?? 'g'}` : ''
+  return <div className="food-result-row"><button className="food-result-main" onClick={() => onSelect(food)} type="button"><strong>{food.name}{food.isVerified ? ' ✓' : ''}</strong><span>{[food.brand, food.standardServingSize ?? food.servingSize, servingWeight].filter(Boolean).join(' · ')}</span>{suggestions.length > 0 && <small>Serving options: {suggestions.join(' or ')}</small>}<em>{food.calories} kcal · P {food.protein}g · C {food.carbohydrates}g · F {food.fats}g</em></button><div className="food-result-actions"><button onClick={() => onSave(food)} type="button">{food.isSaved ? 'Saved' : 'Save'}</button>{isCurator && !food.isVerified && <button onClick={() => onPromote(food)} type="button">Verify</button>}</div></div>
 }
 
 function foodResultKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase() }
@@ -321,6 +374,7 @@ function Icon({ name }) {
   if (name === 'barcode') return <svg {...common}><path d="M4 5v14M7 5v14M11 5v14M14 5v14M16.5 5v14M20 5v14" /></svg>
   if (name === 'mic') return <svg {...common}><rect height="11" rx="3.5" width="7" x="8.5" y="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6" /></svg>
   if (name === 'bookmark') return <svg {...common}><path d="M6.5 4.5A1.5 1.5 0 0 1 8 3h8a1.5 1.5 0 0 1 1.5 1.5V21L12 17l-5.5 4V4.5Z" /></svg>
+  if (name === 'plus') return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>
   return <svg {...common}><path d="m7 9 5 5 5-5" /></svg>
 }
 
@@ -434,6 +488,6 @@ function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete,
 function NutritionDetailsModal({ entries, hydrationMl, onClose, targets, totals, unitSystem }) {
   const mealTotals = Object.entries(entries.reduce((result, entry) => { const meal = entry.meal || 'Other'; result[meal] = (result[meal] || 0) + Number(entry.calories || 0); return result }, {})).map(([name, calories]) => ({ name, calories })).filter((item) => item.calories > 0)
   const colors = ['#2f8cff', '#6aa76d', '#e8b04f', '#f08b46', '#a878d8', '#6b879f']
-  const nutrients = [['Fiber', totals.fiber, 'g'], ['Sugar', totals.sugar, 'g'], ['Saturated fat', totals.saturatedFat, 'g'], ['Polyunsaturated fat', totals.polyunsaturatedFat, 'g'], ['Monounsaturated fat', totals.monounsaturatedFat, 'g'], ['Trans fat', totals.transFat, 'g'], ['Cholesterol', totals.cholesterol, 'mg'], ['Sodium', totals.sodium, 'mg'], ['Potassium', totals.potassium, 'mg'], ['Vitamin A', totals.vitaminA, 'mcg'], ['Vitamin C', totals.vitaminC, 'mg'], ['Vitamin D', totals.vitaminD, 'mcg'], ['Vitamin E', totals.vitaminE, 'mg'], ['Vitamin K', totals.vitaminK, 'mcg'], ['Calcium', totals.calcium, 'mg'], ['Iron', totals.iron, 'mg']]
+  const nutrients = [['Fiber', totals.fiber, 'g'], ['Sugar', totals.sugar, 'g'], ['Saturated fat', totals.saturatedFat, 'g'], ['Polyunsaturated fat', totals.polyunsaturatedFat, 'g'], ['Monounsaturated fat', totals.monounsaturatedFat, 'g'], ['Trans fat', totals.transFat, 'g'], ['Cholesterol', totals.cholesterol, 'mg'], ['Sodium', totals.sodium, 'mg'], ['Potassium', totals.potassium, 'mg'], ['Vitamin A', totals.vitaminA, 'mcg RAE'], ['Vitamin C', totals.vitaminC, 'mg'], ['Vitamin D', totals.vitaminD, 'mcg'], ['Vitamin E', totals.vitaminE, 'mg'], ['Vitamin K', totals.vitaminK, 'mcg'], ['Calcium', totals.calcium, 'mg'], ['Iron', totals.iron, 'mg']]
   return <div className="modal-backdrop" onClick={onClose}><section className="nutrition-details-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Nutrition details" title="Your day at a glance." /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="nutrition-detail-list"><span>Calories<strong>{totals.calories} / {targets.calories ?? '—'}</strong></span><span>Protein<strong>{totals.protein}g / {targets.protein ?? '—'}g</strong></span><span>Carbohydrates<strong>{totals.carbohydrates}g / {targets.carbohydrates ?? '—'}g</strong></span><span>Fat<strong>{totals.fats}g / {targets.fats ?? '—'}g</strong></span><span>Water<strong>{formatHydration(hydrationMl, unitSystem)}</strong></span><span>Foods logged<strong>{entries.length}</strong></span></div><div className="nutrition-meal-chart"><h3>Calories by meal</h3>{mealTotals.length ? <ResponsiveContainer height={210} width="100%"><PieChart><Pie data={mealTotals} dataKey="calories" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3}>{mealTotals.map((item, index) => <Cell fill={colors[index % colors.length]} key={item.name} />)}</Pie><Tooltip formatter={(value) => [`${value} calories`, '']} /></PieChart></ResponsiveContainer> : <p>No calorie breakdown yet.</p>}<div className="nutrition-chart-legend">{mealTotals.map((item, index) => <span key={item.name}><i style={{ background: colors[index % colors.length] }} />{item.name}: {item.calories} cal</span>)}</div></div><div className="nutrition-detail-list expanded">{nutrients.map(([label, value, unit]) => <span key={label}>{label}<strong>{Math.round(Number(value || 0) * 10) / 10}{unit}</strong></span>)}</div></section></div>
 }

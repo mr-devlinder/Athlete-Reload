@@ -25,6 +25,7 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   const [association, setAssociation] = useState('Personal')
   const [newAssociation, setNewAssociation] = useState('')
   const [isCreatingAssociation, setIsCreatingAssociation] = useState(false)
+  const [legalConsent, setLegalConsent] = useState(false)
   function updateProfile(field, value) {
     setProfile((current) => ({
       ...current,
@@ -36,6 +37,10 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   function continueFromProfile(eventSubmit) {
     eventSubmit.preventDefault()
     setError('')
+    if (!legalConsent) {
+      setError('Confirm that you are at least 16 and accept the legal terms before continuing.')
+      return
+    }
     setStep('nutrition')
   }
 
@@ -164,6 +169,10 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
               </select>
             </label>}
           </div>
+          <label className="settings-toggle">
+            <input checked={legalConsent} onChange={(event) => setLegalConsent(event.target.checked)} required type="checkbox" />
+            <span>I am at least 16 and agree to the Privacy Policy, Terms of Service, Medical Disclaimer, and processing of the health and wellness information I choose to enter.</span>
+          </label>
           <button className="primary-button" type="submit">Continue</button>
         </form>
       )}
@@ -175,7 +184,7 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
           <div className="onboarding-two-col onboarding-three-col">
             <label className="select-field">
               Age
-              <input inputMode="numeric" max="120" min="13" type="number" value={profile.age} onChange={(event) => updateProfile('age', event.target.value)} placeholder="Optional" />
+              <input inputMode="numeric" max="120" min="16" type="number" value={profile.age} onChange={(event) => updateProfile('age', event.target.value)} placeholder="Optional" />
             </label>
           </div>
           <ProfileMeasurements profile={profile} onChange={updateProfile} />

@@ -5,6 +5,7 @@ function normalizeProduct(product = {}) {
   const nutriments = product.nutriments ?? {}
   const servingSize = product.serving_size ?? '1 serving'
   const servingGrams = Number.parseFloat(product.serving_quantity) || 100
+  const servingWeightUnit = /\bml\b/i.test(servingSize) ? 'mL' : 'g'
   const nutrient = (key, outputUnit = 'g') => {
     const servingValue = nutriments[`${key}_serving`]
     const per100gValue = nutriments[`${key}_100g`]
@@ -32,6 +33,9 @@ function normalizeProduct(product = {}) {
     name: product.product_name ?? product.product_name_en ?? 'Unnamed food',
     protein: nutrient('proteins'),
     servingSize,
+    standardServingSize: servingSize,
+    servingWeight: servingGrams,
+    servingWeightUnit,
     sugar: nutrient('sugars'),
     saturatedFat: nutrient('saturated-fat'),
     polyunsaturatedFat: nutrient('polyunsaturated-fat'),
@@ -79,7 +83,7 @@ export async function searchFoods(query) {
   if (supabase) {
     try {
       const { data, error } = await supabase.functions.invoke('search-food', { body: { query: search } })
-      if (!error && data?.foods?.length) return rankFoods(data.foods, normalizedQuery)
+      if (!error && data?.foods?.length) return rankFoods(data.foods.map(normalizeFoodRecord), normalizedQuery)
     } catch {
       // The public fallbacks below keep search usable while the edge function is unavailable.
     }
@@ -114,17 +118,18 @@ export async function loadSavedFoods() {
   if (!supabase) return []
   const { data, error } = await supabase.from('saved_foods').select('id, food').order('created_at', { ascending: false })
   if (error) throw error
-  return (data ?? []).map((row) => ({ ...row.food, savedFoodId: row.id, isSaved: true }))
+  return (data ?? []).map((row) => ({ ...normalizeFoodRecord(row.food), savedFoodId: row.id, isSaved: true }))
 }
 
 export async function saveFood(food) {
   if (!supabase) return { ...food, isSaved: true }
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Sign in to save foods.')
-  const sourceKey = getFoodSourceKey(food)
-  const { data, error } = await supabase.from('saved_foods').upsert({ user_id: user.id, source_key: sourceKey, food: stripFoodState(food) }, { onConflict: 'user_id,source_key' }).select('id, food').single()
+  const normalizedFood = normalizeFoodRecord(food)
+  const sourceKey = getFoodSourceKey(normalizedFood)
+  const { data, error } = await supabase.from('saved_foods').upsert({ user_id: user.id, source_key: sourceKey, food: stripFoodState(normalizedFood) }, { onConflict: 'user_id,source_key' }).select('id, food').single()
   if (error) throw error
-  return { ...data.food, savedFoodId: data.id, isSaved: true }
+  return { ...normalizeFoodRecord(data.food), savedFoodId: data.id, isSaved: true }
 }
 
 export function isSameSavedFood(first, second) {
@@ -150,7 +155,18 @@ export async function verifyFood(food) {
   return data.food
 }
 
-function getFoodSourceKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim() }
+function getFoodSourceKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.standardServingSize ?? food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim() }
+function normalizeFoodRecord(food = {}) {
+  const standardServingSize = food.standardServingSize ?? food.servingSize ?? '1 serving'
+  const explicitWeight = String(standardServingSize).match(/(\d+(?:\.\d+)?)\s*(g|ml)\b/i)
+  return {
+    ...food,
+    servingSize: food.servingSize ?? standardServingSize,
+    standardServingSize,
+    servingWeight: food.servingWeight ?? (explicitWeight ? Number(explicitWeight[1]) : undefined),
+    servingWeightUnit: food.servingWeightUnit ?? (explicitWeight?.[2]?.toLowerCase() === 'ml' ? 'mL' : 'g'),
+  }
+}
 function stripFoodState(food) {
   const value = { ...food }
   for (const field of ['isSaved', 'savedFoodId', 'isVerified', 'meal', 'id', 'loggedAt', 'date', 'completed']) delete value[field]

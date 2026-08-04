@@ -32,14 +32,14 @@ Deno.serve(async (request) => {
 
 function sanitizeFood(food: Record<string, unknown> = {}) {
   const numeric = ['calories', 'protein', 'carbohydrates', 'fats', 'fiber', 'sugar', 'saturatedFat', 'polyunsaturatedFat', 'monounsaturatedFat', 'transFat', 'cholesterol', 'sodium', 'potassium', 'calcium', 'iron', 'vitaminA', 'vitaminC', 'vitaminD', 'vitaminE', 'vitaminK']
-  const result: Record<string, unknown> = { barcode: String(food.barcode ?? ''), brand: String(food.brand ?? ''), foodSource: String(food.foodSource ?? ''), name: String(food.name ?? '').trim().slice(0, 180), servingSize: String(food.servingSize ?? '1 serving').slice(0, 80) }
+  const standardServingSize = String(food.standardServingSize ?? food.servingSize ?? '1 serving').slice(0, 80)
+  const result: Record<string, unknown> = { barcode: String(food.barcode ?? ''), brand: String(food.brand ?? ''), foodSource: String(food.foodSource ?? ''), name: String(food.name ?? '').trim().slice(0, 180), servingSize: standardServingSize, standardServingSize, servingWeight: Math.max(0, Number(food.servingWeight ?? 0) || 0), servingWeightUnit: food.servingWeightUnit === 'mL' ? 'mL' : 'g' }
   for (const key of numeric) result[key] = Math.max(0, Number(food[key] ?? 0) || 0)
   return result
 }
 
 function sourceKey(food: Record<string, unknown>) {
-  return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim()
+  return String(food.barcode || `${food.name}|${food.brand}|${food.standardServingSize ?? food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }) }
-

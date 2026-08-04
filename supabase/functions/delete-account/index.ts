@@ -61,20 +61,8 @@ Deno.serve(async (request) => {
     apikey: serviceRoleKey,
     Authorization: `Bearer ${serviceRoleKey}`,
   }
-  const userId = encodeURIComponent(user.id)
-
-  for (const table of ['pain_reports', 'training_checkouts', 'check_ins', 'schedule_events', 'athlete_associations', 'privacy_preferences', 'athlete_profiles']) {
-    const deleted = await fetch(`${projectUrl}/rest/v1/${table}?user_id=eq.${userId}`, {
-      method: 'DELETE',
-      headers: adminHeaders,
-    })
-
-    if (!deleted.ok) {
-      return respond({ error: 'Unable to delete account data' }, 500)
-    }
-  }
-
-  const deletedUser = await fetch(`${projectUrl}/auth/v1/admin/users/${userId}`, {
+  // User-owned tables cascade from auth.users, keeping erasure complete as tables are added.
+  const deletedUser = await fetch(`${projectUrl}/auth/v1/admin/users/${encodeURIComponent(user.id)}`, {
     method: 'DELETE',
     headers: adminHeaders,
   })

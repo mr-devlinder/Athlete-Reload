@@ -33,12 +33,31 @@ async function callRecommendationFunction(payload) {
   return data
 }
 
-export async function generateAiRecommendation(payload) {
+const personalizationFields = [
+  'athleteProfile',
+  'baseline',
+  'dailyWellness',
+  'nutritionContext',
+  'recentEvents',
+  'recentPainReports',
+  'recentRoutineExerciseNames',
+  'recentRoutineSequences',
+  'recoveryCompletions',
+  'previousCheckout',
+  'previousRecoveryCompletion',
+  'weeklyWorkloadContext',
+]
+
+function withoutPersonalization(payload) {
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => !personalizationFields.includes(key)))
+}
+
+export async function generateAiRecommendation(payload, { personalize = true } = {}) {
   let timeoutId
 
   try {
     const data = await Promise.race([
-      callRecommendationFunction(payload),
+      callRecommendationFunction(personalize ? payload : withoutPersonalization(payload)),
       new Promise((_, reject) => {
         timeoutId = setTimeout(() => {
           reject(new Error('Recommendation request timed out'))

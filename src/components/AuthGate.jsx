@@ -5,6 +5,7 @@ import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 
 const authDefaults = {
   email: '',
+  legalConsent: false,
   password: '',
 }
 
@@ -139,6 +140,11 @@ export function AuthGate({
   async function signInWithProvider(provider) {
     setAuthMessage('')
 
+    if (isSigningUp && !authForm.legalConsent) {
+      setAuthMessage('Confirm that you are at least 16 and accept the legal terms before creating an account.')
+      return
+    }
+
     if (!hasSupabaseConfig) {
       setAuthMessage('Social sign-in is available after Supabase is connected.')
       return
@@ -241,6 +247,11 @@ export function AuthGate({
       return
     }
 
+    if (isSigningUp && !authForm.legalConsent) {
+      setAuthMessage('Confirm that you are at least 16 and accept the legal terms before creating an account.')
+      return
+    }
+
     setIsSubmitting(true)
 
     const authRequest = isSigningUp
@@ -248,6 +259,12 @@ export function AuthGate({
           email: authForm.email,
           password: authForm.password,
           options: {
+            data: {
+              age_16_or_older_confirmed: true,
+              legal_accepted_at: new Date().toISOString(),
+              legal_version: '2026-08-04',
+              sensitive_data_processing_consent: true,
+            },
             emailRedirectTo: getAuthRedirectUrl(),
           },
         })
@@ -462,6 +479,13 @@ export function AuthGate({
         </label>
 
         {isSigningUp && <PasswordStrength strength={passwordStrength} />}
+
+        {isSigningUp && (
+          <label className="settings-toggle">
+            <input checked={authForm.legalConsent} onChange={(event) => updateAuthField('legalConsent', event.target.checked)} required type="checkbox" />
+            <span>I am at least 16 and agree to the Privacy Policy, Terms of Service, Medical Disclaimer, and processing of the health and wellness information I choose to enter.</span>
+          </label>
+        )}
 
         {authMessage && <p className="auth-message">{authMessage}</p>}
 

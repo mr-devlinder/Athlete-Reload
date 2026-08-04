@@ -319,6 +319,7 @@ function toPainReportRow(report) {
 
 function fromPrivacyPreferencesRow(row) {
   return {
+    aiPersonalizationEnabled: row.ai_personalization_enabled !== false,
     analyticsAllowed: row.analytics_allowed,
     cloudSync: row.cloud_sync,
     coachIncludeNotes: row.coach_include_notes,
@@ -452,6 +453,7 @@ function toLegacyDailyWellnessRow(wellness) {
 
 function toPrivacyPreferencesRow(preferences) {
   return {
+    ai_personalization_enabled: preferences.aiPersonalizationEnabled !== false,
     analytics_allowed: Boolean(preferences.analyticsAllowed),
     cloud_sync: Boolean(preferences.cloudSync),
     coach_include_notes: Boolean(preferences.coachIncludeNotes),
