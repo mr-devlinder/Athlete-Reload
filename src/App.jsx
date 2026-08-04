@@ -1588,6 +1588,7 @@ function App() {
       const savedWellness = await upsertDailyWellness(wellness)
       if (savedWellness.date === todayIso) setDailyWellness(savedWellness)
       setNutritionHistory((current) => [savedWellness, ...current.filter((entry) => entry.date !== savedWellness.date)])
+      setDataStatus('synced')
     } catch (error) {
       console.error(error)
       setDataStatus('error')
