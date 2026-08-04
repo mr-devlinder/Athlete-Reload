@@ -97,7 +97,7 @@ export const sportProfiles = {
     defaultCompetitionMinutes: 90,
     eventTypes: ['Match', 'Team training', 'Individual training', 'Gym session', 'Conditioning', 'Other activity', 'Recovery', 'Recovery Day', 'Rest Day'],
     surfaces: ['Natural grass', 'Artificial turf', 'Indoor turf', 'Gym'],
-    workloadFields: [selectField('sprintExposure', 'Sprint exposure', ['event', 'checkout'], ['Low', 'Moderate', 'High'], { eventTypes: ['Match', 'Team training', 'Individual training'] })],
+    workloadFields: [],
   },
   Swimming: {
     positions: ['Freestyle', 'Backstroke', 'Breaststroke', 'Butterfly', 'Individual medley', 'Distance'],

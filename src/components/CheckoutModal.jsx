@@ -24,6 +24,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
     position: athleteProfile?.position,
     eventType: event.type,
   })
+  const relevantSessionContentOptions = getSessionContentOptions(event)
 
   useEffect(() => {
     document.body.classList.add('modal-open')
@@ -59,7 +60,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
       setIsEditing(false)
     } catch (error) {
       console.error(error)
-      setSaveError('We could not save this checkout. Check your connection and try again.')
+      setSaveError(error instanceof Error ? error.message : 'We could not generate the AI recovery plan. Please try again.')
     } finally {
       setIsSaving(false)
     }
@@ -84,6 +85,10 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
           ) : (
             <div className="modal-form">
             {saveError && <p className="form-error" role="alert">{saveError}</p>}
+            <div className="checkout-event-summary">
+              <strong>{event.type}</strong>
+              <span>{event.date}{event.time ? ` at ${event.time}` : ''} · {event.expectedDuration ?? event.plannedMinutes ?? 'No'} planned minutes</span>
+            </div>
             <div className="quick-checkin-tools">
               <p>Use a quick checkout description, then review the captured fields before saving.</p>
               <VoiceDraftButton logType="post_checkout" onApply={(voiceDraft) => Object.entries(voiceDraft).forEach(([field, value]) => { if (value !== null && field !== 'notes') updateDraft(field, value) })} />
@@ -111,13 +116,13 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
                 onChange={(value) => updateDraft('sportWorkload', { ...(draft.sportWorkload ?? {}), [field.key]: value })}
               />
             ))}
-            <div className="checkout-section modal-notes">
+            {draft.participation !== 'Did not participate' && <div className="checkout-section modal-notes">
               <div className="checkout-section-heading">
                 <strong>What happened</strong>
                 <span>Choose the work you actually did.</span>
               </div>
-              <CheckboxGroup options={sessionContentOptions} value={draft.sessionContent} onChange={(value) => updateDraft('sessionContent', value)} />
-            </div>
+              <CheckboxGroup options={relevantSessionContentOptions} value={draft.sessionContent.filter((item) => relevantSessionContentOptions.includes(item))} onChange={(value) => updateDraft('sessionContent', value)} />
+            </div>}
 
             <div className="checkout-section modal-notes">
               <Slider
@@ -135,6 +140,10 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
                 <p>{Number(draft.actualMinutes) || 0} minutes x {draft.difficulty} effort. Use this to compare your own patterns over time.</p>
               </div>
             </div>
+            <label className="compact-field modal-notes">
+              Checkout notes
+              <textarea value={draft.notes ?? ''} onChange={(event) => updateDraft('notes', event.target.value)} placeholder="Optional context about this event" />
+            </label>
 
             <div className="checkout-section modal-notes">
               <div className="checkout-section-heading">
@@ -199,66 +208,10 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
   )
 }
 
-function CheckoutComparison({ checkout, event, onEdit, preCheckIn }) {
-  const sessionLoad = checkout.sessionLoad ?? getSessionLoad(checkout)
-  const content = checkout.sessionContent?.length ? checkout.sessionContent.join(', ') : 'No session content recorded'
-  const painChanges = getPainChanges(preCheckIn?.painMap, checkout.painMap)
-  const expectedParticipation = getExpectedParticipation(event)
-  const plannedMinutes = Number(checkout.plannedMinutes ?? event?.plannedMinutes ?? event?.expectedDuration ?? 0)
-
+function CheckoutComparison({ checkout, onEdit }) {
   return (
     <div className="checkout-comparison">
-      <div className="workload-delta matched">
-        <span>Session load</span>
-        <strong>{sessionLoad}</strong>
-        <p>{checkout.actualMinutes} minutes at {checkout.difficulty}/10 effort. This is for comparing your own sessions over time.</p>
-      </div>
-
-      <div className="checkout-comparison-heading">
-        <p className="eyebrow">Event comparison</p>
-        <h3>What changed from plan to reality.</h3>
-      </div>
-      <div className="comparison-grid">
-        <span>
-          <strong>Expected difficulty</strong>
-          {preCheckIn?.expectedDifficulty ?? 'Not recorded'}/10 planned vs {checkout.difficulty}/10 actual
-        </span>
-        <span>
-          <strong>Minutes</strong>
-          {plannedMinutes || 'Not recorded'} planned vs {checkout.actualMinutes} completed
-        </span>
-        <span>
-          <strong>Participation</strong>
-          {expectedParticipation} planned vs {checkout.participation ?? checkout.completionLevel} actual
-        </span>
-        <span>
-          <strong>Session content</strong>
-          {content}
-        </span>
-        <span>
-          <strong>Soreness</strong>
-          {preCheckIn ? `${preCheckIn.soreness}/5 before vs ` : ''}{checkout.postSoreness ?? 3}/5 after
-        </span>
-        <span>
-          <strong>Fatigue</strong>
-          {preCheckIn ? `${preCheckIn.fatigue}/5 before vs ` : ''}{checkout.postFatigue ?? 3}/5 after
-        </span>
-        <span>
-          <strong>Performance</strong>
-          {checkout.performanceRating ?? 'Normal'}
-        </span>
-      </div>
-
-      <div className="pain-change-summary">
-        <strong>Pain map changes</strong>
-        {painChanges.length > 0 ? (
-          <ul>{painChanges.map((change) => <li key={change}>{change}</li>)}</ul>
-        ) : (
-          <p>No pain locations were added, removed, or changed meaningfully.</p>
-        )}
-      </div>
-
-      {checkout.recommendation && (
+      {checkout.recommendation?._source === 'gemini' && (
         <RecoveryPlanCard
           recommendation={checkout.recommendation}
           recommendationStatus="ai"
@@ -271,32 +224,6 @@ function CheckoutComparison({ checkout, event, onEdit, preCheckIn }) {
       </button>
     </div>
   )
-}
-
-function getExpectedParticipation(event) {
-  if (event?.type === 'Recovery' || event?.type === 'Rest day') return 'Limited'
-  if (/gym|workout|optional/i.test(`${event?.type ?? ''} ${event?.title ?? ''}`)) return 'Individual'
-  return 'Full'
-}
-
-function getPainChanges(preMap = {}, postMap = {}) {
-  const labels = new Map(bodyPainAreas.map((area) => [area.id, area.label]))
-  const areaIds = new Set([...Object.keys(preMap ?? {}), ...Object.keys(postMap ?? {})])
-
-  return [...areaIds].flatMap((areaId) => {
-    const before = Number(preMap?.[areaId] ?? 0)
-    const after = Number(postMap?.[areaId] ?? 0)
-    const label = labels.get(areaId) ?? areaId
-
-    if (before === 0 && after > 0) return [`${label} was added after the event (${Math.round(after / 10)}/10).`]
-    if (before > 0 && after === 0) return [`${label} settled to no reported pain after the event.`]
-    if (Math.abs(after - before) >= 10) {
-      const direction = after > before ? 'increased' : 'decreased'
-      return [`${label} ${direction} from ${Math.round(before / 10)}/10 to ${Math.round(after / 10)}/10.`]
-    }
-
-    return []
-  })
 }
 
 function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
@@ -318,9 +245,10 @@ function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
     postFatigue: checkout?.postFatigue ?? 3,
     postSoreness: checkout?.postSoreness ?? 3,
     performanceRating: checkout?.performanceRating ?? 'Normal',
-    sessionContent: checkout?.sessionContent ?? [],
+    sessionContent: (checkout?.sessionContent ?? []).filter((item) => getSessionContentOptions(event).includes(item)),
     sportWorkload: checkout?.sportWorkload ?? event.sportWorkload ?? {},
     cramping: checkout?.cramping ?? false,
+    notes: checkout?.notes ?? '',
   }
 }
 
@@ -387,6 +315,16 @@ function CheckboxGroup({ options, value = [], onChange }) {
       })}
     </div>
   )
+}
+
+function getSessionContentOptions(event) {
+  const eventName = `${event?.type ?? ''} ${event?.title ?? ''}`.toLowerCase()
+  if (/rest|recovery/.test(eventName)) return ['Recovery']
+  if (/strength|gym|lift|weight/.test(eventName)) return ['Strength', 'Plyometrics', 'Recovery']
+  if (/race|run|track|conditioning|endurance|road|speed/.test(eventName)) return ['Sprinting', 'Endurance', 'Plyometrics', 'Recovery']
+  if (/game|match|meet|tournament|bout|round/.test(eventName)) return ['Technical work', 'Tactical work', 'Scrimmage', 'Sprinting', 'Endurance', 'Plyometrics']
+  if (/practice|training|workout|session/.test(eventName)) return ['Technical work', 'Tactical work', 'Scrimmage', 'Sprinting', 'Endurance', 'Strength', 'Plyometrics', 'Recovery']
+  return sessionContentOptions
 }
 
 function getSessionLoad(draft) {

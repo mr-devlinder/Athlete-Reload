@@ -12,7 +12,7 @@ export function Select({ description, label, value, options, onChange }) {
   )
 }
 
-export function Slider({ description, label, min = 0, max, maxLabel, value, unit, onChange }) {
+export function Slider({ description, formatValue, label, min = 0, max, maxLabel, reverse = false, value, unit, onChange }) {
   const numericMin = Number(min)
   const numericMax = Number(max)
   const parsedValue = Number(value)
@@ -21,6 +21,7 @@ export function Slider({ description, label, min = 0, max, maxLabel, value, unit
     : numericMin
   const range = numericMax - numericMin
   const progress = range > 0 ? ((numericValue - numericMin) / range) * 100 : 0
+  const displayedProgress = reverse ? 100 - progress : progress
 
   function handleChange(event) {
     const nextValue = Number(event.currentTarget.value)
@@ -34,14 +35,15 @@ export function Slider({ description, label, min = 0, max, maxLabel, value, unit
       <input
         max={numericMax}
         min={numericMin}
+        dir={reverse ? 'rtl' : 'ltr'}
         step={1}
-        style={{ '--range-progress': `${progress}%` }}
+        style={{ '--range-progress': `${displayedProgress}%` }}
         type="range"
         value={numericValue}
         onChange={handleChange}
       />
       <span>
-        {maxLabel && numericValue === numericMax ? maxLabel : `${numericValue}${unit ?? ''}`}
+        {formatValue ? formatValue(numericValue) : maxLabel && numericValue === numericMax ? maxLabel : `${numericValue}${unit ?? ''}`}
       </span>
     </label>
   )

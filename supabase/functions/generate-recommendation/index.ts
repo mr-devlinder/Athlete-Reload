@@ -23,9 +23,13 @@ type Recommendation = {
   recoverySteps?: Array<{ title: string; why: string; when: string; id?: string }>
   timeline?: Array<{ title: string; items: string[] }>
   routine?: { title: string; summary: string; durationMinutes: number; painAware: boolean; exercises: any[] }
+  reportSections?: Array<{ id: string; title: string; summary: string; items: string[]; action?: string; actionLabel?: string }>
 }
 
+const requestWindows = new Map<string, number[]>()
+
 Deno.serve(async (request) => {
+  let stage = 'request_validation'
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -37,52 +41,73 @@ Deno.serve(async (request) => {
   const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
 
   if (!geminiApiKey) {
-    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 500)
+    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 503)
   }
 
   try {
+    stage = 'parse_request'
     const body = await request.json()
+    const requester = getRequesterKey(request)
+    const now = Date.now()
+    const recent = (requestWindows.get(requester) ?? []).filter((time) => now - time < 60_000)
+    if (recent.length >= 3) return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429)
+    requestWindows.set(requester, [...recent, now])
     if (body?.requestType === 'voice_extract') {
       const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
       return jsonResponse({ extraction: extractionResponse })
     }
-    const model = 'gemini-3.5-flash-lite'
-    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': geminiApiKey,
-      },
-      body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: buildPrompt(body) }] }] }),
-    })
-
+    stage = 'gemini_request'
+    const { response: geminiResponse, model } = await requestGemini(geminiApiKey, buildPrompt(body))
     if (!geminiResponse.ok) {
       const detail = await geminiResponse.text()
       return jsonResponse({ error: 'Gemini request failed', detail }, 502)
     }
 
+    stage = 'parse_gemini_response'
     const data = await geminiResponse.json()
     const text = extractOutputText(data)
-    const recommendation = normalizeRecommendation(JSON.parse(stripJsonFence(text)), body)
+    stage = 'normalize_recommendation'
+    const recommendation = normalizeRecommendation(parseJsonResponse(text), body)
 
-    return jsonResponse({ recommendation, source: 'gemini' })
+    return jsonResponse({ recommendation, source: 'gemini', model })
   } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+      stage,
+    }))
+    const stageStatus = {
+      parse_request: 520,
+      build_prompt: 524,
+      gemini_request: 521,
+      parse_gemini_response: 522,
+      normalize_recommendation: 523,
+    }[stage] ?? 500
     return jsonResponse({
       error: 'Unable to generate recommendation',
       detail: error instanceof Error ? error.message : String(error),
-    }, 500)
+      stage,
+    }, stageStatus)
   }
 })
 
 async function generateGeminiJson(apiKey: string, input: string) {
-  const model = 'gemini-3.5-flash-lite'
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+  const { response } = await requestGemini(apiKey, input)
+  if (!response.ok) throw new Error('Gemini request failed')
+  return parseJsonResponse(extractOutputText(await response.json()))
+}
+
+async function requestGemini(apiKey: string, input: string) {
+  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
+  let response: Response | null = null
+  for (const model of models) {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: input }] }] }),
-  })
-  if (!response.ok) throw new Error('Gemini request failed')
-  return JSON.parse(stripJsonFence(extractOutputText(await response.json())))
+    })
+    if (response.ok || ![429, 503].includes(response.status)) return { response, model }
+  }
+  return { response: response!, model: models[models.length - 1] }
 }
 
 function buildVoiceExtractionPrompt(payload: any) {
@@ -117,8 +142,8 @@ JSON shape:
   "legHeaviness": number|null,
   "sleep": number|null,
   "sleepQuality": number|null,
-  "stress": "1 - Low"|"2"|"3"|"4"|"5 - High"|null,
-  "illnessSymptoms": "None"|"Mild"|"Significant"|null,
+  "stress": 0|1|2|3|4|5|null,
+  "illnessSymptoms": 0|1|2|3|4|5|null,
   "expectedDifficulty": number|null,
   "notes": string
 }`}
@@ -127,7 +152,7 @@ JSON shape:
 
 function buildPrompt(payload: unknown) {
   if ((payload as any)?.requestType === 'post_checkout') {
-    return buildPostCheckoutPrompt(payload)
+    return buildCompactPostCheckoutPrompt(payload)
   }
 
   if ((payload as any)?.requestType === 'recovery_plan') {
@@ -140,36 +165,31 @@ function buildPrompt(payload: unknown) {
 
   return `
 You are Athlete Reload's training readiness assistant for student athletes.
+Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
-Use the athlete's current check-in, the selected scheduled event in event, the athlete profile, and previousCheckout to create a recommendation for this specific event. The event is the main unit, not the calendar day. previousCheckout is the only historical session context: use only that single immediately previous completed event when present, and do not infer or reference older sessions. This is not a medical diagnosis. Be practical: do not default to "no training" for very low pain unless the symptoms are red flags. If there are red flags like head injury symptoms, numbness, severe pain, worsening swelling, instability, or pain at rest, recommend adult/medical/athletic trainer help.
+Use the athlete's current check-in, selected event, athlete profile, current nutrition/preparation context, recentEvents, previousCheckout, previousRecoveryCompletion, generatedAt, and future schedule to create a recommendation for this specific event. Recent events establish workload and response patterns, but current information remains most important. This is not a medical diagnosis. Be practical: do not default to "no training" for very low pain unless symptoms are red flags.
 
-Current pain rule: checkIn.painMap and checkIn.pain are the sole source of truth for active pain and restrictions. If they contain no value above 0, do not protect, limit, monitor, or alter activity for any historically painful body part. previousCheckout is historical workload context only and must never turn resolved pain into a current restriction.
+Current pain rule: checkIn.painMap and checkIn.pain are the sole source of truth for active pain and restrictions. History may identify patterns but must never turn resolved pain into a current restriction.
 
-Calibration rules:
-- If energy is 5/5, soreness is 1/5, fatigue is 1/5, leg heaviness is 1/5, sleep is 9-10 hours, sleep quality is 4-5/5, stress is 1-2/5, hydration is adequate, and pain is 0 with no pain areas selected, readiness should be 92-100 and the label should be Full Training unless the schedule/history includes an obvious red flag.
-- Do not punish an athlete for having a normal practice or gym session scheduled when all readiness inputs are excellent.
-- For a game, do not choose Controlled Training just because the event is demanding. If readiness inputs are strong and there are no red flags, use Full Training and give game-specific preparation and monitoring instructions.
-- Use Controlled Training only when the athlete can participate but a clearly identified demand needs to be reduced, such as overhead work, sprinting, jumping, cutting, contact, or volume.
-- Low pain (1-2 out of 10) should usually lead to Full Training or Controlled Training with specific modifications, not automatic rest, unless the pain type is a red flag.
-- A readiness score measures how much the event plan should be adjusted today; it is not a danger score, injury diagnosis, or measure of how serious a person is. Do not make a single low-level pain report dominate the score.
-- With no red flags, a single low-level pain report should generally score in the mid-60s or above. A moderate pain report should usually mean a controlled or modified plan, not a crisis; scores below the mid-50s are for red flags or several meaningful readiness problems together.
-- "Potential Bone Bruise" is not the same as a suspected bone stress injury or fracture. With a low, stable, localized symptom and no red flags, treat it as a bruise and recommend modifying only the affected demands.
-- Sharp pain alone is not a reason to recommend sitting out when it is low-level, localized, stable, and only occurs during one specific movement. Modify that movement and any directly related contact, rather than removing the athlete from every drill.
-- Reserve "Stop and Check In" and a medical-evaluation recommendation for explicit red flags: severe or rapidly worsening pain, meaningful pain at rest, inability to bear weight, obvious swelling/deformity, numbness/tingling/weakness, chest pain, breathing trouble, fainting/confusion, head injury symptoms, or a confirmed/suspected bone stress injury.
-- Example calibration: an athlete with strong energy, minimal soreness/fatigue, seven or more hours of sleep, no illness, and one stable low-level localized symptom should receive a score in the high 60s to low 80s and a controlled or modified event plan. Keep the athlete in the event's unaffected work, modify only the related demands, and do not tell them to merely observe from the sidelines.
+Calibration principles:
+- Infer readiness holistically from the current check-in, the demands of this specific event, preparation status, personal baseline, recent workload/recovery, profile, and schedule. Do not calculate the score from a fixed deduction table and do not anchor ordinary combinations to preset score ranges.
+- A readiness score describes how prepared this athlete appears for this event at this time. Event difficulty alone is not poor readiness, and one minor concern must not dominate otherwise strong information.
+- Weight evidence by relevance and confidence. Current symptoms outweigh history; a well-established personal baseline is more informative than a generic assumption; missing nutrition logs mean unknown rather than deficient.
+- Keep the score, label, summary, concerns, and recommendations internally consistent. Explain only the few factors that materially changed the outlook.
+- Escalate only genuine red flags such as severe or rapidly worsening pain, pain at rest, inability to bear weight, obvious swelling/deformity, neurological symptoms, chest/breathing symptoms, fainting/confusion, head-injury symptoms, or suspected bone stress injury.
 - Avoid/focus should be practical instructions for this event, not generic wellness filler.
 - Give an event plan, not a binary clearance verdict. Explain what the athlete can do, what to change, how to warm up, when to reassess, and what to do afterward.
 - Make each list item a complete, specific instruction of about 8-20 words.
-- Always return 2-4 concrete items in each of preparation, during, and recovery. Those three arrays power the visible event-plan cards, so do not leave them empty.
+- Legacy preparation/during/recovery arrays are storage compatibility only. Put the visible, non-duplicated report content in reportSections.
 - Do not use numeric pain cutoffs or phrases such as "exceeds 3/10" in the recommendation. Describe meaningful changes plainly, such as sharp pain, worsening symptoms, altered movement, or inability to perform the motion normally.
 - Use the event type, sport, association, duration, intensity, surface, environment, and every selected pain area together. Tailor each modification to the athlete's sport and the actual event demands: upper-body symptoms may affect overhead work, throwing, catching, lifting, bracing, or contact; lower-body symptoms may affect sprinting, jumping, cutting, kicking, landing, or lifting; trunk symptoms may affect rotation, bracing, and contact. Head or neck symptoms require the red-flag rules.
 - Use sportContext workload only when values are present. Translate exposure, distance, yardage, throwing, jumping, or contact details into practical preparation and monitoring; never use them to diagnose or predict injury risk.
 - Treat an Other activity as sport-neutral. Use its activity name, duration, planned load, surface/environment, and any prior checkout effort without applying the athlete's primary-sport position or sport-specific workload assumptions.
 - When scheduleContext includes a Rest Day, describe it only as planned rest/recovery context. A scheduled Rest Day is not proof that the athlete is recovered and must never override current wellness, pain, or red-flag information.
 - When event.tournament is present, account for the tournament date range and its scheduled games. A short turnaround to the next match should favor practical recovery, symptom monitoring, and avoiding unnecessary extra work; do not treat a tournament game like an isolated event.
-- Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, illness symptoms, sleep quality, recovery actions, and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, and saved recoveryPlan action statuses or feedback as the prior-session context. Notice when an athlete repeatedly cannot complete an important recovery action, but do not shame them; make the next plan practical and prioritize the most important missing action.
+- Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, numeric illness symptoms (0 none, 5 unwell), sleep quality (5 best, 0 worst), numeric stress (0 low, 5 high), and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, saved recoveryPlan action statuses or feedback, and previousRecoveryCompletion as the prior-session context.
 - Use eventPreparationContext as the only fuel and hydration assessment for this check-in. Its statuses are broad, time-adjusted event-preparation signals, not full-day target completion scores. Do not reconstruct or imply a full-day comparison.
 - For early-morning events or events shortly after waking, explicitly state that full-day food and hydration progress is not expected. Missing logs mean insufficient data, not under-fueled or underhydrated.
 - Respect eventPreparationContext timing. When an event begins soon, suggest only gradual sipping and, if useful, a small familiar snack if tolerated; never recommend rapidly drinking a large amount or eating a large meal to catch up.
@@ -195,6 +215,7 @@ JSON shape:
   "preparation": array of 3 to 5 ordered warm-up or preparation instructions,
   "during": array of 3 to 5 instructions for the event's drills, reps, pace, contact, or intensity,
   "recovery": array of 2 to 4 specific after-event actions,
+  "reportSections": array in this order: main-concerns only when a meaningful issue changes preparation, event-demand, personalized-warm-up, fuel-hydration, pain-guidance only with current pain, motivational-quote. Each item is {"id":"exact-id","title":"display title","summary":"specific 1-2 sentence interpretation","items":["0-4 non-duplicated actionable details"]}. Event demand must follow the actual selected activity rather than the athlete's primary sport. Fuel-hydration must use event timing and logged intake; when intake is unlogged, give a normal proportional baseline without claiming a deficit. Motivational quote must be short, original, and matched to the readiness outlook.
   "reasons": array of 1 to 5 concrete reasons,
   "breakdown": array of score factors like [{"label":"Sleep","value":-8}]
 }
@@ -204,70 +225,86 @@ ${JSON.stringify(payload, null, 2)}
 `
 }
 
+function buildCompactPostCheckoutPrompt(payload: unknown) {
+  return `
+You are Athlete Reload's post-event recovery assistant for a student athlete.
+Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+The event has already ended. Create a practical recovery plan from only the supplied checkout data.
+Do not give participation clearance for the completed event. Do not diagnose injuries.
+Escalate new or worsening pain, changed movement, breathing trouble, dizziness, confusion, or severe symptoms to an adult, coach, athletic trainer, or medical professional.
+
+Return ONLY valid JSON with this exact shape:
+{
+  "score": number from 0 to 100,
+  "label": "a concise event-specific label derived from participation, completion, workload and body response; avoid judgmental language",
+  "tone": "ready" | "caution" | "warning" | "danger",
+  "intensity": "short recovery category",
+  "summary": "one sentence",
+  "action": "one concise recovery priority",
+  "avoid": ["0 to 4 specific items"],
+  "focus": ["2 to 5 specific items"],
+  "preparation": ["1 to 2 immediate post-event actions"],
+  "during": ["1 to 2 actions for the next two hours"],
+  "recovery": ["3 to 5 ordered actions for tonight"],
+  "reportSections": [
+    {"id":"event-summary","title":"Event Summary","summary":"one sentence including actual duration, intensity, participation, completion and meaningful plan difference","items":[]},
+    {"id":"planned-vs-actual","title":"Planned vs. Actual","summary":"one sentence comparison","items":[]},
+    {"id":"workload-summary","title":"Workload Summary","summary":"plain-language meaning of minutes multiplied by effort","items":[]},
+    {"id":"body-response","title":"Body Response","summary":"expected versus unusual response; omit only when no response data exists","items":[]},
+    {"id":"session-quality","title":"Performance or Session Quality","summary":"neutral interpretation, never judgment","items":[]},
+    {"id":"recovery-demand","title":"Recovery Demand","summary":"how much recovery is likely needed and why","items":[]},
+    {"id":"immediate-priorities","title":"Immediate Priorities","summary":"short lead-in","items":["2-4 highest value actions"]},
+    {"id":"next-event-impact","title":"Next Event Impact","summary":"include only when a future event is supplied; do not automatically recommend skipping","items":[]}
+  ],
+  "nextEventWarning": "short warning or empty string",
+  "reasons": ["1 to 5 reasons tied to the checkout"],
+  "breakdown": [{"label":"factor","value":0}]
+}
+
+Checkout context:
+${formatPostCheckoutData(payload as any)}
+`
+}
+
 function buildQuickCheckInPrompt(payload: any) {
   return `
 You are Athlete Reload's quick check-in assistant for a student athlete.
+Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
 Use only the athlete's edited words below. Do not invent missing measurements or pretend the athlete answered the detailed check-in fields.
 Create a practical event recommendation from the information that is actually present. Clearly state what is unknown and keep the plan conservative when important details are missing.
 This is not medical advice or clearance. Direct the athlete to a parent, coach, athletic trainer, or qualified healthcare professional for red flags.
 
-Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, and breakdown.
+Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, breakdown, and reportSections. reportSections may use only main-concerns when meaningful, event-demand, personalized-warm-up, fuel-hydration, pain-guidance only when current pain was explicitly reported, and motivational-quote. Omit any section that cannot be supported by the athlete's words and supplied event context.
 
 Quick check-in text:
 ${String(payload?.quickTranscript ?? '').trim()}
 `
 }
 
-function buildPostCheckoutPrompt(payload: unknown) {
-  return `
-You are Athlete Reload's post-training recovery assistant for student athletes.
 
-Return ONLY valid JSON. No markdown. No extra commentary.
-
-Use the completed event, its preCheckIn, the current checkout, athlete profile, and previousCheckout to create a recovery recommendation after this specific session. previousCheckout is the only historical session context: do not infer or reference older sessions. This is not a medical diagnosis. The goal is to help the athlete recover from the session they just completed and monitor symptoms.
-
-Important behavior:
-- This is after training, not before training. Do not tell the athlete whether to participate in the session they already completed.
-- Use participation, actual session length, session-RPE, session load, session content, fatigue and soreness after the event, pain before versus pain after, and the post-event body map.
-- Use sportContext workload only when values are present. Let minutes, distance, yardage, throwing volume, jumping/cutting exposure, or contact level scale practical recovery guidance; never diagnose or predict injury risk from workload.
-- For an Other activity, use generic duration, session-RPE, participation, surface/environment, and symptom changes. Do not introduce position-specific or primary-sport workload questions.
-- Treat Rest Days in scheduleContext as plans, not evidence of recovery. They may inform pacing and follow-through, but symptoms and safety rules remain decisive.
-- Consider new pain, cramping, dizziness, nausea, headache, unusual shortness of breath, changed movement or performance, performance rating, mental focus, motivation, and whether fatigue affected decisions or technique.
-- Do not make this about deciding tomorrow's participation. Tomorrow's check-in handles that.
-- Use the completed session intensity only to scale recovery care, not to predict readiness. A larger session load needs more deliberate recovery, but never call a number inherently safe or dangerous.
-- Use the athlete profile's sport, position, training style, and dominant side to make recovery steps relevant to the session, without turning the profile into a diagnosis.
-- Use dailyWellness and nutritionContext for practical recovery-food and hydration priorities based on what the athlete has already logged, their targets, goals, and the completed session. Do not prescribe exact medical nutrition quantities or make nutrition the sole reason to escalate a symptom.
-- If pain worsened, symptoms are new, movement changed, or the athlete stopped early, give a more cautious recovery plan and a concise next-event warning for the following check-in.
-- If the session was completed normally with stable pain, give practical recovery steps without sounding alarmist.
-- When the athlete reports cramping with dizziness, nausea, headache, or unusual shortness of breath, instruct them to stop additional exercise, move to a cool environment, and tell an adult, coach, or trainer. State that fainting, confusion, vomiting, or severe/worsening symptoms require urgent help.
-- Red flags like head injury symptoms, numbness, severe or worsening pain, swelling, instability, breathing pain, or pain at rest should recommend adult/medical/athletic trainer help.
-- Use concrete recovery steps: hydration according to team or medical guidance, food, cooldown, gentle mobility, light stretching when appropriate, icing for irritated/sore areas, elevation when swollen, sleep setup, symptom monitoring, and when to tell an adult/coach/athletic trainer.
-- Make the recovery response detailed and actionable, including an order or timing such as immediately after training, later tonight, and before sleep.
-- Always return 2-4 concrete items in each of preparation, during, and recovery. Those three arrays power the visible recovery-plan cards, so do not leave them empty.
-- For a shorter or easier-than-planned session with stable symptoms, explain that normal recovery is appropriate and they should not automatically add extra training.
-- Do not say "prepare for the next session" unless it is a small note inside the recovery context. Do not mention the next event as the main recommendation.
-
-JSON shape:
-{
-  "score": number from 0 to 100, still required for storage but not shown in the recovery UI,
-  "label": "Normal Recovery" | "Monitor Symptoms" | "Extra Recovery" | "Tell an Adult / Trainer" | "Seek Help",
-  "tone": "ready" | "caution" | "warning" | "danger",
-  "intensity": short recovery category phrase like "Normal cooldown" or "Soreness care",
-  "summary": one short sentence explaining the recovery plan,
-  "action": one specific paragraph telling the athlete what to do tonight after training,
-  "avoid": array of 0 to 4 specific things to avoid during recovery,
-  "focus": array of 3 to 5 specific recovery actions,
-  "preparation": array of 0 to 2 immediate post-session steps,
-  "during": array of 0 to 2 symptom-monitoring steps for the next few hours,
-  "recovery": array of 3 to 5 detailed recovery steps in order,
-  "nextEventWarning": one concise carry-forward warning for the next check-in, or an empty string when no special warning is needed,
-  "reasons": array of 1 to 5 concrete reasons,
-  "breakdown": array of score factors like [{"label":"Pain after session","value":-10}]
+function formatPostCheckoutData(payload: any) {
+  return [
+    ['athleteProfile', payload?.athleteProfile],
+    ['checkout', payload?.checkout],
+    ['completedEvent', payload?.completedEvent],
+    ['dailyWellness', payload?.dailyWellness],
+    ['nutritionContext', payload?.nutritionContext],
+    ['generatedAt', payload?.generatedAt],
+    ['nextScheduledEvent', payload?.nextScheduledEvent],
+    ['preCheckIn', payload?.preCheckIn],
+    ['previousCheckout', payload?.previousCheckout],
+    ['recentEvents', payload?.recentEvents],
+    ['scheduleContext', payload?.scheduleContext],
+    ['sportContext', payload?.sportContext],
+  ].map(([label, value]) => `${label}: ${safeJson(value)}`).join('\n')
 }
 
-Athlete data:
-${JSON.stringify(payload, null, 2)}
-`
+function safeJson(value: unknown) {
+  try {
+    return JSON.stringify(value ?? null)
+  } catch {
+    return 'null'
+  }
 }
 
 function buildRecoveryPlanPrompt(payload: unknown) {
@@ -276,6 +313,7 @@ function buildRecoveryPlanPrompt(payload: unknown) {
 
   return `
 You are Athlete Reload's recovery planning assistant for student athletes.
+Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
@@ -292,13 +330,14 @@ Important behavior:
 - Use recoveryCompletions to avoid stacking another demanding routine immediately after one was completed. A recent completion should favor follow-through actions such as food, fluids, and sleep or a shorter gentle routine.
 - Use recentPainReports by latest body area state. A zero-severity follow-up means that area is no longer currently painful, though previous history can still justify sensible monitoring.
 - Use actual minutes, session difficulty, participation, session content, surface, sport, position, current soreness, pain before versus after, new symptoms, changed movement, and the next event's timing together.
-- Generate 3-6 prioritized Do now recovery steps. Each needs a title, why it matters, and a suggested completion time.
+- Generate 2-4 ranked Recovery Priorities inside reportSections. Each must be specific to the selected plan, current context, and recovery window.
 - Use dailyWellness, nutritionContext, selected goals, and dietary preferences to make food and hydration steps practical. Use what is already logged that day; do not prescribe exact medical nutrition quantities or claim a meal repairs an injury.
 - Include normal recovery habits such as fluids, a normal meal or snack, sleep, a cooldown, and comfortable mobility when appropriate. Do not prescribe exact medical or nutrition quantities.
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
 - A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.
 - Do not imply stretching prevents soreness or injury or that temporary looseness proves healing. Present it as optional comfortable mobility or relaxation.
 - Treat the supplied timeAvailable as an exact routine time budget, not merely a maximum. Set routine.durationMinutes to exactly that selected whole-minute duration. The sum of the individual timed exercise steps must land within about one minute of that duration, with enough distinct exercises for the selected plan type. Adjust the content to effort, duration, participation, and the next event. The equipment array describes what is available, but the routine does not need to use every item. Always include a no-equipment option.
+- Never require equipment that is absent from the supplied equipment array. Selected equipment enables an option; it does not obligate its use. Every exercise must include "equipment":"None" or the exact name of one selected item.
 - Build a real stretching and mobility routine, not generic filler. The routine must contain enough distinct stretches and movements to use the full exact time budget. For 5 minutes, return 5-8 individual exercise steps; for 10 minutes, return 10-14; for 15 minutes, 14-18; for 20 minutes, 18-24; for 30 minutes, 24-32. Each step should usually be a 20-45 second hold or 6-12 controlled repetitions; do not rely on long holds to fill time. Never prescribe a three-minute hold or a multi-minute single movement.
 - Only split a movement into separate left and right exercise steps when it is genuinely unilateral. For example, output "Half-kneeling hip-flexor stretch - Left" and then a separate "Half-kneeling hip-flexor stretch - Right" instead of one "each side" entry. Keep truly bilateral or full-body movements, such as cat-cow, child's pose, wall slides, or a symmetrical squat hold, as one exercise labeled "Both sides" or "Full body". Do not force a left/right split where it does not make sense.
 - Unless planType is targeted, flexibility, quick, or mobility, build a full-body recovery routine that includes the major regions relevant after activity. For specialized plan types, stay focused on the selected outcome while keeping adjacent joints and basic whole-body balance where useful. Keep painful or concerning areas protected rather than forcing direct stretching.
@@ -313,6 +352,15 @@ Important behavior:
 - Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
 - If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
 - Do not use a readiness score in this response. A stored score may be 0.
+- Do not generate the legacy recoverySteps or timeline fields. The visible recovery output is reportSections plus the personalized routine.
+- For flexibility, mobility, targeted, full-body, or quick routine requests, return reportSections as an empty array. These users requested a routine, not a full recovery report. Keep the routine personalized from profile, current body state, targeted areas, time, and available equipment.
+- For last-checkout, competition, or recovery-day plans, Recovery Priorities must contain only the highest-value session-specific actions not covered by the dedicated nutrition, hydration, sleep/rest, or pain sections. Never repeat those dedicated goals in Recovery Priorities.
+- Nutrition Guidance must state a real recovery goal in plain language. Use current logged nutrition, time of day, athlete goals, and the completed session when supplied. Explain whether carbohydrates, protein, or an ordinary balanced meal/snack deserves priority and why; do not merely print macro numbers.
+- Hydration Guidance must never estimate exact sweat or fluid loss. Distinguish between returning to normal steady hydration after a light session and deliberately replacing fluids after longer, hotter, or harder work, using symptoms and logged hydration when available.
+- Sleep and Rest Guidance must fit generatedAt and the next event. Do not say only "get sleep"; explain the useful rest priority for the remaining recovery window.
+- Include pain-guidance only when currentRecoveryContext shows current pain. Historical pain alone never enables it.
+- Personalize every routine sequence. Use variationKey as a diversity cue and recentRoutineExerciseNames to avoid returning the same exercise order or exact routine repeatedly. Do not force novelty when a familiar stretch is clearly the safest or best choice; change the surrounding sequence, emphasis, sides, or timing instead.
+- Prefer recognizable stretches and mobility work. Use niche movements sparingly and only when profile, sport, target area, or current body state makes them more useful than a familiar option.
 
 JSON shape:
 {
@@ -320,10 +368,9 @@ JSON shape:
   "tone": "ready" | "caution" | "warning" | "danger",
   "summary": "one short sentence",
   "action": "one short paragraph describing the priority tonight",
-  "recoverySteps": [{"title":"Drink fluids","why":"Why this matters","when":"Right now"}],
-  "timeline": [{"title":"Right now","items":["..."]},{"title":"Within two hours","items":["..."]},{"title":"Tonight","items":["..."]},{"title":"Tomorrow morning","items":["..."]}],
+  "reportSections": [{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on current nutrition and this session","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"practical guidance without claiming exact fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]}],
   "planType": "${planType}",
-  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","durationSeconds":30,"instruction":"...","why":"short reason this movement fits the selected routine type and athlete context","feel":"...","avoid":"..."}]},
+  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","durationSeconds":30,"instruction":"...","why":"short reason this movement fits the selected routine type and athlete context","feel":"...","avoid":"..."}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -377,11 +424,24 @@ function stripJsonFence(value: string) {
     .replace(/\s*```$/i, '')
 }
 
+function parseJsonResponse(value: string) {
+  const cleaned = stripJsonFence(value)
+
+  try {
+    return JSON.parse(cleaned)
+  } catch {
+    const firstBrace = cleaned.indexOf('{')
+    const lastBrace = cleaned.lastIndexOf('}')
+    if (firstBrace < 0 || lastBrace <= firstBrace) throw new Error('AI response did not contain a complete JSON object')
+    return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1))
+  }
+}
+
 function normalizeRecommendation(value: any, payload?: any): Recommendation {
-  const calibration = getCalibration(payload)
+  value = redactAthleteName(value, payload?.athleteProfile)
+  const calibration = getSafetyCalibration(payload)
   const score = clampNumber(value.score, 0, 100)
-  const scoreWithMinimum = calibration.minScore ? Math.max(score, calibration.minScore) : score
-  const calibratedScore = calibration.maxScore ? Math.min(scoreWithMinimum, calibration.maxScore) : scoreWithMinimum
+  const calibratedScore = score
   const action = stringOrFallback(value.action, 'Use a conservative modified session and reassess after warm-up.')
   const prepare = stringArray(value.preparation).slice(0, 5)
   const during = stringArray(value.during).slice(0, 5)
@@ -400,17 +460,15 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
   return {
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
     planType: stringOrFallback(value?.planType, String(payload?.planType ?? 'last-checkout')),
-    action: calibration.minorLocalizedPain && hasOverlyRestrictiveAdvice(action)
-      ? getMinorPainAction(payload)
-      : action,
-    avoid: calibration.clearAvoid ? [] : removeOverlyRestrictiveAdvice(stringArray(value.avoid).slice(0, 4), calibration),
+    action,
+    avoid: stringArray(value.avoid).slice(0, 4),
     breakdown: normalizeBreakdown(value.breakdown),
-    during: ensurePlanItems(removeOverlyRestrictiveAdvice(during, calibration), sectionFallbacks.during),
-    focus: removeOverlyRestrictiveAdvice(stringArray(value.focus).slice(0, 5), calibration),
+    during: ensurePlanItems(during, sectionFallbacks.during),
+    focus: stringArray(value.focus).slice(0, 5),
     intensity: calibration.intensity ?? stringOrFallback(value.intensity, 'Modified load'),
-    label: getRecommendationLabel(value, calibration, payload),
+    label: formatEventLabel(stringOrFallback(value.label, 'Event plan'), payload),
     nextEventWarning: stringOrFallback(value.nextEventWarning, ''),
-    preparation: ensurePlanItems(removeOverlyRestrictiveAdvice(prepare, calibration), sectionFallbacks.preparation),
+    preparation: ensurePlanItems(prepare, sectionFallbacks.preparation),
     reassess: stringArray(value.reassess).slice(0, 3),
     recovery: ensurePlanItems(recovery, sectionFallbacks.recovery),
     recoverySteps: normalizeRecoverySteps(value.recoverySteps, recovery),
@@ -420,7 +478,107 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
     timeline: normalizeRecoveryTimeline(value.timeline, prepare, during, recovery),
     tone,
     routine: normalizeRoutine(value.routine, payload),
+    reportSections: normalizeReportSections(value.reportSections, payload),
   }
+}
+
+function redactAthleteName(value: any, profile: any): any {
+  const names = [profile?.displayName, profile?.fullName, profile?.firstName, profile?.preferredName]
+    .filter((name) => typeof name === 'string' && name.trim().length > 1)
+    .map((name) => name.trim())
+    .sort((first, second) => second.length - first.length)
+  if (names.length === 0) return value
+  if (Array.isArray(value)) return value.map((item) => redactAthleteName(item, profile))
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactAthleteName(item, profile)]))
+  }
+  if (typeof value !== 'string') return value
+  return names.reduce((text, name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    return text.replace(new RegExp(`\\b${escaped}\\b,?\\s*`, 'gi'), '')
+  }, value).replace(/\s+([,.!?;:])/g, '$1').trim()
+}
+
+function getSafetyCalibration(payload: any) {
+  if (payload?.requestType !== 'check_in') return {}
+  const checkIn = payload?.checkIn ?? {}
+  const painDetails = [
+    { injuryType: checkIn.injuryType, painType: checkIn.painType, hurtsWhen: checkIn.hurtsWhen },
+    ...Object.values(checkIn.painDetails ?? {}),
+  ] as Array<any>
+  const highestPain = Math.max(0, Number(checkIn.pain) || 0, ...Object.values(checkIn.painMap ?? {}).map((value) => Number(value) || 0))
+  const hasRedFlag = highestPain >= 8 || Number(checkIn.illnessSymptoms ?? 0) >= 4 || painDetails.some((detail) => {
+    const text = `${detail?.injuryType ?? ''} ${detail?.painType ?? ''} ${detail?.hurtsWhen ?? ''}`.toLowerCase()
+    return /concussion|bone stress|numb|tingling|instability|breathing|faint|confusion|unable to bear weight|at rest/.test(text)
+  })
+  return hasRedFlag ? { tone: 'danger' } : {}
+}
+
+function normalizeReportSections(value: unknown, payload: any) {
+  if (!Array.isArray(value)) return []
+  if (payload?.requestType === 'recovery_plan' && ['flexibility', 'mobility', 'targeted', 'full-body', 'quick'].includes(payload?.planType)) return []
+  const hasCurrentPain = payload?.requestType === 'recovery_plan'
+    ? Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
+    : payload?.requestType === 'post_checkout'
+      ? Object.values(payload?.checkout?.painMap ?? {}).some((severity) => Number(severity) > 0) || Boolean(payload?.checkout?.newPain)
+      : Object.values(payload?.checkIn?.painMap ?? {}).some((severity) => Number(severity) > 0) || Number(payload?.checkIn?.pain) > 0
+  const hasNextEvent = Boolean(payload?.nextScheduledEvent) || Boolean(payload?.scheduleContext?.nextEvent)
+  const seen = new Set<string>()
+  const usedContent = new Set<string>()
+  const suppliedSectionIds = new Set(value.map((section: any) => String(section?.id ?? '').toLowerCase()))
+  const allowedIds = new Set(payload?.requestType === 'post_checkout'
+    ? ['event-summary', 'planned-vs-actual', 'workload-summary', 'body-response', 'session-quality', 'recovery-demand', 'immediate-priorities', 'next-event-impact']
+    : payload?.requestType === 'recovery_plan'
+      ? ['recovery-priorities', 'nutrition-guidance', 'hydration-guidance', 'sleep-rest-guidance', 'pain-guidance']
+      : ['main-concerns', 'event-demand', 'personalized-warm-up', 'fuel-hydration', 'pain-guidance', 'motivational-quote'])
+  const uniqueText = (text: unknown) => {
+    const value = String(text ?? '').trim()
+    const key = value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    if (!key || usedContent.has(key)) return ''
+    usedContent.add(key)
+    return value
+  }
+  return value.flatMap((section: any) => {
+    const id = String(section?.id ?? '').toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+    if (!id || !allowedIds.has(id) || seen.has(id)) return []
+    if (id.includes('pain') && !hasCurrentPain) return []
+    if (id === 'main-concerns' && !stringOrFallback(section?.summary, '') && stringArray(section?.items).length === 0) return []
+    if (id === 'main-concerns' && /^(no |none|nothing|no meaningful|no major)/i.test(String(section?.summary ?? '').trim())) return []
+    if (id === 'next-event-impact' && !hasNextEvent) return []
+    seen.add(id)
+    const summary = uniqueText(section?.summary)
+    const items = stringArray(section?.items).filter((item) => {
+      if (id !== 'recovery-priorities') return true
+      const text = item.toLowerCase()
+      if (suppliedSectionIds.has('nutrition-guidance') && /protein|carb|meal|snack|nutrition|food/.test(text)) return false
+      if (suppliedSectionIds.has('hydration-guidance') && /fluid|water|hydrat|electrolyte/.test(text)) return false
+      if (suppliedSectionIds.has('sleep-rest-guidance') && /sleep|bed|nap|rest/.test(text)) return false
+      if (suppliedSectionIds.has('pain-guidance') && /pain|sore|symptom|swelling/.test(text)) return false
+      return true
+    }).map(uniqueText).filter(Boolean).slice(0, 5)
+    if (!summary && items.length === 0) return []
+    return [{
+      id,
+      title: getReportSectionTitle(id, payload?.requestType),
+      summary,
+      items,
+      action: id === 'personalized-warm-up' ? 'warmup' : undefined,
+      actionLabel: id === 'personalized-warm-up' ? stringOrFallback(section?.actionLabel, 'Open full warm-up') : undefined,
+    }]
+  }).slice(0, 8)
+}
+
+function getReportSectionTitle(id: string, requestType?: string) {
+  if (id === 'pain-guidance') return requestType === 'recovery_plan' ? 'Pain Specific Guidance' : 'Pain and Soreness Guidance'
+  const titles: Record<string, string> = {
+    'main-concerns': 'Main Concerns', 'event-demand': 'Event Demand', 'personalized-warm-up': 'Personalized Warm Up',
+    'fuel-hydration': 'Fuel and Hydration', 'motivational-quote': 'Motivation',
+    'event-summary': 'Event Summary', 'planned-vs-actual': 'Planned vs. Actual Comparison', 'workload-summary': 'Workload Summary',
+    'body-response': 'Body Response', 'session-quality': 'Performance or Session Quality', 'recovery-demand': 'Recovery Demand',
+    'immediate-priorities': 'Immediate Priorities', 'next-event-impact': 'Next Event Impact', 'recovery-priorities': 'Recovery Priorities',
+    'nutrition-guidance': 'Nutrition Guidance', 'hydration-guidance': 'Hydration Guidance', 'sleep-rest-guidance': 'Sleep and Rest Guidance',
+  }
+  return titles[id] ?? id.replace(/-/g, ' ')
 }
 
 function getRoutineGoal(planType: unknown) {
@@ -461,24 +619,42 @@ function normalizeRecoverySteps(value: any, fallback: string[]) {
 }
 
 function normalizeRecoveryTimeline(value: any, preparation: string[], during: string[], recovery: string[]) {
+  const seen = new Set<string>()
+  const uniqueItems = (items: unknown) => stringArray(items).filter((item) => {
+    const key = item.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).slice(0, 5)
+
   if (Array.isArray(value) && value.length > 0) {
     return value.slice(0, 4).map((phase, index) => ({
       title: stringOrFallback(phase?.title, ['Right now', 'Within two hours', 'Tonight', 'Tomorrow morning'][index]),
-      items: stringArray(phase?.items).slice(0, 5),
+      items: uniqueItems(phase?.items),
     })).filter((phase) => phase.items.length > 0)
   }
 
   return [
-    { title: 'Right now', items: preparation.slice(0, 4) },
-    { title: 'Within two hours', items: during.slice(0, 4) },
-    { title: 'Tonight', items: recovery.slice(0, 5) },
-    { title: 'Tomorrow morning', items: ['Recheck soreness and pain before the next readiness check.'] },
+    { title: 'Right now', items: uniqueItems(preparation).slice(0, 4) },
+    { title: 'Within two hours', items: uniqueItems(during).slice(0, 4) },
+    { title: 'Tonight', items: uniqueItems(recovery) },
+    { title: 'Tomorrow morning', items: uniqueItems(['Recheck soreness and pain before the next readiness check.']) },
   ]
 }
 
 function normalizeRoutine(value: any, payload?: any) {
+  const availableEquipment = new Set(stringArray(payload?.equipment).map((item) => item.toLowerCase()))
   const exercises = Array.isArray(value?.exercises)
-    ? value.exercises.slice(0, 32).map((exercise: any) => ({
+    ? value.exercises.filter((exercise: any) => {
+      const required = String(exercise?.equipment ?? 'None').trim().toLowerCase()
+      const exerciseText = `${exercise?.name ?? ''} ${exercise?.instruction ?? ''}`.toLowerCase()
+      const inferredRequirement = [
+        ['foam roller', /foam roll/], ['resistance band', /resistance band|banded/], ['massage ball', /massage ball|lacrosse ball/],
+        ['stationary bike', /stationary bike|cycling/], ['pool', /pool|swim|aquatic/], ['compression equipment', /compression boot|compression sleeve/],
+      ].find(([, pattern]) => (pattern as RegExp).test(exerciseText))?.[0]
+      if (inferredRequirement && !availableEquipment.has(inferredRequirement as string)) return false
+      return !required || required === 'none' || required === 'bodyweight' || availableEquipment.has(required)
+    }).slice(0, 32).map((exercise: any) => ({
       area: stringOrFallback(exercise?.area, 'Comfortable range'),
       avoid: stringOrFallback(exercise?.avoid, 'Sharp or worsening pain'),
       durationSeconds: Number.isFinite(Number(exercise?.durationSeconds))
@@ -486,6 +662,7 @@ function normalizeRoutine(value: any, payload?: any) {
         : 0,
       feel: stringOrFallback(exercise?.feel, 'Mild, comfortable tension'),
       instruction: stringOrFallback(exercise?.instruction, 'Move slowly through a comfortable range.'),
+      equipment: stringOrFallback(exercise?.equipment, 'None'),
       name: stringOrFallback(exercise?.name, 'Gentle mobility'),
       reps: Number.isFinite(Number(exercise?.reps))
         ? clampNumber(exercise.reps, 4, 15)
@@ -560,129 +737,7 @@ function formatEventLabel(label: string, payload: any) {
   return label
 }
 
-function getCalibration(payload: any) {
-  if (payload?.requestType === 'post_checkout') return {}
 
-  const checkIn = payload?.checkIn
-
-  if (!checkIn) return {}
-
-  const idealReadiness =
-    Number(checkIn.energy) >= 5 &&
-    Number(checkIn.soreness) <= 1 &&
-    Number(checkIn.fatigue) <= 1 &&
-    Number(checkIn.legHeaviness ?? 1) <= 1 &&
-    Number(checkIn.sleep) >= 9 &&
-    ['Low', '1 - Low', '2'].includes(checkIn.stress) &&
-    checkIn.hydration === 'Good' &&
-    Number(checkIn.pain) === 0
-
-  if (idealReadiness) {
-    return {
-      clearAvoid: true,
-      intensity: 'Normal load',
-      label: 'Full Training',
-      minScore: 92,
-      tone: 'ready',
-    }
-  }
-
-  const painDetails = Object.values(checkIn.painDetails ?? {}) as Array<any>
-  const painLevels = [Number(checkIn.pain), ...Object.values(checkIn.painMap ?? {}).map(Number)]
-    .filter(Number.isFinite)
-  const highestPain = Math.max(0, ...painLevels)
-  const allPainDetails = [
-    {
-      injuryType: checkIn.injuryType,
-      painType: checkIn.painType,
-      hurtsWhen: checkIn.hurtsWhen,
-    },
-    ...painDetails,
-  ]
-  const hasRedFlag = highestPain >= 8
-    || String(checkIn.illnessSymptoms ?? '').toLowerCase() === 'significant'
-    || allPainDetails.some((detail) => {
-      const injuryType = String(detail?.injuryType ?? '').toLowerCase()
-      const painType = String(detail?.painType ?? '').toLowerCase()
-      const hurtsWhen = String(detail?.hurtsWhen ?? '').toLowerCase()
-
-      return injuryType.includes('concussion')
-        || injuryType.includes('bone stress')
-        || painType.includes('numb')
-        || painType.includes('tingling')
-        || painType.includes('instability')
-        || painType.includes('headache')
-        || hurtsWhen.includes('breathing')
-        || (hurtsWhen === 'at rest' && highestPain >= 4)
-    })
-  const stableMinorLocalizedPain =
-    highestPain > 0
-    && highestPain <= 2
-    && !hasRedFlag
-    && Number(checkIn.energy) >= 4
-    && Number(checkIn.soreness) <= 1
-    && Number(checkIn.fatigue) <= 1
-    && Number(checkIn.legHeaviness ?? 1) <= 2
-    && Number(checkIn.sleep) >= 7
-    && String(checkIn.illnessSymptoms ?? 'None').toLowerCase() === 'none'
-
-  if (stableMinorLocalizedPain) {
-    return {
-      intensity: 'Modified event plan',
-      label: 'Modified Participation',
-      maxScore: 82,
-      minScore: 68,
-      minorLocalizedPain: true,
-      tone: 'caution',
-    }
-  }
-
-  if (highestPain > 0 && highestPain <= 2 && !hasRedFlag) {
-    return {
-      minScore: 64,
-      preventStopLabel: true,
-    }
-  }
-
-  if (highestPain >= 3 && highestPain <= 4 && !hasRedFlag) {
-    return {
-      minScore: 56,
-      preventStopLabel: true,
-    }
-  }
-
-  return {}
-}
-
-function hasOverlyRestrictiveAdvice(value: string) {
-  return /(sit out|sideline|observe practice|no training|do not begin|medical evaluation before|consult a medical)/i.test(value)
-}
-
-function removeOverlyRestrictiveAdvice(items: string[], calibration: any) {
-  if (!calibration.minorLocalizedPain) return items
-
-  return items.filter((item) => !hasOverlyRestrictiveAdvice(item))
-}
-
-function getRecommendationLabel(value: any, calibration: any, payload?: any) {
-  if (calibration.label) return calibration.label
-
-  const requestedLabel = stringOrFallback(value.label, 'Modified Participation')
-  if (calibration.preventStopLabel && /stop and check in|no training|rehab|rest/i.test(requestedLabel)) {
-    return formatEventLabel('Controlled Training', payload)
-  }
-
-  return formatEventLabel(requestedLabel, payload)
-}
-
-function getMinorPainAction(payload: any) {
-  const checkIn = payload?.checkIn ?? {}
-  const area = String(checkIn.location ?? 'affected area').toLowerCase()
-  const event = payload?.schedule?.find((item: any) => item?.id === checkIn.eventId)
-  const eventName = String(event?.type ?? event?.title ?? checkIn.session ?? 'event').toLowerCase()
-
-  return `Take part in ${eventName}, but modify only the movements that recreate your ${area} symptoms and related contact. Keep the unaffected parts of the session, use controlled alternatives for the trigger, and stop that specific movement if symptoms become sharper or change your form.`
-}
 
 function ensurePlanItems(items: string[], fallback: string[]) {
   return items.length > 0 ? items : fallback
@@ -734,6 +789,19 @@ function clampNumber(value: any, min: number, max: number) {
   if (!Number.isFinite(number)) return 60
 
   return Math.max(min, Math.min(max, Math.round(number)))
+}
+
+function getRequesterKey(request: Request) {
+  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+      if (payload?.sub) return `user:${payload.sub}`
+    } catch {
+      // The Supabase gateway validates the token; use the network key only if its payload cannot be decoded.
+    }
+  }
+  return `network:${request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'}`
 }
 
 function jsonResponse(body: unknown, status = 200) {

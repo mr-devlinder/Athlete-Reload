@@ -63,7 +63,7 @@ import {
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
-import { getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
+import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
@@ -215,10 +215,27 @@ function normalizeCheckInScales(checkIn) {
     fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
     legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
     sleep: Math.max(3, Math.min(10, Math.round(Number(checkIn.sleep) || 10))),
+    illnessSymptoms: normalizeIllnessValue(checkIn.illnessSymptoms),
     sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, 5),
     soreness: normalizeFivePointValue(checkIn.soreness, 0),
+    stress: normalizeStressValue(checkIn.stress),
     painMap: normalizePainMapScale(checkIn.painMap, checkIn.pain),
   }
+}
+
+function normalizeStressValue(value) {
+  const parsed = Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.min(5, String(value).includes('Low') ? parsed - 1 : parsed))
+}
+
+function normalizeIllnessValue(value) {
+  if (typeof value === 'number') return Math.max(0, Math.min(5, value))
+  const normalized = String(value ?? '').toLowerCase()
+  if (normalized === 'none') return 0
+  if (normalized === 'mild') return 2
+  if (normalized === 'significant' || normalized === 'unwell') return 5
+  return Math.max(0, Math.min(5, Number.parseInt(normalized, 10) || 0))
 }
 
 function getYesterdayLoadFromSchedule(schedule) {
@@ -284,17 +301,21 @@ function getComparableCheckIn(checkIn) {
     hurtsWhen: checkIn.hurtsWhen ?? '',
     hydration: checkIn.hydration ?? '',
     hydrationOz: Number(checkIn.hydrationOz ?? 0),
+    illnessSymptoms: Number(checkIn.illnessSymptoms ?? 0),
     injuryType: checkIn.injuryType ?? '',
+    legHeaviness: Number(checkIn.legHeaviness ?? 0),
     location: checkIn.location ?? '',
     notes: checkIn.notes ?? checkIn.note ?? '',
     pain: Number(checkIn.pain ?? 0),
     painMap: checkIn.painMap ?? null,
     painType: checkIn.painType ?? '',
     plannedIntensity: checkIn.plannedIntensity ?? '',
+    expectedDifficulty: Number(checkIn.expectedDifficulty ?? 5),
     session: checkIn.session ?? '',
     sleep: Number(checkIn.sleep),
+    sleepQuality: Number(checkIn.sleepQuality ?? 5),
     soreness: Number(checkIn.soreness),
-    stress: checkIn.stress ?? '',
+    stress: Number(checkIn.stress ?? 0),
     yesterdayLoad: checkIn.yesterdayLoad ?? '',
   }
 }
@@ -338,6 +359,10 @@ function withoutNotes(value) {
 
   const { note: _note, notes: _notes, ...rest } = value
   return rest
+}
+
+function normalizePainAreaName(value) {
+  return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
 function getPreviousCheckoutRecommendationContext(previousCheckout, currentCheckIn) {
@@ -422,6 +447,16 @@ function getRecommendationScheduleContext(schedule, event) {
       type: item.type,
     })),
     plannedRestDays: nearbyEvents.filter(isRestDayEvent).map((item) => item.date),
+  }
+}
+
+function getCheckoutWellnessContext(dailyWellness, nutritionContext) {
+  return {
+    date: dailyWellness?.date,
+    hydrationOz: Number(dailyWellness?.hydrationOz ?? 0),
+    nutritionEntryCount: dailyWellness?.nutritionEntries?.length ?? 0,
+    nutritionTotals: nutritionContext?.totals,
+    nutritionTargets: nutritionContext?.targets,
   }
 }
 
@@ -611,7 +646,7 @@ function App() {
   const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
     scoreLabel: 'readiness',
     session: '',
-    title: "Today's recommendation.",
+    title: 'Check-in report',
   })
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
@@ -707,11 +742,6 @@ function App() {
     nutritionHistory,
     schedule,
   }), [checkouts, dailyWellness, nutritionContext, nutritionHistory, schedule, selectedCheckInEvent])
-  const hasEarlierEventToday = Boolean(selectedCheckInEvent && todayEvents.some((event) =>
-    event.id !== selectedCheckInEvent.id
-      && getScheduleTimeValue(event.time) < getScheduleTimeValue(selectedCheckInEvent.time),
-  ))
-
   const localRecommendation = useMemo(
     () => getRecommendation(scheduleDrivenCheckIn),
     [scheduleDrivenCheckIn],
@@ -735,7 +765,10 @@ function App() {
       pain: checkIn.pain,
       location: checkIn.location,
       fatigue: checkIn.fatigue,
+      illnessSymptoms: checkIn.illnessSymptoms,
+      legHeaviness: checkIn.legHeaviness,
       sleep: checkIn.sleep,
+      sleepQuality: checkIn.sleepQuality,
       stress: checkIn.stress,
       yesterdayLoad: scheduleDrivenCheckIn.yesterdayLoad,
       hydration: checkIn.hydration,
@@ -744,6 +777,7 @@ function App() {
       painType: checkIn.painType,
       painMap: checkIn.painMap,
       hurtsWhen: checkIn.hurtsWhen,
+      expectedDifficulty: checkIn.expectedDifficulty,
       plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
       session: scheduleDrivenCheckIn.session,
       note: checkIn.notes,
@@ -751,6 +785,8 @@ function App() {
     [
       checkIn.energy,
       checkIn.fatigue,
+      checkIn.illnessSymptoms,
+      checkIn.legHeaviness,
       checkIn.hurtsWhen,
       checkIn.hydration,
       checkIn.hydrationOz,
@@ -761,6 +797,7 @@ function App() {
       checkIn.painMap,
       checkIn.painType,
       checkIn.sleep,
+      checkIn.sleepQuality,
       checkIn.soreness,
       checkIn.stress,
       recommendation.score,
@@ -1176,7 +1213,7 @@ function App() {
       setSubmittedRecommendationContext({
         scoreLabel: 'readiness',
         session: scheduleDrivenCheckIn.session,
-        title: "Today's recommendation.",
+        title: 'Check-in report',
       })
       setIsSavingCheckIn(false)
       return
@@ -1195,6 +1232,10 @@ function App() {
     if (!savedCheckIn.quickRecommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
+        const previousRecoveryCompletion = recoveryCompletions.find((completion) =>
+          completion.sourceCheckoutId === previousCheckout?.id
+            && String(completion.completedAt ?? '').startsWith(selectedCheckInEvent?.date ?? todayIso),
+        )
 
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
@@ -1210,8 +1251,12 @@ function App() {
             schedule,
           }),
           event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
+          generatedAt: new Date().toISOString(),
+          nutritionContext,
+          recentEvents: checkouts.slice(0, 4).map(withoutNotes),
           sportContext: getSportContext({ athleteProfile, event: selectedCheckInEvent }),
           previousCheckout: getPreviousCheckoutRecommendationContext(previousCheckout, savedCheckIn),
+          previousRecoveryCompletion: withoutNotes(previousRecoveryCompletion),
           requestType: 'check_in',
           scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
         })
@@ -1307,7 +1352,7 @@ function App() {
     setSubmittedRecommendationContext({
       scoreLabel: 'readiness',
       session: scheduleDrivenCheckIn.session,
-      title: "Today's recommendation.",
+      title: 'Check-in report',
     })
     setIsSavingCheckIn(false)
   }
@@ -1704,10 +1749,8 @@ function App() {
       ...checkout,
       painMap: normalizePainMapScale(checkout.painMap, preCheckIn?.pain),
     }
-    const nextScheduledEvent = getNextScheduledEvent(schedule, event)
-    const localCheckoutRecommendation = getLocalCheckoutRecommendation(checkout, event, preCheckIn, nextScheduledEvent)
-    let finalRecommendation = existingCheckout?.recommendation ?? localCheckoutRecommendation
-    let finalRecommendationStatus = existingCheckout?.recommendation ? 'ai' : 'local'
+    let finalRecommendation = existingCheckout?.recommendation ?? null
+    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'loading'
 
     if (supabase) {
       try {
@@ -1717,10 +1760,13 @@ function App() {
           athleteProfile,
           checkout: withoutNotes(checkout),
           completedEvent: attachTournamentContext(event, tournaments, schedule),
-          dailyWellness,
+          dailyWellness: getCheckoutWellnessContext(dailyWellness, nutritionContext),
+          generatedAt: new Date().toISOString(),
+          nextScheduledEvent: getNextScheduledEvent(schedule, event),
           nutritionContext,
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
+          recentEvents: checkouts.filter((item) => item.id !== existingCheckout?.id).slice(0, 4).map(withoutNotes),
           requestType: 'post_checkout',
           scheduleContext: getRecommendationScheduleContext(schedule, event),
           sportContext: getSportContext({ athleteProfile, event, workload: checkout.sportWorkload }),
@@ -1728,8 +1774,7 @@ function App() {
         finalRecommendationStatus = 'ai'
       } catch (error) {
         console.error(error)
-        finalRecommendation = localCheckoutRecommendation
-        finalRecommendationStatus = 'fallback'
+        throw new Error(`AI recovery plan failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
       }
     }
 
@@ -1789,7 +1834,7 @@ function App() {
       setSubmittedRecommendationContext({
         scoreLabel: 'recovery',
         session: event.title || event.type,
-        title: 'Post-training recovery plan.',
+        title: 'Checkout report',
       })
       if (savedCheckout.recommendationNotPersisted) {
         setDataStatus('offline')
@@ -1839,7 +1884,7 @@ function App() {
     setSubmittedRecommendationContext({
       scoreLabel: 'recovery',
       session: event.title || event.type,
-      title: 'Post-training recovery plan.',
+      title: 'Checkout report',
     })
     advanceCheckInAfterCheckout(event, savedCheckout)
   }
@@ -1848,20 +1893,35 @@ function App() {
     const latestCheckout = [...checkouts]
       .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
 
-    if (!latestCheckout) return
+    if (!latestCheckout && planType === 'last-checkout') {
+      setRecoveryPlanStatus('error')
+      return
+    }
 
-    const completedEvent = schedule.find((event) => event.id === latestCheckout.eventId)
-    const preCheckIn = history.find((entry) => entry.eventId === latestCheckout.eventId)
+    const usesCheckoutContext = ['last-checkout', 'competition'].includes(planType)
+    const contextCheckout = usesCheckoutContext ? latestCheckout : null
+    const completedEvent = contextCheckout ? schedule.find((event) => event.id === contextCheckout.eventId) : null
+    const preCheckIn = contextCheckout ? history.find((entry) => entry.eventId === contextCheckout.eventId) : null
     const nextScheduledEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : null
-    const currentPainMap = normalizePainMapScale(checkIn.painMap ?? {}, checkIn.pain)
+    const latestSavedCheckIn = [...history].sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
+    const checkoutTime = latestCheckout ? new Date(latestCheckout.createdAt ?? `${latestCheckout.date}T12:00:00`).getTime() : 0
+    const checkInTime = latestSavedCheckIn ? new Date(latestSavedCheckIn.createdAt ?? `${latestSavedCheckIn.date}T12:00:00`).getTime() : 0
+    const currentBodyReport = checkoutTime >= checkInTime ? latestCheckout : latestSavedCheckIn
+    const currentPainMap = normalizePainMapScale(currentBodyReport?.painMap ?? {}, currentBodyReport?.pain)
     const activePain = Object.fromEntries(Object.entries(currentPainMap).filter(([, severity]) => Number(severity) > 0))
     const currentRecoveryContext = {
-      fatigue: Number(checkIn.fatigue ?? 0),
+      fatigue: Number(currentBodyReport?.postFatigue ?? currentBodyReport?.fatigue ?? 0),
       pain: Math.max(0, ...Object.values(activePain).map(Number)),
       painMap: activePain,
       restrictions: Object.keys(activePain),
-      soreness: Number(checkIn.soreness ?? 0),
+      soreness: Number(currentBodyReport?.postSoreness ?? currentBodyReport?.soreness ?? 0),
+      sourceCreatedAt: currentBodyReport?.createdAt ?? currentBodyReport?.date ?? null,
+      sourceType: currentBodyReport === latestCheckout ? 'checkout' : 'check-in',
     }
+    const recentRoutineExerciseNames = [
+      ...savedRoutines.flatMap((item) => item?.routine?.routine?.exercises ?? item?.routine?.exercises ?? []),
+      ...checkouts.flatMap((item) => item?.recommendation?.recoveryPlan?.routine?.exercises ?? []),
+    ].map((exercise) => exercise?.name).filter(Boolean).slice(0, 60)
 
     setRecoveryPlanStatus('loading')
     setIsReplayingSavedRoutine(false)
@@ -1869,8 +1929,8 @@ function App() {
     try {
       const plan = await generateAiRecommendation({
         athleteProfile,
-        checkout: withoutNotes(latestCheckout),
-        completedEvent: attachTournamentContext(completedEvent, tournaments, schedule),
+        checkout: withoutNotes(contextCheckout),
+        completedEvent: completedEvent ? attachTournamentContext(completedEvent, tournaments, schedule) : null,
         currentRecoveryContext,
         dailyWellness,
         equipment,
@@ -1880,16 +1940,19 @@ function App() {
         planType,
         preCheckIn: withoutNotes(preCheckIn),
         recentPainReports: painReports.slice(0, 12).map(withoutNotes),
+        recentEvents: checkouts.slice(0, 4).map(withoutNotes),
+        recentRoutineExerciseNames,
         recoveryCompletions: recoveryCompletions.slice(0, 5),
         requestType: 'recovery_plan',
         scheduleContext: getRecommendationScheduleContext(schedule, completedEvent),
-        sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout.sportWorkload }),
+        sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
         targetedAreas,
         timeAvailable,
+        variationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       })
 
       setGeneratedRecoveryPlan(plan)
-      setGeneratedRecoveryCheckoutId(latestCheckout.id)
+      setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
       setIsGeneratedRecoveryPlanSaved(false)
       setRecoveryPlanStatus('ai')
     } catch (error) {
@@ -1903,7 +1966,33 @@ function App() {
     const checkout = checkouts.find((item) => item.id === checkoutId)
     const completedEvent = schedule.find((event) => event.id === checkout?.eventId)
 
-    if (!checkout || !completedEvent || !plan) return false
+    if (!plan) return false
+
+    if (!checkout || !completedEvent) {
+      const completion = {
+        completedAt: new Date().toISOString(),
+        details: { plan },
+        id: `recovery-completion-${Date.now()}`,
+        routineId: null,
+        sourceCheckoutId: null,
+      }
+      if (isSupabaseSession) {
+        try {
+          const savedCompletion = await createRecoveryRoutineCompletion(completion)
+          setRecoveryCompletions((current) => [savedCompletion, ...current])
+        } catch (error) {
+          console.error(error)
+          setDataStatus('error')
+          return false
+        }
+      } else {
+        setRecoveryCompletions((current) => [completion, ...current])
+      }
+      setGeneratedRecoveryPlan(null)
+      setGeneratedRecoveryCheckoutId(null)
+      setIsGeneratedRecoveryPlanSaved(false)
+      return true
+    }
 
     const updatedCheckout = {
       ...checkout,
@@ -1970,12 +2059,13 @@ function App() {
     const severity = Number(report.severity)
     if (!report?.area || !Number.isFinite(severity) || severity <= 0) return
 
+    const matchedArea = bodyPainAreas.find((area) => normalizePainAreaName(area.label) === normalizePainAreaName(report.area))
     const painReport = {
-      bodyPart: report.area,
+      bodyPart: matchedArea?.label ?? report.area,
       date: todayIso,
       notes: `Reported during recovery exercise: ${report.exercise ?? 'movement'}${report.type ? ` (${report.type})` : ''}${report.sameIssue ? `. Previously reported issue: ${report.sameIssue}` : ''}`,
       severity,
-      side: 'center',
+      side: matchedArea?.side ?? (/\bleft\b/i.test(report.area) ? 'left' : /\bright\b/i.test(report.area) ? 'right' : 'center'),
       sourceId: report.checkoutId,
       sourceType: 'recovery_routine',
       triggerMovement: report.exercise ?? '',
@@ -2109,42 +2199,6 @@ function App() {
     setRecoveryPlanStatus('idle')
   }
 
-  async function updateRecoveryStep(stepId, status) {
-    const latestCheckout = [...checkouts]
-      .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
-    const completedEvent = schedule.find((event) => event.id === latestCheckout?.eventId)
-
-    if (!latestCheckout || !completedEvent) return
-
-    const recoveryPlan = latestCheckout.recommendation?.recoveryPlan
-    if (!recoveryPlan) return
-
-    const updatedCheckout = {
-      ...latestCheckout,
-      recommendation: {
-        ...latestCheckout.recommendation,
-        recoveryPlan: {
-          ...recoveryPlan,
-          stepStatuses: {
-            ...(recoveryPlan.stepStatuses ?? {}),
-            [stepId]: status,
-          },
-        },
-      },
-    }
-
-    setCheckouts((current) => [updatedCheckout, ...current.filter((item) => item.id !== latestCheckout.id)])
-
-    if (isSupabaseSession) {
-      try {
-        const savedCheckout = await updateTrainingCheckout(latestCheckout.id, completedEvent, updatedCheckout)
-        setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
-      } catch (error) {
-        console.error(error)
-        setDataStatus('error')
-      }
-    }
-  }
 
   function advanceCheckInAfterCheckout(event, savedCheckout) {
     if (event.date !== todayIso) return
@@ -2802,7 +2856,6 @@ function App() {
                 onOpenCheckout={openCheckout}
                 onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
-                hasEarlierEventToday={hasEarlierEventToday}
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
                 isQuickMode={false}
                 restDayPlanned={todayEvents.some(isRestDayEvent)}
@@ -2844,14 +2897,12 @@ function App() {
                 generatedPlanSaved={isGeneratedRecoveryPlanSaved}
                 isReplayingSavedRoutine={isReplayingSavedRoutine}
                 generationStatus={recoveryPlanStatus}
-                nextEvent={nextEvent}
                 recentCompletion={recoveryCompletions[0] ?? null}
                 onGeneratePlan={generateRecoveryPlan}
                 onReplaySavedRoutine={replaySavedRoutine}
                 onReportRoutinePain={reportRoutinePain}
                 onCompleteSavedRoutine={completeSavedRoutine}
                 onSaveRecoveryPlan={saveRecoveryPlan}
-                onUpdateRecoveryStep={updateRecoveryStep}
                 schedule={schedule}
                 savedRoutines={savedRoutines}
               />
@@ -2961,7 +3012,7 @@ function App() {
           <section className="event-modal recommendation-modal glass-panel" role="dialog" aria-modal="true">
             <div className="schedule-header">
               <div>
-                <p className="eyebrow">Saved</p>
+                <p className="eyebrow">AI report</p>
                 <h2>{submittedRecommendationContext.title}</h2>
               </div>
               <button className="ghost-close" onClick={() => setSubmittedRecommendation(null)} type="button">

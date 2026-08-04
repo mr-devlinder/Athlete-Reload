@@ -349,7 +349,8 @@ function getReasons(checkIn) {
   if (Number(checkIn.energy) <= 2) reasons.push('low energy')
   if (Number(checkIn.soreness) >= 4) reasons.push('high soreness')
   if (Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
-  if (String(checkIn.stress).includes('High')) reasons.push('high stress')
+  if (Number(checkIn.stress) >= 4) reasons.push('high stress')
+  if (Number(checkIn.illnessSymptoms) >= 3) reasons.push('illness symptoms')
   if (['Hard', 'Game'].includes(checkIn.yesterdayLoad)) {
     reasons.push(`a ${checkIn.yesterdayLoad.toLowerCase()} session yesterday`)
   }
@@ -567,6 +568,7 @@ export function getRecommendation(checkIn) {
   const breakdown = [
     { label: 'Energy', value: -Math.max(0, 5 - checkIn.energy) * 5 },
     { label: 'Sleep', value: -Math.max(0, 8 - checkIn.sleep) * 6 },
+    { label: 'Sleep quality', value: -Math.max(0, 5 - Number(checkIn.sleepQuality ?? 5)) * 4 },
     { label: 'Fatigue', value: -Math.max(0, checkIn.fatigue - 1) * 5 },
     { label: 'Soreness', value: -Math.max(0, checkIn.soreness - 1) * 5 },
     { label: 'Leg heaviness', value: -Math.max(0, (checkIn.legHeaviness ?? 1) - 1) * 4 },
@@ -577,7 +579,11 @@ export function getRecommendation(checkIn) {
     { label: 'Scheduled session', value: -getSessionRisk(checkIn, pain) },
     {
       label: 'Stress',
-      value: -riskFromChoice(checkIn.stress, { Low: 0, Medium: 5, High: 12 }),
+      value: -Math.max(0, Number(checkIn.stress ?? 0)) * 2.4,
+    },
+    {
+      label: 'Illness',
+      value: -Math.max(0, Number(checkIn.illnessSymptoms ?? 0)) * 4,
     },
     {
       label: 'Yesterday',

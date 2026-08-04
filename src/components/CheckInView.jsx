@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { BodyPainMap } from './BodyPainMap'
-import { Select, Slider } from './FormControls'
+import { Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
 import { getCheckoutForEvent, hasEventStarted, isAllDayCheckInOpen, isAllDayEvent } from '../utils/events'
@@ -24,7 +24,6 @@ export function CheckInView({
   onOpenCheckout,
   onSelectEvent,
   onUpdate,
-  hasEarlierEventToday,
   isFirstEventToday,
   isQuickMode = false,
   restDayPlanned = false,
@@ -152,31 +151,37 @@ export function CheckInView({
               unit="h"
               onChange={(value) => onUpdate('sleep', value)}
             />
-            <Select
+            <Slider
               description="How restful and restorative your sleep felt."
               label="Sleep quality"
-              value={String(checkIn.sleepQuality ?? 5)}
-              options={['1', '2', '3', '4', '5']}
-              onChange={(value) => onUpdate('sleepQuality', Number(value))}
+              min={0}
+              max={5}
+              value={checkIn.sleepQuality ?? 5}
+              unit="/5"
+              onChange={(value) => onUpdate('sleepQuality', value)}
             />
           </>
         )}
         <div className="select-row">
-          <Select
+          <Slider
             description="How much pressure or worry you feel today."
             label="Stress"
-            value={checkIn.stress}
-            options={['1 - Low', '2', '3', '4', '5 - High']}
+            min={0}
+            max={5}
+            value={checkIn.stress ?? 0}
+            unit="/5"
             onChange={(value) => onUpdate('stress', value)}
           />
           <DailyFuelContext dailyWellness={dailyWellness} eventPreparationContext={eventPreparationContext} />
         </div>
         <div className="select-row">
-          <Select
+          <Slider
             description="Any symptoms that may affect training today."
             label="Illness symptoms"
-            value={checkIn.illnessSymptoms ?? 'None'}
-            options={['None', 'Mild', 'Significant']}
+            min={0}
+            max={5}
+            value={checkIn.illnessSymptoms ?? 0}
+            formatValue={formatIllnessValue}
             onChange={(value) => onUpdate('illnessSymptoms', value)}
           />
         </div>
@@ -189,43 +194,6 @@ export function CheckInView({
           unit="/10"
           onChange={(value) => onUpdate('expectedDifficulty', value)}
         />
-        {hasEarlierEventToday && (
-          <fieldset className="recovery-actions-field">
-            <legend>Recovery actions completed</legend>
-            <p className="field-description">Select anything you did after your earlier session today.</p>
-            <div className="recovery-action-options">
-              {[
-                ['Meal', 'Ate a recovery meal or snack.'],
-                ['Hydration', 'Replaced fluids after training.'],
-                ['Stretching or mobility', 'Did gentle mobility work.'],
-                ['Cooldown', 'Completed an easy cooldown.'],
-                ['Rest day', 'Took the day off from training.'],
-              ].map(([action, description]) => {
-                const checked = (checkIn.recoveryActions ?? []).includes(action)
-
-                return (
-                  <label className={checked ? 'recovery-action checked' : 'recovery-action'} key={action}>
-                    <input
-                      checked={checked}
-                      type="checkbox"
-                      onChange={(event) => {
-                        const actions = new Set(checkIn.recoveryActions ?? [])
-                        if (event.target.checked) actions.add(action)
-                        else actions.delete(action)
-                        onUpdate('recoveryActions', Array.from(actions))
-                      }}
-                    />
-                    <span className="recovery-action-copy">
-                      <strong>{action}</strong>
-                      <small>{description}</small>
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          </fieldset>
-        )}
-
           <BodyPainMap
           affectedMovement={checkIn.affectedMovement}
           hurtsWhen={checkIn.hurtsWhen}
@@ -245,6 +213,12 @@ export function CheckInView({
 
     </div>
   )
+}
+
+function formatIllnessValue(value) {
+  if (value === 0) return '0 - None'
+  if (value <= 2) return `${value} - Mild`
+  return `${value} - Unwell`
 }
 
 function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, todayIso }) {

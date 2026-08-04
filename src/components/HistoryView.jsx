@@ -759,7 +759,7 @@ function getCheckInDetailSections(entry) {
         ['Muscle soreness', valueWithUnit(entry.soreness, '/5')],
         ['General fatigue', valueWithUnit(entry.fatigue, '/5')],
         ['Leg heaviness', valueWithUnit(entry.legHeaviness, '/5')],
-        ['Illness symptoms', entry.illnessSymptoms],
+        ['Illness symptoms', formatIllness(entry.illnessSymptoms)],
       ]),
     },
     {
@@ -767,7 +767,7 @@ function getCheckInDetailSections(entry) {
       items: presentItems([
         ['Sleep', valueWithUnit(entry.sleep, 'h')],
         ['Sleep quality', valueWithUnit(entry.sleepQuality, '/5')],
-        ['Stress', entry.stress],
+        ['Stress', valueWithUnit(entry.stress, '/5')],
         ['Today\'s hydration', entry.hydrationOz === undefined ? undefined : `${entry.hydrationOz} fl oz`],
         ['Recovery actions', entry.recoveryActions?.length ? entry.recoveryActions.join(', ') : undefined],
       ]),
@@ -823,7 +823,7 @@ function getPainDetailSections(entry) {
 
       return {
         title: area.label,
-        items: getPainItems(entry, Math.round(severity / 10), area.id),
+        items: getPainItems(entry, severity, area.id),
       }
     })
     .filter(Boolean)
@@ -865,6 +865,15 @@ function yesNo(value) {
   if (value === undefined || value === null) return undefined
 
   return value ? 'Yes' : 'No'
+}
+
+function formatIllness(value) {
+  if (value === undefined || value === null) return undefined
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return value
+  if (numeric === 0) return '0/5 - None'
+  if (numeric <= 2) return `${numeric}/5 - Mild`
+  return `${numeric}/5 - Unwell`
 }
 
 function getCutoffDate(days) {

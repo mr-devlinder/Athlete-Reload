@@ -11,6 +11,21 @@ function normalizeFivePointValue(value, fallback = 1) {
   return Math.max(0, Math.min(5, Math.round(number)))
 }
 
+function normalizeStressValue(value) {
+  const parsed = Number.parseInt(String(value), 10)
+  if (!Number.isFinite(parsed)) return 0
+  return Math.max(0, Math.min(5, String(value).includes('Low') ? parsed - 1 : parsed))
+}
+
+function normalizeIllnessValue(value) {
+  if (typeof value === 'number') return Math.max(0, Math.min(5, value))
+  const normalized = String(value ?? '').toLowerCase()
+  if (normalized === 'none') return 0
+  if (normalized === 'mild') return 2
+  if (normalized === 'significant' || normalized === 'unwell') return 5
+  return Math.max(0, Math.min(5, Number.parseInt(normalized, 10) || 0))
+}
+
 function fromScheduleRow(row) {
   const eventStub = { type: row.event_type }
   const isAllDay = isAllDayEvent(eventStub)
@@ -117,7 +132,7 @@ function fromCheckInRow(row) {
     eventTime: row.event_time ?? '',
     eventTitle: row.session_title ?? row.session_type,
     fatigue: normalizeFivePointValue(row.fatigue, 0),
-    illnessSymptoms: row.illness_symptoms ?? 'None',
+    illnessSymptoms: normalizeIllnessValue(row.illness_symptoms),
     legHeaviness: normalizeFivePointValue(row.leg_heaviness, 0),
     hurtsWhen: row.hurts_when,
     hydration: row.hydration,
@@ -139,7 +154,7 @@ function fromCheckInRow(row) {
     sleep: Number(row.sleep),
     sleepQuality: normalizeFivePointValue(row.sleep_quality, 5),
     soreness: normalizeFivePointValue(row.soreness, 0),
-    stress: row.stress,
+    stress: normalizeStressValue(row.stress),
     yesterdayLoad: row.yesterday_load,
     expectedDifficulty: Math.max(1, Math.min(10, Math.round(Number(row.expected_difficulty) || 5))),
   }
@@ -153,7 +168,7 @@ function toCheckInRow(checkIn, recommendation) {
     energy: normalizeFivePointValue(checkIn.energy, 5),
     event_time: checkIn.eventTime ?? '',
     fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
-    illness_symptoms: checkIn.illnessSymptoms ?? 'None',
+    illness_symptoms: String(checkIn.illnessSymptoms ?? 0),
     leg_heaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
     hurts_when: checkIn.hurtsWhen,
     hydration: checkIn.hydration,
@@ -176,7 +191,7 @@ function toCheckInRow(checkIn, recommendation) {
     sleep: checkIn.sleep,
     sleep_quality: normalizeFivePointValue(checkIn.sleepQuality, 5),
     soreness: normalizeFivePointValue(checkIn.soreness, 0),
-    stress: checkIn.stress,
+    stress: String(checkIn.stress ?? 0),
     yesterday_load: checkIn.yesterdayLoad,
     expected_difficulty: Number(checkIn.expectedDifficulty ?? 5),
   }

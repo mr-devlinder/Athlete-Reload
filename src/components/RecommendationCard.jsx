@@ -1,124 +1,85 @@
-export function RecommendationCard({
-  recommendation,
-  recommendationStatus = 'local',
-  scoreLabel = 'readiness',
-  session,
-}) {
+export function RecommendationCard({ recommendation, recommendationStatus = 'local', scoreLabel = 'readiness', session }) {
   const readinessBand = getReadinessBand(recommendation.score)
-  const statusLabel = {
-    ai: 'AI',
-    fallback: 'Local fallback',
-    loading: 'Generating AI',
-    local: 'Local engine',
-  }[recommendationStatus]
+  const sections = indexSections(recommendation.reportSections)
+  const concerns = sections['main-concerns']
+  const pain = sections['pain-guidance']
 
   return (
-    <aside className={`recommendation ${recommendation.tone} ${readinessBand}`}>
-      <div className="recommendation-source">
-        <p className="eyebrow">{session}</p>
-        <span>{statusLabel}</span>
-      </div>
-      <div className="score-row">
-        <div
-          className={`score-ring ${readinessBand}`}
-          style={{ '--score': `${recommendation.score}%` }}
-        >
-          <span>{recommendation.score}</span>
-          <small>{scoreLabel}</small>
+    <aside className={`recommendation recommendation-report checkin-report ${recommendation.tone} ${readinessBand}`}>
+      <ReportSource session={session} status={recommendationStatus} />
+      <header className="checkin-report-hero">
+        <div className={`score-ring ${readinessBand}`} style={{ '--score': `${recommendation.score}%` }}>
+          <span>{recommendation.score}</span><small>{scoreLabel}</small>
         </div>
-        <div>
-          <h2>{recommendation.label}</h2>
-          <p>{recommendation.summary}</p>
-        </div>
+        <div><p className="report-kicker">Your event outlook</p><h2>{recommendation.label}</h2><p>{recommendation.summary}</p></div>
+      </header>
+
+      <div className="report-section-grid">
+        {concerns && <ReportSection section={concerns} tone="concern" />}
+        <ReportSection section={sections['event-demand']} />
+        <ReportSection section={sections['personalized-warm-up']} />
+        <ReportSection section={sections['fuel-hydration']} />
+        {pain && <ReportSection section={pain} tone="pain" />}
       </div>
-
-      {recommendation.action && (
-        <section className="training-action">
-          <strong>Today&apos;s plan</strong>
-          <p>{recommendation.action}</p>
-        </section>
-      )}
-
-      <RecommendationSections recommendation={recommendation} />
-
+      {sections['motivational-quote'] && <QuoteSection section={sections['motivational-quote']} />}
     </aside>
   )
-}
-
-function getReadinessBand(score) {
-  if (Number(score) >= 75) return 'readiness-green'
-  if (Number(score) >= 50) return 'readiness-yellow'
-  return 'readiness-red'
 }
 
 export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local', session }) {
-  const statusLabel = {
-    ai: 'AI',
-    fallback: 'Local fallback',
-    loading: 'Generating AI',
-    local: 'Local engine',
-  }[recommendationStatus]
+  const sections = indexSections(recommendation.reportSections)
+  const orderedIds = ['event-summary', 'planned-vs-actual', 'workload-summary', 'body-response', 'session-quality', 'recovery-demand', 'immediate-priorities', 'next-event-impact']
 
   return (
-    <aside className={`recommendation recovery-plan ${recommendation.tone}`}>
-      <div className="recommendation-source">
-        <p className="eyebrow">{session}</p>
-        <span>{statusLabel}</span>
-      </div>
-
-      <div className="recovery-plan-hero">
+    <aside className={`recommendation recommendation-report checkout-report ${recommendation.tone}`}>
+      <ReportSource session={session} status={recommendationStatus} />
+      <header className="checkout-report-hero">
+        <p className="report-kicker">Checkout complete</p>
         <h2>{recommendation.label}</h2>
         <p>{recommendation.summary}</p>
+      </header>
+      <div className="report-section-grid checkout-section-grid">
+        {orderedIds.map((id) => sections[id] ? <ReportSection key={id} section={sections[id]} tone={id === 'immediate-priorities' ? 'priority' : ''} /> : null)}
       </div>
-
-      {recommendation.action && (
-        <section className="training-action">
-          <strong>Recovery plan</strong>
-          <p>{recommendation.action}</p>
-        </section>
-      )}
-
-      <RecommendationSections recoveryMode recommendation={recommendation} />
-
-      {recommendation.nextEventWarning && (
-        <div className="next-event-warning">
-          <strong>Next event</strong>
-          <p>{recommendation.nextEventWarning}</p>
-        </div>
-      )}
-
-      {recommendation.reasons.length > 0 && (
-        <div className="recovery-reasons">
-          <strong>Why this plan</strong>
-          {recommendation.reasons.map((reason) => (
-            <span key={reason}>{reason}</span>
-          ))}
-        </div>
-      )}
     </aside>
   )
 }
 
-function RecommendationSections({ recommendation, recoveryMode = false }) {
-  const sections = [
-    [recoveryMode ? 'Right now' : 'Prepare', recoveryMode ? 'Start with the immediate steps that support recovery.' : 'Set up the event with the right warm-up and adjustments.', recommendation.preparation],
-    [recoveryMode ? 'Next few hours' : 'During the event', recoveryMode ? 'Use these cues while your body settles after the session.' : 'Keep these modifications in place while you participate.', recommendation.during],
-    [recoveryMode ? 'Later today' : 'After the event', recoveryMode ? 'Finish the day with the recovery actions that matter most.' : 'Close the event with recovery and symptom-aware follow-through.', recommendation.recovery],
-  ].filter(([, , items]) => items?.length)
+function ReportSource({ session, status }) {
+  const statusLabel = { ai: 'AI personalized', loading: 'Generating', local: 'Saved' }[status] ?? 'AI personalized'
+  return <div className="recommendation-source"><p className="eyebrow">{session}</p><span>{statusLabel}</span></div>
+}
 
-  if (sections.length === 0) return null
+function ReportSection({ section, tone = '' }) {
+  if (!section || (!section.summary && !section.items?.length)) return null
+  return <section className={`report-section ${tone}`}>
+    <div className="report-section-heading"><span aria-hidden="true">{getSectionIcon(section.id)}</span><strong>{section.title}</strong></div>
+    {section.summary && <p>{section.summary}</p>}
+    {section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}
+    {section.id === 'personalized-warm-up' && section.items?.length > 1 && <details className="warmup-details"><summary>View warm-up focus</summary><p>Use these priorities inside your normal progressive warm-up. Keep every movement comfortable and controlled.</p></details>}
+  </section>
+}
 
-  return (
-    <div className="recommendation-sections">
-      {sections.map(([title, description, items]) => (
-        <section className={`recommendation-section${title === 'After the event' || title === 'Later today' ? ' after-event' : ''}`} key={title}>
-          <strong>{title}</strong>
-          <p>{description}</p>
-          <ul>
-            {items.map((item) => <li key={item}>{item}</li>)}
-          </ul>
-        </section>
-      ))}
-    </div>
-  )
+function QuoteSection({ section }) {
+  const quote = section.summary || section.items?.[0]
+  if (!quote) return null
+  return <blockquote className="motivation-quote"><span>“</span><p>{quote.replace(/^[“"]|[”"]$/g, '')}</p></blockquote>
+}
+
+function indexSections(sections = []) {
+  return Object.fromEntries(sections.filter((section) => section?.id).map((section) => [section.id, section]))
+}
+
+function getSectionIcon(id) {
+  return ({
+    'main-concerns': '!', 'event-demand': '↗', 'personalized-warm-up': '◌', 'fuel-hydration': '◇', 'pain-guidance': '+',
+    'event-summary': '✓', 'planned-vs-actual': '↔', 'workload-summary': '∿', 'body-response': '◉', 'session-quality': '★',
+    'recovery-demand': '◒', 'immediate-priorities': '→', 'next-event-impact': '›',
+  })[id] ?? '•'
+}
+
+function getReadinessBand(score) {
+  if (Number(score) >= 80) return 'readiness-green'
+  if (Number(score) >= 60) return 'readiness-yellow'
+  return 'readiness-red'
 }

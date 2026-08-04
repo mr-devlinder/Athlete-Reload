@@ -4,8 +4,15 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
-import { getBaselineComparison, getPersonalBaseline } from '../utils/baselines'
 import { PainShareModal } from './PainShareModal'
+
+const athleteQuotes = [
+  { quote: 'Set your goals high, and do not stop until you get there.', athlete: 'Bo Jackson' },
+  { quote: 'Champions keep playing until they get it right.', athlete: 'Billie Jean King' },
+  { quote: 'You have to expect things of yourself before you can do them.', athlete: 'Michael Jordan' },
+  { quote: 'The only way to prove that you are a good sport is to lose.', athlete: 'Ernie Banks' },
+  { quote: 'Never let your head hang down. Never give up and sit down and grieve.', athlete: 'Satchel Paige' },
+]
 
 export function HomeView({
   athleteProfile,
@@ -34,10 +41,8 @@ export function HomeView({
   const workload = getWorkloadSummary(schedule, checkouts)
   const painWatchlist = getPainWatchlist(history, painReports)
   const painTimelines = getPainTimelines(history, painReports)
-  const patterns = getPatterns(history, checkouts, painWatchlist)
-  const baseline = getPersonalBaseline(history, nextEvent)
+  const athleteQuote = athleteQuotes[Math.abs(differenceInCalendarDays(now, new Date(2020, 0, 1))) % athleteQuotes.length]
   const weeklySignals = getWeeklySignals(history)
-  const sportInsight = getSportInsight(athleteProfile, nextEvent, checkouts, painWatchlist)
 
   return (
     <div className="home-view" data-tour="home-page">
@@ -188,23 +193,6 @@ export function HomeView({
           )}
           <div className="signal-legend"><span className="readiness">Readiness</span><span className="sleep">Sleep</span><span className="fatigue">Fatigue</span><span className="soreness">Soreness</span></div>
         </article>
-        <article className="home-panel baseline-panel">
-          <div className="panel-heading">
-            <span>Personal baseline</span>
-            <strong>{baseline.confidence}</strong>
-          </div>
-          <h3>{baseline.confidence === 'Not ready' ? 'Learning your normal.' : `${baseline.eventType} context`}</h3>
-          {baseline.confidence === 'Not ready' ? (
-            <p>{Math.max(0, 7 - baseline.sampleSize)} more saved check-in{baseline.sampleSize === 6 ? '' : 's'} needed before comparisons appear.</p>
-          ) : (
-            <div className="baseline-values">
-              <span><strong>{baseline.values.readiness}</strong> readiness</span>
-              <span><strong>{baseline.values.sleep}h</strong> sleep</span>
-              <span><strong>{baseline.values.fatigue}/5</strong> fatigue</span>
-              {getBaselineComparison(history[0] ?? {}, baseline).slice(0, 1).map((comparison) => <p key={comparison}>{comparison}</p>)}
-            </div>
-          )}
-        </article>
         <article className="home-panel">
           <div className="panel-heading">
             <span>Workload</span>
@@ -231,14 +219,6 @@ export function HomeView({
         </article>
 
         <PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} />
-        <article className="home-panel sport-insight-panel">
-          <div className="panel-heading">
-            <span>{athleteProfile?.sport || 'Athlete'} focus</span>
-            <strong>{athleteProfile?.position || 'Today'}</strong>
-          </div>
-          <h3>{sportInsight.title}</h3>
-          <p>{sportInsight.detail}</p>
-        </article>
       </section>
 
       <section className="home-panels">
@@ -258,15 +238,10 @@ export function HomeView({
 
         <article className="home-panel">
           <div className="panel-heading">
-            <span>Pattern detection</span>
+            <span>Daily encouragement</span>
           </div>
-          <h3>Personal patterns</h3>
-          <div className="pattern-list">
-            {patterns.map((pattern) => (
-              <p key={pattern}>{pattern}</p>
-            ))}
-          </div>
-          <p className="pattern-disclaimer">These are personal patterns, not injury predictions or medical advice.</p>
+          <h3>&ldquo;{athleteQuote.quote}&rdquo;</h3>
+          <p className="pattern-disclaimer">{athleteQuote.athlete}</p>
         </article>
       </section>
     </div>
@@ -694,12 +669,16 @@ function getPainTimelines(history, painReports) {
       const reportedPoints = [...entries.values()]
         .sort((first, second) => first.date.localeCompare(second.date))
         .slice(-6)
+      const latestPoint = reportedPoints[reportedPoints.length - 1]
+      const resolvedForMoreThanTwoDays = latestPoint?.score === 0
+        && differenceInCalendarDays(new Date(), parseISO(latestPoint.date)) > 2
       return {
         label,
         points: reportedPoints,
+        resolvedForMoreThanTwoDays,
       }
     })
-    .filter((timeline) => timeline.points.length >= 2)
+    .filter((timeline) => timeline.points.length >= 2 && !timeline.resolvedForMoreThanTwoDays)
     .sort((first, second) => second.points[second.points.length - 1].date.localeCompare(first.points[first.points.length - 1].date))
     .slice(0, 4)
 }
