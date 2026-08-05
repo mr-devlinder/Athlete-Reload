@@ -133,6 +133,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
     let mutationObserver = null
     let stopped = false
     let activeTarget = null
+    let isPreparingTarget = false
     let unlockScroll = () => {}
     setHasReadThrough(!step?.requiresReadThrough)
 
@@ -181,10 +182,13 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
     }
 
     async function prepareTarget() {
+      if (isPreparingTarget || stopped) return
+      isPreparingTarget = true
       const target = await waitForVisibleTarget(() => {
         const form = phase === 'schedule' ? document.querySelector('.event-modal') : null
         return form ?? document.querySelector(step?.target) ?? document.querySelector(step?.readTarget)
       }, () => stopped)
+      isPreparingTarget = false
       if (!target || stopped) return
 
       activeTarget = target
@@ -204,8 +208,11 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
     setTargetRect(null)
     setBubbleRect(null)
     mutationObserver = new MutationObserver(() => {
+      const scheduleForm = phase === 'schedule' ? document.querySelector('.event-modal') : null
+      const targetChangedToForm = scheduleForm && activeTarget !== scheduleForm
+
       if (!activeTarget) void prepareTarget()
-      else if (!activeTarget.isConnected || !isVisible(activeTarget)) {
+      else if (targetChangedToForm || !activeTarget.isConnected || !isVisible(activeTarget)) {
         targetObserver?.disconnect()
         activeTarget = null
         unlockScroll()
@@ -278,6 +285,11 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
 }
 
 function scrollTourTargetIntoView(target, phase) {
+  if (target.matches('.event-modal')) {
+    target.scrollTo({ top: 0, behavior: 'auto' })
+    return
+  }
+
   const navigationStep = tourSteps[phase]?.navigationStep
   const scrollTarget = navigationStep ? target.closest('.nav-tabs') ?? target : target
   scrollTarget.scrollIntoView({ behavior: 'auto', block: navigationStep ? 'end' : 'center', inline: 'nearest' })

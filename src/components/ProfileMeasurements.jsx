@@ -26,7 +26,7 @@ export function ProfileMeasurements({ profile, onChange }) {
           </label>
           <label className="select-field">
             Height (inches)
-            <input inputMode="decimal" max="11.9" min="0" step="0.1" type="number" value={height.inches} onChange={(event) => updateImperialHeight('inches', event.target.value)} placeholder="Optional" />
+            <input inputMode="decimal" max="11.9" min="0" step="0.1" type="number" value={height.inches} onChange={(event) => updateImperialHeight('inches', event.target.value)} placeholder="0" />
           </label>
         </div>
       ) : (

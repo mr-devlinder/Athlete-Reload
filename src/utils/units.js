@@ -38,9 +38,10 @@ export function getHeightInputs(heightCm, unitSystem = 'imperial') {
   const centimeters = toFiniteNumber(heightCm)
   if (centimeters === null) return unitSystem === 'metric' ? { centimeters: '' } : { feet: '', inches: '' }
   if (unitSystem === 'metric') return { centimeters: roundMeasurement(centimeters, 1) }
-  const totalInches = centimetersToInches(centimeters)
+  const totalInches = roundMeasurement(centimetersToInches(centimeters), 1)
   const feet = Math.floor(totalInches / 12)
-  return { feet, inches: roundMeasurement(totalInches - feet * 12, 1) }
+  const inches = roundMeasurement(totalInches - feet * 12, 1)
+  return { feet, inches: inches === 0 ? '' : inches }
 }
 
 export function heightInputsToCentimeters({ centimeters, feet, inches }, unitSystem = 'imperial') {

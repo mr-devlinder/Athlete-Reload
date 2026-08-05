@@ -6388,6 +6388,7 @@ body.modal-open {
   .guided-tour-event-form .modal-backdrop {
     align-items: start;
     padding-top: var(--guided-tour-form-top, 140px);
+    touch-action: pan-y;
   }
 
   .hero-content {
