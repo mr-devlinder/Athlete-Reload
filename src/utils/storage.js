@@ -16,3 +16,12 @@ export function saveState(state) {
 export function clearSavedState() {
   window.localStorage.removeItem(storageKey)
 }
+
+export function clearUserStorage() {
+  clearSavedState()
+  window.sessionStorage.clear()
+
+  Object.keys(window.localStorage)
+    .filter((key) => key.startsWith('sb-') || key.startsWith('athlete-reload'))
+    .forEach((key) => window.localStorage.removeItem(key))
+}

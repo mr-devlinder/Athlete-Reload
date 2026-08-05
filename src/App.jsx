@@ -68,7 +68,7 @@ import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, ge
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
-import { loadSavedState, saveState } from './utils/storage'
+import { clearUserStorage, loadSavedState, saveState } from './utils/storage'
 import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
@@ -1364,19 +1364,25 @@ function App() {
   }
 
   async function updateScheduleItem(id, updates) {
+    const previousEvent = schedule.find((item) => item.id === id)
     setSchedule((current) =>
       current.map((item) => (item.id === id ? { ...item, ...updates } : item)),
     )
 
     if (!isSupabaseSession) {
-      return
+      return true
     }
 
     try {
-      await updateScheduleEvent(id, updates)
+      const savedEvent = await updateScheduleEvent(id, updates)
+      setSchedule((current) => current.map((item) => item.id === id ? savedEvent : item))
+      setDataStatus('synced')
+      return true
     } catch (error) {
       console.error(error)
+      if (previousEvent) setSchedule((current) => current.map((item) => item.id === id ? previousEvent : item))
       setDataStatus('error')
+      return false
     }
   }
 
@@ -1391,20 +1397,23 @@ function App() {
       try {
         const savedEvent = await createScheduleEvent(eventToSave)
         setSchedule((current) => [...current, savedEvent])
+        setDataStatus('synced')
         if (onboardingTour === 'schedule') {
           setOnboardingTour('checkin-nav')
         }
+        return true
       } catch (error) {
         console.error(error)
         setDataStatus('error')
+        return false
       }
-      return
     }
 
     setSchedule((current) => [...current, eventToSave])
     if (onboardingTour === 'schedule') {
       setOnboardingTour('checkin-nav')
     }
+    return true
   }
 
   async function addTournament(tournamentDraft, games) {
@@ -1535,6 +1544,7 @@ function App() {
       await deleteCheckInsForEvent(id)
       await deleteTrainingCheckoutsForEvent(id)
       await deleteScheduleEvent(id)
+      setDataStatus('synced')
     } catch (error) {
       console.error(error)
       setDataStatus('error')
@@ -2501,12 +2511,29 @@ function App() {
       await supabase.auth.signOut({ scope: 'local' })
     }
 
+    clearUserStorage()
+    setSchedule([])
+    setAssociations([])
+    setHistory([])
+    setCheckouts([])
+    setPainReports([])
+    setPainIssues([])
+    setSavedRoutines([])
+    setRecoveryCompletions([])
+    setShareAuditLogs([])
+    setTournaments([])
+    setAthleteProfile(null)
+    setDailyWellness({ date: todayIso, hydrationMl: 0, nutritionEntries: [] })
+    setNutritionHistory([])
+    setPrivacyPreferences(privacyDefaults)
     setSession(null)
     setIsAppUnlocked(false)
     setIsProfileReady(false)
     setAuthEntryMode('landing')
     setOnboardingTour(null)
     setOnboardingCompleteOpen(false)
+    setDataStatus('idle')
+    setActiveView('Home')
   }
 
   function getNearestTab(pointerX) {

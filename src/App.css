@@ -5176,7 +5176,7 @@ body.modal-open {
   inset: 0;
   background: rgba(17, 20, 28, 0.16);
   pointer-events: auto;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .guided-tour-navigation-blocker {

@@ -102,9 +102,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [hasReadThrough, setHasReadThrough] = useState(false)
   const [calloutHeight, setCalloutHeight] = useState(0)
-  const hasAutoScrolled = useRef(false)
   const calloutRef = useRef(null)
-  const wasFormOpen = useRef(false)
 
   useEffect(() => {
     document.body.classList.add('guided-tour-active')
@@ -131,34 +129,22 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
 
   useEffect(() => {
     let frameId = null
-    let observer = null
+    let targetObserver = null
     let mutationObserver = null
-    hasAutoScrolled.current = false
+    let stopped = false
+    let activeTarget = null
+    let unlockScroll = () => {}
     setHasReadThrough(!step?.requiresReadThrough)
 
-    function updateRect() {
+    function measure() {
+      if (stopped || !activeTarget || !isVisible(activeTarget)) return
       const form = phase === 'schedule' ? document.querySelector('.event-modal') : null
-      const target = form ?? document.querySelector(step?.target) ?? document.querySelector(step?.readTarget)
+      const target = form ?? activeTarget
       const bubbleTarget = form ?? document.querySelector(step?.bubbleTarget) ?? target
-      const readTarget = form ?? document.querySelector(step?.readTarget ?? step?.target)
+      const readTarget = form ?? document.querySelector(step?.readTarget ?? step?.target) ?? target
       const nextIsFormOpen = Boolean(form)
 
-      setIsFormOpen(nextIsFormOpen)
-
-      if (nextIsFormOpen && !wasFormOpen.current) {
-        hasAutoScrolled.current = false
-        requestAnimationFrame(() => {
-          form.scrollTo({ top: 0, behavior: 'auto' })
-          form.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-        })
-      }
-      wasFormOpen.current = nextIsFormOpen
-
-      if (!target) {
-        setTargetRect(null)
-        setBubbleRect(null)
-        return
-      }
+      setIsFormOpen((current) => current === nextIsFormOpen ? current : nextIsFormOpen)
 
       const rect = target.getBoundingClientRect()
       const bubbleTargetRect = bubbleTarget?.getBoundingClientRect() ?? rect
@@ -187,29 +173,55 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
         return current === nextValue ? current : nextValue
       })
 
-      if (!hasAutoScrolled.current) {
-        hasAutoScrolled.current = true
-        requestAnimationFrame(() => scrollTourTargetIntoView(target, Boolean(form), phase))
-      }
     }
 
     function scheduleUpdate() {
       cancelAnimationFrame(frameId)
-      frameId = requestAnimationFrame(updateRect)
+      frameId = requestAnimationFrame(measure)
     }
 
-    updateRect()
-    observer = new ResizeObserver(scheduleUpdate)
-    observer.observe(document.body)
-    mutationObserver = new MutationObserver(scheduleUpdate)
+    async function prepareTarget() {
+      const target = await waitForVisibleTarget(() => {
+        const form = phase === 'schedule' ? document.querySelector('.event-modal') : null
+        return form ?? document.querySelector(step?.target) ?? document.querySelector(step?.readTarget)
+      }, () => stopped)
+      if (!target || stopped) return
+
+      activeTarget = target
+      setIsFormOpen(Boolean(phase === 'schedule' && target.matches('.event-modal')))
+      scrollTourTargetIntoView(target, phase)
+      await afterLayout()
+      if (stopped) return
+
+      measure()
+      targetObserver = new ResizeObserver(scheduleUpdate)
+      targetObserver.observe(target)
+      unlockScroll = step.requiresReadThrough || target.matches('.event-modal') ? () => {} : lockTourScrolling()
+      window.addEventListener('resize', scheduleUpdate)
+      window.addEventListener('scroll', scheduleUpdate, true)
+    }
+
+    setTargetRect(null)
+    setBubbleRect(null)
+    mutationObserver = new MutationObserver(() => {
+      if (!activeTarget) void prepareTarget()
+      else if (!activeTarget.isConnected || !isVisible(activeTarget)) {
+        targetObserver?.disconnect()
+        activeTarget = null
+        unlockScroll()
+        unlockScroll = () => {}
+        void prepareTarget()
+      }
+    })
     mutationObserver.observe(document.body, { childList: true, subtree: true })
-    window.addEventListener('resize', scheduleUpdate)
-    window.addEventListener('scroll', scheduleUpdate, true)
+    void prepareTarget()
 
     return () => {
+      stopped = true
       cancelAnimationFrame(frameId)
-      observer?.disconnect()
+      targetObserver?.disconnect()
       mutationObserver?.disconnect()
+      unlockScroll()
       window.removeEventListener('resize', scheduleUpdate)
       window.removeEventListener('scroll', scheduleUpdate, true)
     }
@@ -265,21 +277,77 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
   )
 }
 
-function scrollTourTargetIntoView(target, isFormOpen, phase) {
-  if (isFormOpen) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
-    return
-  }
-
+function scrollTourTargetIntoView(target, phase) {
   const navigationStep = tourSteps[phase]?.navigationStep
   const scrollTarget = navigationStep ? target.closest('.nav-tabs') ?? target : target
+  scrollTarget.scrollIntoView({ behavior: 'auto', block: navigationStep ? 'end' : 'center', inline: 'nearest' })
+
   const rect = scrollTarget.getBoundingClientRect()
-  const behavior = tourSteps[phase]?.instantEntry ? 'auto' : 'smooth'
-  const offset = phase === 'checkin' ? 18 : 72
-  window.scrollTo({
-    behavior,
-    top: Math.max(0, window.scrollY + rect.top - offset),
+  const safeTop = 76
+  const safeBottom = window.innerWidth <= 1060 ? 92 : 24
+  if (rect.top < safeTop) window.scrollBy({ top: rect.top - safeTop, behavior: 'auto' })
+  else if (rect.bottom > window.innerHeight - safeBottom) {
+    window.scrollBy({ top: rect.bottom - window.innerHeight + safeBottom, behavior: 'auto' })
+  }
+}
+
+function isVisible(element) {
+  if (!element?.isConnected) return false
+  const style = window.getComputedStyle(element)
+  const rect = element.getBoundingClientRect()
+  return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+}
+
+function waitForVisibleTarget(findTarget, isStopped) {
+  return new Promise((resolve) => {
+    let observer
+    const check = () => {
+      if (isStopped()) return finish(null)
+      const target = findTarget()
+      if (isVisible(target)) return finish(target)
+    }
+    const finish = (target) => {
+      observer?.disconnect()
+      resolve(target)
+    }
+    observer = new MutationObserver(check)
+    observer.observe(document.body, { attributes: true, childList: true, subtree: true })
+    check()
   })
+}
+
+function afterLayout() {
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+}
+
+function lockTourScrolling() {
+  const scrollables = [document.documentElement, document.body, ...document.querySelectorAll('*')]
+    .filter((element) => element === document.documentElement || element === document.body
+      || (element.scrollHeight > element.clientHeight
+        && /(auto|scroll)/.test(`${getComputedStyle(element).overflow}${getComputedStyle(element).overflowY}`)))
+  const snapshots = scrollables.map((element) => [element, element.style.overflow, element.style.touchAction])
+  scrollables.forEach((element) => {
+    element.style.overflow = 'hidden'
+    element.style.touchAction = 'none'
+  })
+
+  const preventScroll = (event) => event.preventDefault()
+  const preventScrollKeys = (event) => {
+    if (['ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp', ' '].includes(event.key)) event.preventDefault()
+  }
+  window.addEventListener('wheel', preventScroll, { passive: false, capture: true })
+  window.addEventListener('touchmove', preventScroll, { passive: false, capture: true })
+  window.addEventListener('keydown', preventScrollKeys, { capture: true })
+
+  return () => {
+    snapshots.forEach(([element, overflow, touchAction]) => {
+      element.style.overflow = overflow
+      element.style.touchAction = touchAction
+    })
+    window.removeEventListener('wheel', preventScroll, { capture: true })
+    window.removeEventListener('touchmove', preventScroll, { capture: true })
+    window.removeEventListener('keydown', preventScrollKeys, { capture: true })
+  }
 }
 
 function getBlockers(rect) {

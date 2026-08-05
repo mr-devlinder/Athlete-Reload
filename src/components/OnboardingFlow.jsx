@@ -27,11 +27,14 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   const [isCreatingAssociation, setIsCreatingAssociation] = useState(false)
   const [legalConsent, setLegalConsent] = useState(false)
   function updateProfile(field, value) {
-    setProfile((current) => ({
-      ...current,
-      [field]: value,
-      ...(field === 'sport' ? { position: '' } : {}),
-    }))
+    setProfile((current) => {
+      if (field === 'sport') {
+        const positions = getPositionOptions(value)
+        return { ...current, sport: value, position: positions.includes(current.position) ? current.position : '' }
+      }
+
+      return { ...current, [field]: value }
+    })
   }
 
   function continueFromProfile(eventSubmit) {
@@ -39,6 +42,15 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     setError('')
     if (!legalConsent) {
       setError('Confirm that you are at least 16 and accept the legal terms before continuing.')
+      return
+    }
+    const positionOptions = getPositionOptions(profile.sport)
+    if (!profile.sport) {
+      setError('Select your sport or activity before continuing.')
+      return
+    }
+    if (positionOptions.length > 0 && !positionOptions.includes(profile.position)) {
+      setError('Select a position or specialty for your chosen sport.')
       return
     }
     setStep('nutrition')
@@ -133,24 +145,24 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
               placeholder="First name or nickname"
             />
           </label>
-          {getPositionOptions(profile.sport).length > 0 && <label className="select-field">
-            Sport
-            <select value={profile.sport} onChange={(event) => updateProfile('sport', event.target.value)}>
-              <option value="">I’ll add this later</option>
+          <label className="select-field">
+            Sport or activity
+            <select required value={profile.sport} onChange={(event) => updateProfile('sport', event.target.value)}>
+              <option value="">Choose a sport or activity</option>
               {sportOptions.map((sport) => <option key={sport}>{sport}</option>)}
             </select>
-          </label>}
-          <label className="select-field">
+          </label>
+          {profile.sport && getPositionOptions(profile.sport).length > 0 && <label className="select-field">
             Position or event specialty
             <select
+              required
               value={profile.position}
               onChange={(event) => updateProfile('position', event.target.value)}
             >
-              <option value="">{profile.sport ? 'Select a position or specialty' : 'Choose a sport first'}</option>
+              <option value="">Select a position or specialty</option>
               {getPositionOptions(profile.sport).map((position) => <option key={position}>{position}</option>)}
-              <option value="Other">Other / not listed</option>
             </select>
-          </label>
+          </label>}
           <div className="onboarding-two-col">
             <label className="select-field">
               Training style

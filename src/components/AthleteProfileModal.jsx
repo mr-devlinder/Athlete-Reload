@@ -84,6 +84,17 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
     setIsSaving(true)
     setMessage('')
 
+    if (!draft.sport) {
+      setMessage('Select your sport or activity.')
+      setIsSaving(false)
+      return
+    }
+    if (positionOptions.length > 0 && !positionOptions.includes(draft.position)) {
+      setMessage('Select a position or specialty for your chosen sport.')
+      setIsSaving(false)
+      return
+    }
+
     try {
       await onSave(draft)
       onClose()
@@ -111,17 +122,20 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
           </label>
           <label className="select-field">
             Sport
-            <select value={draft.sport ?? ''} onChange={(event) => setDraft((current) => ({ ...current, sport: event.target.value, position: '' }))}>
+            <select required value={draft.sport ?? ''} onChange={(event) => setDraft((current) => {
+              const sport = event.target.value
+              const positions = getPositionOptions(sport)
+              return { ...current, sport, position: positions.includes(current.position) ? current.position : '' }
+            })}>
               <option value="">Choose a sport or activity</option>
               {sportOptions.map((sport) => <option key={sport}>{sport}</option>)}
             </select>
           </label>
           {positionOptions.length > 0 && <label className="select-field">
             Position or specialty
-            <select value={draft.position ?? ''} onChange={(event) => setDraft((current) => ({ ...current, position: event.target.value }))}>
+            <select required value={draft.position ?? ''} onChange={(event) => setDraft((current) => ({ ...current, position: event.target.value }))}>
               <option value="">{draft.sport ? 'Select a position or specialty' : 'Choose a sport first'}</option>
               {positionOptions.map((position) => <option key={position}>{position}</option>)}
-              <option value="Other">Other / not listed</option>
             </select>
           </label>}
           <label className="select-field">

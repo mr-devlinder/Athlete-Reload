@@ -40,7 +40,7 @@ const emptyEvent = {
   note: '',
   opponent: '',
   surface: 'Grass',
-  time: '',
+  time: '18:00',
   title: 'Team practice',
   venue: '',
   type: 'Team practice',
@@ -78,6 +78,8 @@ export function ScheduleView({
   const [tournamentModalMode, setTournamentModalMode] = useState('create')
   const [editingTournament, setEditingTournament] = useState(null)
   const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const [isSavingEvent, setIsSavingEvent] = useState(false)
   const [actionsMenuPosition, setActionsMenuPosition] = useState({ left: 12, top: 12 })
   const actionsMenuRef = useRef(null)
   const actionsMenuButtonRef = useRef(null)
@@ -180,6 +182,7 @@ export function ScheduleView({
   }
 
   function closeModal() {
+    setSaveError('')
     setModalMode(null)
   }
 
@@ -222,6 +225,8 @@ export function ScheduleView({
   }
 
   async function saveDraft() {
+    setSaveError('')
+    setIsSavingEvent(true)
     const isAllDay = isAllDayEvent(draftEvent)
     const isOtherActivity = isOtherActivityEvent(draftEvent)
     const displayName = isOtherActivity ? draftEvent.customActivityName.trim() : draftEvent.type
@@ -238,18 +243,25 @@ export function ScheduleView({
       title: displayName,
     }
 
-    if (modalMode === 'edit') {
-      await onUpdate(event.id, event)
-    } else {
-      const events = createRecurringEvents(event)
+    try {
+      if (modalMode === 'edit') {
+        if (!(await onUpdate(event.id, event))) throw new Error('update_failed')
+      } else {
+        const events = createRecurringEvents(event)
 
-      for (const scheduledEvent of events) {
-        await onAdd(scheduledEvent)
+        for (const scheduledEvent of events) {
+          if (!(await onAdd(scheduledEvent))) throw new Error('create_failed')
+        }
       }
-    }
 
-    setSelectedDate(event.date)
-    closeModal()
+      setSelectedDate(event.date)
+      closeModal()
+    } catch (error) {
+      console.error(error)
+      setSaveError('The event could not be saved. Check your connection and try again.')
+    } finally {
+      setIsSavingEvent(false)
+    }
   }
 
   return (
@@ -547,6 +559,8 @@ export function ScheduleView({
           athleteProfile={athleteProfile}
           associations={associations}
           draftEvent={draftEvent}
+          error={saveError}
+          isSaving={isSavingEvent}
           mode={modalMode}
           isOnboardingEventCreation={isOnboardingEventCreation && modalMode === 'create'}
           onClose={closeModal}
@@ -769,7 +783,7 @@ function isTournamentSummaryVisible(tournament) {
   return today >= visibleFrom && today <= visibleUntil
 }
 
-function EventModal({ associations, athleteProfile, draftEvent, isOnboardingEventCreation, mode, onClose, onSave, onUpdate }) {
+function EventModal({ associations, athleteProfile, draftEvent, error, isOnboardingEventCreation, isSaving, mode, onClose, onSave, onUpdate }) {
   const [cityQuery, setCityQuery] = useState(draftEvent.location ?? '')
   const [cityResults, setCityResults] = useState([])
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
@@ -999,8 +1013,9 @@ function EventModal({ associations, athleteProfile, draftEvent, isOnboardingEven
         </div>
 
         {isAllDay && <p className="field-description">{isRestDay ? 'Rest Day' : 'Recovery Day'} is all day and will not request an event check-in or checkout. It provides schedule context but does not confirm recovery status.</p>}
-        <button className="primary-button" disabled={(!isAllDay && (!cityIsValid || !draftEvent.time)) || (isOtherActivity && !draftEvent.customActivityName?.trim())} onClick={onSave} type="button">
-          {mode === 'edit' ? 'Save changes' : 'Create event'}
+        {error && <p className="form-error" role="alert">{error}</p>}
+        <button className="primary-button" disabled={isSaving || (!isAllDay && (!cityIsValid || !draftEvent.time)) || (isOtherActivity && !draftEvent.customActivityName?.trim())} onClick={onSave} type="button">
+          {isSaving ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create event'}
         </button>
       </section>
     </div>

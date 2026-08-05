@@ -33,6 +33,7 @@ export function AccountPrivacyView({
   const [identities, setIdentities] = useState([])
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [clearHistoryForm, setClearHistoryForm] = useState({ code: '', confirmation: '', password: '' })
   const [deleteForm, setDeleteForm] = useState({ code: '', confirmation: '', password: '' })
   const [emailForm, setEmailForm] = useState({ email: '', password: '' })
@@ -434,27 +435,35 @@ export function AccountPrivacyView({
       return
     }
 
-    const usesTotp = verifiedTotpFactors.length > 0
-    if (usesTotp && !(await verifyDeleteTotp())) {
-      setMessage('Unable to verify this sensitive action.')
-      return
+    setIsDeletingAccount(true)
+    try {
+      const usesTotp = verifiedTotpFactors.length > 0
+      if (usesTotp && !(await verifyDeleteTotp())) {
+        setMessage('Unable to verify this sensitive action.')
+        return
+      }
+
+      const { data, error } = await supabase.functions.invoke('delete-account', {
+        body: {
+          confirmation: deleteForm.confirmation,
+          method: usesTotp ? 'totp' : 'password',
+          password: usesTotp ? undefined : deleteForm.password,
+        },
+      })
+
+      if (error || !data?.deleted) {
+        const detail = await getFunctionErrorMessage(error)
+        setMessage(detail || data?.error || 'Unable to delete your account. No success was reported.')
+        return
+      }
+
+      setMessage('Account deleted. Signing you out...')
+      setIsDeleteModalOpen(false)
+      setDeleteForm({ code: '', confirmation: '', password: '' })
+      await onAccountDeleted()
+    } finally {
+      setIsDeletingAccount(false)
     }
-
-    const { error } = await supabase.functions.invoke('delete-account', {
-      body: {
-        method: usesTotp ? 'totp' : 'password',
-        password: usesTotp ? undefined : deleteForm.password,
-      },
-    })
-
-    if (error) {
-      setMessage('Unable to delete your account. Verify your confirmation and try again.')
-      return
-    }
-
-    setIsDeleteModalOpen(false)
-    setDeleteForm({ code: '', confirmation: '', password: '' })
-    await onAccountDeleted()
   }
 
   if (!hasSupabaseConfig) {
@@ -775,7 +784,7 @@ export function AccountPrivacyView({
                   <input autoComplete="current-password" onChange={(event) => setDeleteForm((current) => ({ ...current, password: event.target.value }))} required type="password" value={deleteForm.password} />
                 </label>
               )}
-              <button className="remove-button" type="submit">Permanently delete account</button>
+              <button className="remove-button" disabled={isDeletingAccount} type="submit">{isDeletingAccount ? 'Deleting account...' : 'Permanently delete account'}</button>
             </form>
           </section>
         </div>
@@ -812,6 +821,19 @@ export function AccountPrivacyView({
       )}
     </section>
   )
+}
+
+async function getFunctionErrorMessage(error) {
+  try {
+    const response = error?.context
+    if (response instanceof Response) {
+      const body = await response.clone().json()
+      return body?.error ?? ''
+    }
+  } catch {
+    // Fall through to the stable client-facing message.
+  }
+  return ''
 }
 
 function ShareAuditRow({ entry, onDelete, onToggle, openId }) {
