@@ -349,7 +349,8 @@ Important behavior:
 - Prefer conventional, widely recognized exercise and stretch names with clear form cues. Do not treat any example list or familiar pair as a template, and do not routinely begin with the same two movements. Use niche movements sparingly and only when the athlete context makes them more useful than a familiar option.
 - Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
 - For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
-- Use each exercise's instruction, side, feel, and avoid fields well. Include a mix of reps and holds, clear body-area labels, and enough useful work to fill the selected time without exceeding it.
+- Use each exercise's instruction, side, feel, and avoid fields well. Instructions must state setup, movement direction, what stays still, what the athlete should feel, when a rep or hold ends, how to switch sides, and when pain means stop. Include a mix of reps and holds, clear body-area labels, and enough useful work to fill the selected time without exceeding it.
+- Static stretches and sustained positions must use durationSeconds and omit reps. Controlled mobility repetitions must use reps and omit durationSeconds. Use side "Each side" for unilateral movements and "Both sides" only when both sides move together.
 - Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
 - If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
 - Do not use a readiness score in this response. A stored score may be 0.
@@ -658,23 +659,7 @@ function normalizeRoutine(value: any, payload?: any) {
       ].find(([, pattern]) => (pattern as RegExp).test(exerciseText))?.[0]
       if (inferredRequirement && !availableEquipment.has(inferredRequirement as string)) return false
       return !required || required === 'none' || required === 'bodyweight' || availableEquipment.has(required)
-    }).slice(0, 32).map((exercise: any) => ({
-      area: stringOrFallback(exercise?.area, 'Comfortable range'),
-      avoid: stringOrFallback(exercise?.avoid, 'Sharp or worsening pain'),
-      durationSeconds: Number.isFinite(Number(exercise?.durationSeconds))
-        ? clampNumber(exercise.durationSeconds, 15, 60)
-        : 0,
-      feel: stringOrFallback(exercise?.feel, 'Mild, comfortable tension'),
-      instruction: stringOrFallback(exercise?.instruction, 'Move slowly through a comfortable range.'),
-      equipment: stringOrFallback(exercise?.equipment, 'None'),
-      name: stringOrFallback(exercise?.name, 'Gentle mobility'),
-      reps: Number.isFinite(Number(exercise?.reps))
-        ? clampNumber(exercise.reps, 4, 15)
-        : 0,
-      side: stringOrFallback(exercise?.side, 'Both sides'),
-      type: stringOrFallback(exercise?.type, 'Mobility'),
-      why: stringOrFallback(exercise?.why, 'This movement supports the selected routine goal.'),
-    }))
+    }).slice(0, 32).map((exercise: any) => normalizeRecoveryExercise(exercise))
     : []
   const exercises = avoidRepeatedRoutineOpening(generatedExercises, payload?.recentRoutineSequences, payload?.variationKey)
 
@@ -686,6 +671,37 @@ function normalizeRoutine(value: any, payload?: any) {
     painAware: hasCurrentPain && Boolean(value?.painAware),
     summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
     title: stringOrFallback(value?.title, getRoutineTitle(payload?.planType)),
+  }
+}
+
+function normalizeRecoveryExercise(exercise: any) {
+  const name = stringOrFallback(exercise?.name, 'Gentle mobility')
+  const type = stringOrFallback(exercise?.type, 'Mobility')
+  const text = `${name} ${type}`.toLowerCase()
+  const isHold = /stretch|hold|breath|release|relax|flexibility/.test(text)
+  const isUnilateral = /single[- ]?(leg|arm)|split stance|half[- ]kneeling|figure[- ]four|calf stretch|hamstring stretch|hip flexor|open book|side[- ]lying|one[- ]arm|one[- ]leg/.test(text)
+  const suppliedSide = stringOrFallback(exercise?.side, isUnilateral ? 'Each side' : 'Both sides')
+  const side = isUnilateral && /^both( sides)?$/i.test(suppliedSide) ? 'Each side' : suppliedSide
+  const instruction = stringOrFallback(exercise?.instruction, '')
+  const isVague = instruction.length < 45 || /^(move gently|stretch your|hold the position|do a|move slowly)[.!]?$/i.test(instruction.trim())
+  const clearInstruction = isVague
+    ? `Set up in a stable position for ${name.toLowerCase()}, move only through a comfortable range, keep the rest of your body still, and stop for sharp or worsening pain.`
+    : instruction
+
+  return {
+    area: stringOrFallback(exercise?.area, 'Comfortable range'),
+    avoid: stringOrFallback(exercise?.avoid, 'Stop for sharp or worsening pain, numbness, instability, or changed movement.'),
+    durationSeconds: isHold
+      ? clampNumber(Number(exercise?.durationSeconds) || 30, 15, 60)
+      : 0,
+    feel: stringOrFallback(exercise?.feel, isHold ? 'Mild, comfortable tension in the named area' : 'Smooth motion without pinching or compensation'),
+    instruction: clearInstruction,
+    equipment: stringOrFallback(exercise?.equipment, 'None'),
+    name,
+    reps: isHold ? 0 : clampNumber(Number(exercise?.reps) || 8, 4, 15),
+    side,
+    type,
+    why: stringOrFallback(exercise?.why, 'This movement supports the selected routine goal.'),
   }
 }
 

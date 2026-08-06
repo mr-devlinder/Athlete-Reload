@@ -25,7 +25,6 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   const [association, setAssociation] = useState('Personal')
   const [newAssociation, setNewAssociation] = useState('')
   const [isCreatingAssociation, setIsCreatingAssociation] = useState(false)
-  const [legalConsent, setLegalConsent] = useState(false)
   function updateProfile(field, value) {
     setProfile((current) => {
       if (field === 'sport') {
@@ -40,10 +39,6 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
   function continueFromProfile(eventSubmit) {
     eventSubmit.preventDefault()
     setError('')
-    if (!legalConsent) {
-      setError('Confirm that you are at least 16 and accept the legal terms before continuing.')
-      return
-    }
     const positionOptions = getPositionOptions(profile.sport)
     if (!profile.sport) {
       setError('Select your sport or activity before continuing.')
@@ -181,10 +176,6 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
               </select>
             </label>}
           </div>
-          <label className="settings-toggle">
-            <input checked={legalConsent} onChange={(event) => setLegalConsent(event.target.checked)} required type="checkbox" />
-            <span>I am at least 16 and agree to the Privacy Policy, Terms of Service, Medical Disclaimer, and processing of the health and wellness information I choose to enter.</span>
-          </label>
           <button className="primary-button" type="submit">Continue</button>
         </form>
       )}

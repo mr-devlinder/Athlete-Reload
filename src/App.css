@@ -6843,3 +6843,91 @@ body.modal-open {
     height: 12px;
   }
 }
+img,
+svg,
+video,
+canvas {
+  max-width: 100%;
+}
+
+.recording-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #a73535;
+  font-weight: 850;
+}
+
+.recording-indicator span {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #d13f3f;
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+@media (max-width: 760px) {
+  .app-shell,
+  .auth-shell,
+  .onboarding-shell {
+    width: 100%;
+    max-width: 100%;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  main,
+  section,
+  article,
+  form,
+  fieldset,
+  .glass-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .modal-backdrop {
+    align-items: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
+
+  .modal-backdrop > .glass-panel,
+  .modal-backdrop > section.glass-panel {
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scroll-padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  button,
+  [role="button"],
+  a,
+  input[type="checkbox"],
+  input[type="radio"] {
+    touch-action: manipulation;
+  }
+
+  button:not(.icon-button):not(.ghost-close),
+  [role="button"] {
+    min-height: 44px;
+  }
+
+  .food-modal-actions,
+  .onboarding-two-col,
+  .manual-food-grid,
+  .recovery-generator-controls,
+  .tournament-game-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

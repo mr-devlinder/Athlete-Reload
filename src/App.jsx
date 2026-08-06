@@ -900,8 +900,23 @@ function App() {
 
     let isMounted = true
 
+    async function savePendingOauthConsent(nextSession) {
+      const acceptedAt = localStorage.getItem('athlete-reload-pending-legal-consent')
+      if (!nextSession || !acceptedAt) return
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          age_16_or_older_confirmed: true,
+          legal_accepted_at: acceptedAt,
+          legal_version: '2026-08-04',
+          sensitive_data_processing_consent: true,
+        },
+      })
+      if (!error) localStorage.removeItem('athlete-reload-pending-legal-consent')
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       if (isMounted) {
+        void savePendingOauthConsent(data.session)
         setSession(data.session)
         setIsAppUnlocked(Boolean(data.session))
         setIsAuthReady(true)
@@ -911,6 +926,7 @@ function App() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      void savePendingOauthConsent(nextSession)
       setSession(nextSession)
       if (event === 'PASSWORD_RECOVERY') {
         setAuthEntryMode('reset-password')
@@ -2039,11 +2055,27 @@ function App() {
       try {
         const savedCheckout = await updateTrainingCheckout(checkout.id, completedEvent, updatedCheckout)
         setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
+        const savedCompletion = await createRecoveryRoutineCompletion({
+          details: { plan },
+          routineId: null,
+          sourceCheckoutId: checkout.id,
+        })
+        setRecoveryCompletions((current) => [savedCompletion, ...current])
       } catch (error) {
         console.error(error)
         setDataStatus('error')
         return false
       }
+    }
+
+    if (!isSupabaseSession) {
+      setRecoveryCompletions((current) => [{
+        completedAt: new Date().toISOString(),
+        details: { plan },
+        id: `recovery-completion-${Date.now()}`,
+        routineId: null,
+        sourceCheckoutId: checkout.id,
+      }, ...current])
     }
 
     setGeneratedRecoveryPlan(null)
@@ -2225,13 +2257,7 @@ function App() {
           routineId: routine.id,
           sourceCheckoutId: routine.sourceCheckoutId,
         })
-        completion = {
-          completedAt: savedCompletion.completed_at,
-          details: savedCompletion.completion_json ?? details,
-          id: savedCompletion.id,
-          routineId: savedCompletion.routine_id,
-          sourceCheckoutId: savedCompletion.source_checkout_id,
-        }
+        completion = savedCompletion
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -3006,6 +3032,7 @@ function App() {
                 onClear={clearHistory}
                 onDeleteEntry={deleteHistoryEntry}
                 onFavoriteRoutine={favoriteRecoveryRoutine}
+                recoveryCompletions={recoveryCompletions}
                 savedRoutines={savedRoutines}
               />
             )}

@@ -418,6 +418,16 @@ function toSavedRecoveryRoutineRow(routine) {
   }
 }
 
+function fromRecoveryRoutineCompletionRow(row) {
+  return {
+    completedAt: row.completed_at,
+    details: row.completion_json ?? {},
+    id: row.id,
+    routineId: row.routine_id,
+    sourceCheckoutId: row.source_checkout_id,
+  }
+}
+
 function toPainIssueRow(issue) {
   return {
     athlete_notes: issue.athleteNotes ?? '',
@@ -549,13 +559,7 @@ export async function loadAthleteData() {
     painReports: painReportsResponse.data.map(fromPainReportRow),
     painIssues: painIssuesResponse.data.map(fromPainIssueRow),
     savedRoutines: savedRoutinesResponse.data.map(fromSavedRecoveryRoutineRow),
-    recoveryCompletions: recoveryCompletionsResponse.data.map((row) => ({
-      completedAt: row.completed_at,
-      details: row.completion_json ?? {},
-      id: row.id,
-      routineId: row.routine_id,
-      sourceCheckoutId: row.source_checkout_id,
-    })),
+    recoveryCompletions: recoveryCompletionsResponse.data.map(fromRecoveryRoutineCompletionRow),
     shareAuditLogs: shareAuditResponse.data.map(fromShareAuditRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
     tournaments: tournamentsResponse.data.map(fromTournamentRow),
@@ -710,7 +714,7 @@ export async function createRecoveryRoutineCompletion(completion) {
 
   if (error) throw error
 
-  return data
+  return fromRecoveryRoutineCompletionRow(data)
 }
 
 export async function loadPrivacyPreferences() {

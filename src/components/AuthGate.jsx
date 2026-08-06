@@ -10,6 +10,7 @@ const authDefaults = {
 }
 
 const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
+const pendingLegalConsentKey = 'athlete-reload-pending-legal-consent'
 
 export function AuthGate({
   initialMode = 'landing',
@@ -151,6 +152,7 @@ export function AuthGate({
     }
 
     setIsSubmitting(true)
+    if (isSigningUp) localStorage.setItem(pendingLegalConsentKey, new Date().toISOString())
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
@@ -159,6 +161,7 @@ export function AuthGate({
     })
 
     if (error) {
+      localStorage.removeItem(pendingLegalConsentKey)
       setIsSubmitting(false)
       setAuthMessage('Unable to start social sign-in. Check that this provider is enabled in Supabase.')
     }

@@ -19,15 +19,15 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, savedRoutines = [] }) {
-  const hasSavedHistory = history.length > 0 || checkouts.length > 0
+export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [] }) {
+  const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey()]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
-  const archive = getHistoryArchive(history, checkouts)
+  const archive = getHistoryArchive(history, checkouts, recoveryCompletions)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -137,6 +137,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
                           <HistoryGroup
                             checkouts={week.items.filter((item) => item.kind === 'checkout')}
                             checkIns={week.items.filter((item) => item.kind === 'check-in')}
+                            recoveryCompletions={week.items.filter((item) => item.kind === 'recovery-completion')}
                             onDeleteEntry={onDeleteEntry}
                             onSelectEntry={setSelectedEntry}
                           />
@@ -181,7 +182,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   )
 }
 
-function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
+function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recoveryCompletions }) {
   const recoveryItems = checkouts.filter((item) => item.entry.recommendation?.recoveryPlan)
 
   return (
@@ -242,10 +243,21 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
 
       <div className="history-subsection">
         <p className="eyebrow">Recovery</p>
-        {recoveryItems.length === 0 ? (
+        {recoveryItems.length === 0 && recoveryCompletions.length === 0 ? (
           <p>No saved recovery plans this week.</p>
         ) : (
-          recoveryItems.map((item) => (
+          <>{recoveryCompletions.map((item) => {
+            const plan = item.entry.details?.plan
+            const progress = getRecoveryProgress(plan)
+            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`recovery-completion-${item.entry.id}`} kind="recovery-completion" onSelectEntry={onSelectEntry}>
+              <span className="history-record-kind recovery-record-kind">Completed</span>
+              <div>
+                <p className="eyebrow">{format(parseISO(item.entry.completedAt), 'MMM d, yyyy · h:mm a')}</p>
+                <strong>{plan?.routine?.title ?? 'Recovery routine'}</strong>
+                <small>{progress.label}</small>
+              </div>
+            </HistoryRow>
+          })}{recoveryItems.map((item) => (
             (() => {
               const progress = getRecoveryProgress(item.entry.recommendation.recoveryPlan)
 
@@ -270,7 +282,7 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry }) {
             </HistoryRow>
               )
             })()
-          ))
+          ))}</>
         )}
       </div>
     </>
@@ -327,7 +339,7 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
         {isMenuOpen && (
           <div className="history-quick-menu">
             <button onClick={openDetails} type="button">View details</button>
-            <button className="history-delete-action" onClick={deleteEntry} type="button">Delete</button>
+            {onDeleteEntry && <button className="history-delete-action" onClick={deleteEntry} type="button">Delete</button>}
           </div>
         )}
       </div>
@@ -420,6 +432,12 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSy
 
   if (entry.historyKind === 'recovery') {
     return <RecoveryHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
+  }
+
+  if (entry.historyKind === 'recovery-completion') {
+    const plan = entry.details?.plan
+    const progress = getRecoveryProgress(plan)
+    return <div className="modal-backdrop history-modal-backdrop" onClick={onClose}><section className="event-modal history-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Recovery history" title={plan?.routine?.title ?? 'Recovery routine'} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="history-detail-grid"><span><strong>Completed</strong>{format(parseISO(entry.completedAt), 'MMM d, yyyy · h:mm a')}</span><span><strong>Progress</strong>{progress.label}</span><span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span><span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span></div></section></div>
   }
 
   const detailSections = getCheckInDetailSections(entry, unitSystem)
@@ -858,11 +876,12 @@ function getCutoffDate(days) {
   ].join('-')
 }
 
-function getHistoryArchive(history, checkouts) {
+function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
   const years = new Map()
   const items = [
     ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
     ...checkouts.map((entry) => ({ date: entry.date, entry, kind: 'checkout' })),
+    ...recoveryCompletions.map((entry) => ({ date: entry.completedAt?.slice(0, 10), entry, kind: 'recovery-completion' })),
   ].filter((item) => item.date)
 
   items.forEach((item) => {

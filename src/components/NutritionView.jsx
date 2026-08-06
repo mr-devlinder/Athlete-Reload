@@ -6,6 +6,7 @@ import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadSavedFood
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
+import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
 
 const imperialWaterAmounts = [8, 16, 20, 32, 64]
 const metricWaterAmounts = [250, 500, 750, 1000]
@@ -111,7 +112,6 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const [results, setResults] = useState([])
   const [message, setMessage] = useState('')
   const [scannerStatus, setScannerStatus] = useState('idle')
-  const [isListening, setIsListening] = useState(false)
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false)
   const [savedFoods, setSavedFoods] = useState([])
   const [isFoodCurator, setIsFoodCurator] = useState(false)
@@ -122,13 +122,20 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const scannerControlsRef = useRef(null)
   const scannerSessionRef = useRef(0)
   const mountedRef = useRef(true)
+  const voiceRecorderRef = useRef(null)
   const isScanning = !['idle', 'error'].includes(scannerStatus)
+  const voiceRecorder = useAudioRecorder({
+    maxSeconds: 45,
+    onTranscript: (value) => setQuery(value),
+  })
+  voiceRecorderRef.current = voiceRecorder
 
   useEffect(() => {
     Promise.all([loadSavedFoods(), getFoodCuratorStatus()]).then(([foods, isCurator]) => { setSavedFoods(foods); setIsFoodCurator(isCurator) }).catch(() => {})
     return () => {
       mountedRef.current = false
       stopScanner(false)
+      voiceRecorderRef.current?.stop({ cancelled: true })
     }
   }, [])
 
@@ -235,17 +242,14 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
 
   function selectFood(food) { if (onSelectFood) onSelectFood(food, meal); else onSave({ ...food, meal }) }
 
-  function startVoiceSearch() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SpeechRecognition) { setMessage('Voice search is not supported in this browser.'); return }
-    const recognition = new SpeechRecognition()
-    recognition.lang = 'en-US'
-    recognition.interimResults = false
-    recognition.onstart = () => setIsListening(true)
-    recognition.onend = () => setIsListening(false)
-    recognition.onerror = () => setMessage('Voice search could not hear a food. Try again.')
-    recognition.onresult = (event) => { const value = event.results?.[0]?.[0]?.transcript?.trim() ?? ''; setQuery(value); if (value) search(value) }
-    recognition.start()
+  async function toggleVoiceSearch() {
+    if (voiceRecorder.isRecording) {
+      voiceRecorder.stop()
+      if (query.trim()) await search(query)
+      return
+    }
+    stopScanner(false)
+    await voiceRecorder.start()
   }
 
   async function toggleSaved(food) {
@@ -270,7 +274,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     } catch (error) { setMessage(error.message) }
   }
 
-  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button onClick={startVoiceSearch} type="button"><Icon name="mic" />{isListening ? 'Listening...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage(''); setIsManualEntryOpen(false) }} type="button"><Icon name="bookmark" />Saved Foods</button><button className={isManualEntryOpen ? 'active' : ''} onClick={() => { stopScanner(false); setIsManualEntryOpen((current) => !current); setMessage('') }} type="button"><Icon name="plus" />Manual Add</button></div>{isManualEntryOpen && <ManualFoodForm meal={meal} onCancel={() => setIsManualEntryOpen(false)} onSave={onSave} />}{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && !isManualEntryOpen && message && <p className="form-message">{message}</p>}{!isManualEntryOpen && results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button disabled={voiceRecorder.status === 'requesting'} onClick={toggleVoiceSearch} type="button"><Icon name="mic" />{voiceRecorder.isRecording ? `Stop (${formatRecordingTime(voiceRecorder.elapsedSeconds)})` : voiceRecorder.status === 'requesting' ? 'Waiting...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage(''); setIsManualEntryOpen(false) }} type="button"><Icon name="bookmark" />Saved Foods</button><button className={isManualEntryOpen ? 'active' : ''} onClick={() => { stopScanner(false); setIsManualEntryOpen((current) => !current); setMessage('') }} type="button"><Icon name="plus" />Manual Add</button></div>{voiceRecorder.isRecording && <p className="recording-indicator" role="status"><span aria-hidden="true" />Recording {formatRecordingTime(voiceRecorder.elapsedSeconds)}</p>}{voiceRecorder.error && <p className="form-message">{voiceRecorder.error}</p>}{isManualEntryOpen && <ManualFoodForm meal={meal} onCancel={() => setIsManualEntryOpen(false)} onSave={onSave} />}{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && !isManualEntryOpen && message && <p className="form-message">{message}</p>}{!isManualEntryOpen && results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
 }
 
 const manualNutrientFields = [
