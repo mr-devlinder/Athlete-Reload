@@ -5842,6 +5842,16 @@ body.modal-open {
   z-index: 30;
 }
 
+.recovery-history-row.history-row-menu-open {
+  z-index: 100;
+  overflow: visible;
+}
+
+.recovery-history-row.history-row-menu-open .history-quick-actions,
+.recovery-history-row.history-row-menu-open .history-quick-menu {
+  z-index: 101;
+}
+
 .history-row-main {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
@@ -6007,6 +6017,19 @@ body.modal-open {
   margin-top: 18px;
 }
 
+.recovery-history-modal {
+  overflow-x: hidden;
+}
+
+.recovery-history-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.recovery-history-modal .saved-recovery-plan {
+  margin-top: 18px;
+  min-width: 0;
+}
+
 .history-detail-sections {
   display: grid;
   gap: 16px;
@@ -6037,6 +6060,20 @@ body.modal-open {
   margin: -6px 0 0;
   color: #5e6672;
   line-height: 1.5;
+}
+
+.saved-recovery-goal {
+  display: grid;
+  gap: 4px;
+  margin: -6px 0 0;
+  color: #5e6672;
+  line-height: 1.5;
+}
+
+.saved-recovery-goal strong {
+  color: #2f6eaf;
+  font-size: 12px;
+  text-transform: uppercase;
 }
 
 .saved-recovery-timeline {
@@ -6106,8 +6143,36 @@ body.modal-open {
 }
 
 .saved-recovery-routine li {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid rgba(23, 23, 23, 0.07);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.48);
   color: #565f6c;
   font-size: 12px;
+}
+
+.saved-recovery-exercise-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.saved-recovery-routine li p,
+.saved-recovery-routine li small {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.saved-recovery-routine li small {
+  display: block;
+  color: #657080;
+}
+
+.saved-recovery-routine li small strong {
+  color: #3f526b;
 }
 
 .saved-recovery-routine li span,
@@ -6797,6 +6862,19 @@ body.modal-open {
 
   .history-row-with-menu {
     align-items: stretch;
+  }
+
+  .recovery-history-summary,
+  .saved-recovery-timeline {
+    grid-template-columns: 1fr;
+  }
+
+  .saved-recovery-actions span {
+    grid-template-columns: 1fr;
+  }
+
+  .saved-recovery-routine li {
+    overflow-wrap: anywhere;
   }
 
   .history-quick-actions {

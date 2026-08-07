@@ -183,7 +183,10 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
 }
 
 function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recoveryCompletions }) {
-  const recoveryItems = checkouts.filter((item) => item.entry.recommendation?.recoveryPlan)
+  const completedRecoveryCheckoutIds = new Set(recoveryCompletions.map((item) => item.entry.sourceCheckoutId).filter(Boolean))
+  const recoveryItems = checkouts.filter((item) => (
+    item.entry.recommendation?.recoveryPlan && !completedRecoveryCheckoutIds.has(item.entry.id)
+  ))
 
   return (
     <>
@@ -248,20 +251,16 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
         ) : (
           <>{recoveryCompletions.map((item) => {
             const plan = item.entry.details?.plan
-            const progress = getRecoveryProgress(plan)
-            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`recovery-completion-${item.entry.id}`} kind="recovery-completion" onSelectEntry={onSelectEntry}>
-              <span className="history-record-kind recovery-record-kind">Completed</span>
+            const exerciseCount = plan?.routine?.exercises?.length ?? item.entry.details?.exerciseCount ?? 0
+            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`recovery-completion-${item.entry.id}`} kind="recovery-completion" onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
+              <span className="history-record-kind recovery-record-kind">Saved</span>
               <div>
                 <p className="eyebrow">{format(parseISO(item.entry.completedAt), 'MMM d, yyyy · h:mm a')}</p>
                 <strong>{plan?.routine?.title ?? 'Recovery routine'}</strong>
-                <small>{progress.label}</small>
+                <small>{plan?.routine?.durationMinutes ?? '—'} min routine · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}</small>
               </div>
             </HistoryRow>
           })}{recoveryItems.map((item) => (
-            (() => {
-              const progress = getRecoveryProgress(item.entry.recommendation.recoveryPlan)
-
-              return (
             <HistoryRow
               className="history-row recovery-history-row"
               entry={item.entry}
@@ -274,37 +273,14 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
               <div>
                 <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
                 <strong>{item.entry.recommendation.recoveryPlan.routine?.title ?? 'Recovery plan'}</strong>
-                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine · {progress.label}</small>
-                <div aria-label={`Recovery plan ${progress.percent}% complete`} className="history-recovery-progress">
-                  <span style={{ width: `${progress.percent}%` }} />
-                </div>
+                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine · {item.entry.recommendation.recoveryPlan.routine?.exercises?.length ?? 0} exercises</small>
               </div>
             </HistoryRow>
-              )
-            })()
           ))}</>
         )}
       </div>
     </>
   )
-}
-
-function getRecoveryProgress(plan) {
-  const routineProgress = plan?.routineProgress
-  if (Number.isFinite(Number(routineProgress?.total)) && Number(routineProgress.total) > 0) {
-    const percent = Math.round((Number(routineProgress.completed ?? 0) / Number(routineProgress.total)) * 100)
-    return { label: percent === 100 ? 'Routine complete' : `${percent}% routine complete`, percent }
-  }
-
-  const steps = plan?.recoverySteps ?? []
-  const statuses = plan?.stepStatuses ?? {}
-
-  if (steps.length === 0) return { label: 'Not started', percent: 0 }
-
-  const complete = steps.filter((step, index) => statuses[step.id ?? `recovery-step-${index}`] === 'complete').length
-  const percent = Math.round((complete / steps.length) * 100)
-
-  return { label: percent === 100 ? 'Complete' : `${percent}% complete`, percent }
 }
 
 function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectEntry }) {
@@ -435,9 +411,7 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSy
   }
 
   if (entry.historyKind === 'recovery-completion') {
-    const plan = entry.details?.plan
-    const progress = getRecoveryProgress(plan)
-    return <div className="modal-backdrop history-modal-backdrop" onClick={onClose}><section className="event-modal history-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Recovery history" title={plan?.routine?.title ?? 'Recovery routine'} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="history-detail-grid"><span><strong>Completed</strong>{format(parseISO(entry.completedAt), 'MMM d, yyyy · h:mm a')}</span><span><strong>Progress</strong>{progress.label}</span><span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span><span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span></div></section></div>
+    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} />
   }
 
   const detailSections = getCheckInDetailSections(entry, unitSystem)
@@ -607,6 +581,32 @@ function getReadinessBand(score) {
   return 'readiness-red'
 }
 
+function RecoveryCompletionHistoryModal({ entry, onClose }) {
+  const plan = entry.details?.plan
+
+  return (
+    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+      <section
+        className="event-modal history-modal recovery-history-modal glass-panel"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="schedule-header">
+          <SectionHeading eyebrow="Recovery history" title={plan?.routine?.title ?? 'Recovery routine'} />
+          <button className="ghost-close" onClick={onClose} type="button">Close</button>
+        </div>
+        <div className="history-detail-grid recovery-history-summary">
+          <span><strong>Saved</strong>{format(parseISO(entry.completedAt), 'MMM d, yyyy · h:mm a')}</span>
+          <span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span>
+          <span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span>
+        </div>
+        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan details are available.</p>}
+      </section>
+    </div>
+  )
+}
+
 function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
   const plan = entry.recommendation?.recoveryPlan
   const savedRoutine = savedRoutines.find((routine) => routine.sourceCheckoutId === entry.id)
@@ -614,7 +614,7 @@ function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
       <section
-        className="event-modal history-modal glass-panel"
+        className="event-modal history-modal recovery-history-modal glass-panel"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -640,66 +640,32 @@ function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines
 }
 
 function SavedRecoveryPlan({ plan }) {
-  const steps = plan.recoverySteps ?? []
-  const statuses = plan.stepStatuses ?? {}
-  const feedback = plan.feedback
+  const routine = plan.routine
 
   return (
     <section className="history-detail-section saved-recovery-plan">
-      <p className="eyebrow">Saved recovery plan</p>
-      <h3>{plan.routine?.title ?? plan.label ?? 'Recovery routine'}</h3>
-      {plan.summary && <p className="saved-recovery-summary">{plan.summary}</p>}
+      <p className="eyebrow">Generated recovery routine</p>
+      <h3>{routine?.title ?? 'Recovery routine'}</h3>
+      {routine?.goal && <p className="saved-recovery-goal"><strong>Goal</strong>{routine.goal}</p>}
+      {routine?.summary && <p className="saved-recovery-summary">{routine.summary}</p>}
 
-      {plan.timeline?.length > 0 && (
-        <div className="saved-recovery-timeline">
-          {plan.timeline.map((phase) => (
-            <article key={phase.title}>
-              <strong>{phase.title}</strong>
-              <ul>{phase.items?.map((item) => <li key={item}>{item}</li>)}</ul>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {steps.length > 0 && (
-        <div className="saved-recovery-actions">
-          <strong>Recovery actions</strong>
-          {steps.map((step, index) => {
-            const stepId = step.id ?? `recovery-step-${index}`
-            return (
-              <span key={stepId}>
-                <em>{statuses[stepId] ?? 'Not marked'}</em>
-                {step.title}
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      {plan.routine?.exercises?.length > 0 && (
+      {routine?.exercises?.length > 0 && (
         <div className="saved-recovery-routine">
-          <strong>{plan.routine.durationMinutes ?? 10}-minute routine</strong>
+          <strong>{routine.durationMinutes ?? 10}-minute routine</strong>
           <ol>
-            {plan.routine.exercises.map((exercise, index) => (
+            {routine.exercises.map((exercise, index) => (
               <li key={`${exercise.name}-${index}`}>
-                <span>{exercise.type ?? 'Mobility'}</span>
-                <b>{exercise.name}</b>
-                <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
+                <div className="saved-recovery-exercise-heading">
+                  <span>{exercise.type ?? 'Mobility'}</span>
+                  <b>{exercise.name}</b>
+                  <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
+                </div>
+                {exercise.instruction && <p>{exercise.instruction}</p>}
+                {exercise.feel && <small><strong>You should feel:</strong> {exercise.feel}</small>}
+                {exercise.avoid && <small><strong>Avoid:</strong> {exercise.avoid}</small>}
               </li>
             ))}
           </ol>
-        </div>
-      )}
-
-      {feedback && (
-        <div className="saved-recovery-feedback">
-          <strong>Recovery feedback</strong>
-          <div className="history-detail-grid">
-            <span><strong>Routine</strong>{feedback.completion || 'Not saved'}</span>
-            <span><strong>Feeling after</strong>{feedback.feeling || 'Not saved'}</span>
-            <span><strong>Tightness</strong>{feedback.tightness || 'Not saved'}</span>
-            <span><strong>Pain</strong>{feedback.pain || 'Not saved'}</span>
-          </div>
         </div>
       )}
     </section>

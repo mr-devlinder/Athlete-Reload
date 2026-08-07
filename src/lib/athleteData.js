@@ -717,6 +717,15 @@ export async function createRecoveryRoutineCompletion(completion) {
   return fromRecoveryRoutineCompletionRow(data)
 }
 
+export async function deleteRecoveryRoutineCompletion(id) {
+  const { error } = await supabase
+    .from('recovery_routine_completions')
+    .delete()
+    .eq('id', id)
+
+  if (error) throw error
+}
+
 export async function loadPrivacyPreferences() {
   const { data, error } = await supabase
     .from('privacy_preferences')

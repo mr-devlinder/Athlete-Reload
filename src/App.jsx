@@ -42,6 +42,7 @@ import {
   deleteCheckInsForEvent,
   deletePainReportsForSource,
   deletePainReportsForSourceId,
+  deleteRecoveryRoutineCompletion,
   deleteScheduleEvent,
   deleteShareAuditLog,
   deleteTrainingCheckout,
@@ -1654,6 +1655,20 @@ function App() {
 
   async function deleteHistoryEntry(entry, kind) {
     if (!entry?.id) return
+
+    if (kind === 'recovery-completion') {
+      setRecoveryCompletions((current) => current.filter((item) => item.id !== entry.id))
+
+      if (isSupabaseSession) {
+        try {
+          await deleteRecoveryRoutineCompletion(entry.id)
+        } catch (error) {
+          console.error(error)
+          setDataStatus('error')
+        }
+      }
+      return
+    }
 
     if (kind === 'recovery') {
       const checkout = checkouts.find((item) => item.id === entry.id)
