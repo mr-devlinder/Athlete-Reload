@@ -340,7 +340,7 @@ Important behavior:
 - Treat the supplied timeAvailable as an exact routine time budget, not merely a maximum. Set routine.durationMinutes to exactly that selected whole-minute duration. The sum of the individual timed exercise steps must land within about one minute of that duration, with enough distinct exercises for the selected plan type. Adjust the content to effort, duration, participation, and the next event. The equipment array describes what is available, but the routine does not need to use every item. Always include a no-equipment option.
 - Never require equipment that is absent from the supplied equipment array. Selected equipment enables an option; it does not obligate its use. Every exercise must include "equipment":"None" or the exact name of one selected item.
 - Build a real routine with enough distinct, useful steps to fill exactly 5, 10, 15, 20, 25, or 30 selected minutes. Let the athlete context and routine flow determine exercise count: added time may add exercises, extend appropriate holds, or add controlled repetitions. Short plans should be concise and longer plans should contain enough variety, but never pad the plan with filler or multi-minute static holds.
-- Only split a movement into separate left and right steps when it is genuinely unilateral. Keep bilateral and full-body movements as one step. In every step, put laterality in either side or area without duplicating it: use side "Left" with area "Hip", or side "Both sides" with area "Hips"; never side "Left" with area "Left Hip".
+- Every genuinely unilateral movement must be returned as two consecutive exercise objects: one with side "Left" and one with side "Right". Give each object the full duration or repetition dose and side-specific setup, movement, and completion instructions. Never put "switch sides" inside an exercise because each object receives its own timer. Keep bilateral, simultaneous, full-body, and central-body movements as one object with side "Both sides". In every step, put laterality in either side or area without duplicating it: use side "Left" with area "Hip", or side "Both sides" with area "Hips"; never side "Left" with area "Left Hip".
 - Unless planType is targeted, flexibility, quick, or mobility, build a full-body recovery routine that includes the major regions relevant after activity. For specialized plan types, stay focused on the selected outcome while keeping adjacent joints and basic whole-body balance where useful. Keep painful or concerning areas protected rather than forcing direct stretching.
 - Do not include standalone walking, breathing, or generic ankle rolls as routine exercises. They are not acceptable filler. Only include a short cooldown movement when it is specific to the completed sport or a symptom/safety concern, and it must never replace the stretching and mobility work.
 - Use sportContext workload when present to select sport-relevant recovery priorities, but never diagnose or predict injury risk from workload. All symptom and red-flag safety rules override workload-based guidance.
@@ -349,8 +349,8 @@ Important behavior:
 - Prefer conventional, widely recognized exercise and stretch names with clear form cues. Do not treat any example list or familiar pair as a template, and do not routinely begin with the same two movements. Use niche movements sparingly and only when the athlete context makes them more useful than a familiar option.
 - Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
 - For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
-- Use each exercise's instruction, side, feel, and avoid fields well. Instructions must state setup, movement direction, what stays still, what the athlete should feel, when a rep or hold ends, how to switch sides, and when pain means stop. Include a mix of reps and holds, clear body-area labels, and enough useful work to fill the selected time without exceeding it.
-- Static stretches and sustained positions must use durationSeconds and omit reps. Controlled mobility repetitions must use reps and omit durationSeconds. Use side "Each side" for unilateral movements and "Both sides" only when both sides move together.
+- Every exercise, including the final exercise, must fully populate setup, movement, completionCue, sideCue, feel, and avoid. Write for someone who has never performed the movement: name joint positions, movement direction, what remains still, the exact end of a repetition or hold, how to change sides, expected muscle sensation, common form errors, and symptoms that mean stop. Never become shorter or less specific later in the routine.
+- Static stretches and sustained positions must use durationSeconds and omit reps. Controlled mobility repetitions must use reps and omit durationSeconds. Use side "Left" or "Right" for unilateral exercise objects and "Both sides" only when both sides move together.
 - Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
 - If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
 - Do not use a readiness score in this response. A stored score may be 0.
@@ -372,7 +372,7 @@ JSON shape:
   "action": "one short paragraph describing the priority tonight",
   "reportSections": [{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on current nutrition and this session","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"practical guidance without claiming exact fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]}],
   "planType": "${planType}",
-  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","durationSeconds":30,"instruction":"...","why":"short reason this movement fits the selected routine type and athlete context","feel":"...","avoid":"..."}]},
+  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","durationSeconds":30,"setup":"exact starting body position and equipment placement","movement":"step-by-step movement direction plus what must remain still","completionCue":"how to know one repetition or hold is complete","sideCue":"how and when to switch sides, or state that both sides move together","why":"short reason this movement fits the selected routine type and athlete context","feel":"specific muscle or area that should work or stretch","avoid":"specific form faults and symptoms that mean stop"}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -659,7 +659,7 @@ function normalizeRoutine(value: any, payload?: any) {
       ].find(([, pattern]) => (pattern as RegExp).test(exerciseText))?.[0]
       if (inferredRequirement && !availableEquipment.has(inferredRequirement as string)) return false
       return !required || required === 'none' || required === 'bodyweight' || availableEquipment.has(required)
-    }).slice(0, 32).map((exercise: any) => normalizeRecoveryExercise(exercise))
+    }).slice(0, 32).flatMap((exercise: any) => expandRecoveryExerciseSides(normalizeRecoveryExercise(exercise)))
     : []
   const exercises = avoidRepeatedRoutineOpening(generatedExercises, payload?.recentRoutineSequences, payload?.variationKey)
 
@@ -682,11 +682,18 @@ function normalizeRecoveryExercise(exercise: any) {
   const isUnilateral = /single[- ]?(leg|arm)|split stance|half[- ]kneeling|figure[- ]four|calf stretch|hamstring stretch|hip flexor|open book|side[- ]lying|one[- ]arm|one[- ]leg/.test(text)
   const suppliedSide = stringOrFallback(exercise?.side, isUnilateral ? 'Each side' : 'Both sides')
   const side = isUnilateral && /^both( sides)?$/i.test(suppliedSide) ? 'Each side' : suppliedSide
-  const instruction = stringOrFallback(exercise?.instruction, '')
-  const isVague = instruction.length < 45 || /^(move gently|stretch your|hold the position|do a|move slowly)[.!]?$/i.test(instruction.trim())
-  const clearInstruction = isVague
-    ? `Set up in a stable position for ${name.toLowerCase()}, move only through a comfortable range, keep the rest of your body still, and stop for sharp or worsening pain.`
-    : instruction
+  const legacyInstruction = stringOrFallback(exercise?.instruction, '')
+  const setup = stringOrFallback(exercise?.setup, `Choose a stable position where you can perform ${name.toLowerCase()} without losing balance.`)
+  const movement = stringOrFallback(exercise?.movement, legacyInstruction || `Move slowly through the intended range while keeping the rest of your body controlled.`)
+  const completionCue = stringOrFallback(exercise?.completionCue, isHold
+    ? `Ease out under control when the hold time ends.`
+    : `Return to the starting position under control to complete one repetition.`)
+  const sideCue = stringOrFallback(exercise?.sideCue, isUnilateral || /each side|left|right/i.test(side)
+    ? `Complete the full dose on one side, reset your position, then repeat on the other side.`
+    : `Keep both sides moving evenly throughout the exercise.`)
+  const clearInstruction = [setup, movement, completionCue, sideCue]
+    .map(ensureSentence)
+    .join(' ')
 
   return {
     area: stringOrFallback(exercise?.area, 'Comfortable range'),
@@ -703,6 +710,51 @@ function normalizeRecoveryExercise(exercise: any) {
     type,
     why: stringOrFallback(exercise?.why, 'This movement supports the selected routine goal.'),
   }
+}
+
+function expandRecoveryExerciseSides(exercise: any) {
+  const name = String(exercise?.name ?? '')
+  const side = String(exercise?.side ?? '')
+  const instruction = String(exercise?.instruction ?? '')
+  const alreadySideSpecific = /\b(left|right)( side)?\b/i.test(side) || /\s-\s(left|right)$/i.test(name)
+  const explicitlyEachSide = /each side|left and right|right and left|one side at a time/i.test(side)
+  const switchesSides = /switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(instruction)
+  const knownUnilateralMovement = /single[- ]?(?:leg|arm)|half[- ]kneeling|figure[- ]four|open[- ]book|side[- ]lying|one[- ](?:arm|leg)|calf stretch|hamstring stretch|hip[- ]flexor stretch|doorway chest stretch|adductor rock[- ]back/i.test(name)
+
+  if (alreadySideSpecific || (!explicitlyEachSide && !switchesSides && !knownUnilateralMovement)) return [exercise]
+
+  return ['Left', 'Right'].map((currentSide) => ({
+    ...exercise,
+    name: `${name.replace(/\s*[-–]\s*(left|right)$/i, '').trim()} - ${currentSide}`,
+    side: currentSide,
+    instruction: makeRecoveryInstructionSideSpecific(instruction, name, currentSide),
+  }))
+}
+
+function makeRecoveryInstructionSideSpecific(instruction: string, name: string, side: string) {
+  const retained = instruction
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !/switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(sentence))
+    .join(' ')
+    .trim()
+  const loweredName = name.toLowerCase()
+  const setup = /calf stretch/.test(loweredName)
+    ? `Place your ${side.toLowerCase()} leg behind you as the stretching leg.`
+    : /hamstring stretch/.test(loweredName)
+      ? `Use your ${side.toLowerCase()} leg as the leg being stretched.`
+      : /hip[- ]flexor/.test(loweredName)
+        ? `Kneel on your ${side.toLowerCase()} knee to stretch the front of that hip.`
+        : /doorway chest/.test(loweredName)
+          ? `Place your ${side.toLowerCase()} forearm on the doorway.`
+          : `Set up with your ${side.toLowerCase()} side as the working or stretching side.`
+
+  return `${setup} ${retained} This timer is for the ${side.toLowerCase()} side only.`.trim()
+}
+
+function ensureSentence(value: unknown) {
+  const text = String(value ?? '').trim()
+  if (!text) return ''
+  return /[.!?]$/.test(text) ? text : `${text}.`
 }
 
 function avoidRepeatedRoutineOpening(exercises: any[], recentSequences: unknown, variationKey: unknown) {

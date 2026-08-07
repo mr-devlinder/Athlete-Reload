@@ -2015,29 +2015,27 @@ function App() {
 
     if (!plan) return false
 
+    const completion = {
+      completedAt: new Date().toISOString(),
+      details: { plan },
+      id: `recovery-completion-${Date.now()}`,
+      routineId: null,
+      sourceCheckoutId: checkout?.id ?? null,
+    }
+
+    try {
+      const savedCompletion = isSupabaseSession
+        ? await createRecoveryRoutineCompletion(completion)
+        : completion
+      setRecoveryCompletions((current) => [savedCompletion, ...current.filter((item) => item.id !== savedCompletion.id)])
+    } catch (error) {
+      console.error('Unable to save recovery history', error)
+      setDataStatus('error')
+      return false
+    }
+
     if (!checkout || !completedEvent) {
-      const completion = {
-        completedAt: new Date().toISOString(),
-        details: { plan },
-        id: `recovery-completion-${Date.now()}`,
-        routineId: null,
-        sourceCheckoutId: null,
-      }
-      if (isSupabaseSession) {
-        try {
-          const savedCompletion = await createRecoveryRoutineCompletion(completion)
-          setRecoveryCompletions((current) => [savedCompletion, ...current])
-        } catch (error) {
-          console.error(error)
-          setDataStatus('error')
-          return false
-        }
-      } else {
-        setRecoveryCompletions((current) => [completion, ...current])
-      }
-      setGeneratedRecoveryPlan(null)
-      setGeneratedRecoveryCheckoutId(null)
-      setIsGeneratedRecoveryPlanSaved(false)
+      setIsGeneratedRecoveryPlanSaved(true)
       return true
     }
 
@@ -2055,32 +2053,12 @@ function App() {
       try {
         const savedCheckout = await updateTrainingCheckout(checkout.id, completedEvent, updatedCheckout)
         setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
-        const savedCompletion = await createRecoveryRoutineCompletion({
-          details: { plan },
-          routineId: null,
-          sourceCheckoutId: checkout.id,
-        })
-        setRecoveryCompletions((current) => [savedCompletion, ...current])
       } catch (error) {
-        console.error(error)
+        console.error('Recovery history saved, but checkout could not be updated', error)
         setDataStatus('error')
-        return false
       }
     }
-
-    if (!isSupabaseSession) {
-      setRecoveryCompletions((current) => [{
-        completedAt: new Date().toISOString(),
-        details: { plan },
-        id: `recovery-completion-${Date.now()}`,
-        routineId: null,
-        sourceCheckoutId: checkout.id,
-      }, ...current])
-    }
-
-    setGeneratedRecoveryPlan(null)
-    setGeneratedRecoveryCheckoutId(null)
-    setIsGeneratedRecoveryPlanSaved(false)
+    setIsGeneratedRecoveryPlanSaved(true)
     return true
   }
 

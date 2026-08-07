@@ -20,25 +20,25 @@ const planTypeOptions = [
 const targetAreaOptions = ['Shoulders / arms', 'Back / trunk', 'Hips', 'Quads / hamstrings', 'Knees', 'Calves / ankles / feet']
 
 const fallbackRoutine = [
-  { area: 'Spine', reps: 8, instruction: 'Move slowly through a comfortable range and do not force your back.', name: 'Cat-cow', side: 'Both sides', type: 'Mobility' },
-  { area: 'Upper back', reps: 8, instruction: 'Rotate from the upper back while keeping the movement easy and controlled.', name: 'Open-book thoracic rotation', side: 'Each side', type: 'Mobility' },
-  { area: 'Shoulders', reps: 10, instruction: 'Make smooth circles without pinching or sharp pain in the shoulder.', name: 'Shoulder circles', side: 'Both sides', type: 'Mobility' },
-  { area: 'Chest', durationSeconds: 30, instruction: 'Feel a mild opening through the chest, never sharp pain in the shoulder.', name: 'Doorway chest stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Hips', reps: 10, instruction: 'Switch sides under control and stay in a comfortable range.', name: '90/90 hip switches', side: 'Both sides', type: 'Mobility' },
-  { area: 'Adductors', reps: 8, instruction: 'Keep the motion gentle and stop before discomfort becomes sharp.', name: 'Adductor rock-back', side: 'Each side', type: 'Mobility' },
-  { area: 'Hip flexors', durationSeconds: 30, instruction: 'Keep ribs stacked over hips and feel a gentle stretch at the front of the hip.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Hamstrings', durationSeconds: 30, instruction: 'Use a light, comfortable stretch only. Do not push into pain.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Calves', durationSeconds: 30, instruction: 'Keep the heel down and feel gentle tension through the calf.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Spine', reps: 8, instruction: 'Start on hands and knees with hands under shoulders and knees under hips. Exhale as you round your back toward the ceiling, then inhale as you gently lower your chest and tailbone without forcing your neck. Returning to a neutral, level back completes one repetition.', name: 'Cat-cow', side: 'Both sides', type: 'Mobility' },
+  { area: 'Upper back', reps: 8, instruction: 'Lie on one side with hips and knees bent, arms straight in front, and palms together. Keep both knees stacked while you sweep the top arm across your chest and rotate your upper back until the shoulder approaches the floor. Bring the hand back to the starting palm to complete one repetition, then finish the set before changing sides.', name: 'Open-book thoracic rotation', side: 'Each side', type: 'Mobility' },
+  { area: 'Shoulders', reps: 10, instruction: 'Stand tall with ribs over hips and arms relaxed. Lift both shoulders toward your ears, circle them back and down, and keep your neck still. Reaching the relaxed starting position completes one circle; reverse direction after half the repetitions.', name: 'Shoulder circles', side: 'Both sides', type: 'Mobility' },
+  { area: 'Chest', durationSeconds: 30, instruction: 'Stand beside a doorway and place one forearm on the frame with the elbow slightly below shoulder height. Keep your shoulder down and turn your chest away until you feel a mild stretch across the chest, without twisting your low back. Step out when time ends, then repeat with the opposite arm.', name: 'Doorway chest stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Hips', reps: 10, instruction: 'Sit with both knees bent, feet wider than hip width, and hands behind you for support. Keep both sitting bones grounded as you lower both knees together toward one side, return through center, and lower them toward the other side. Returning to center after both directions completes one repetition.', name: '90/90 hip switches', side: 'Both sides', type: 'Mobility' },
+  { area: 'Adductors', reps: 8, instruction: 'Start on hands and knees, extend one leg straight to the side, and keep that foot flat with toes forward. Keep your back level as you send your hips toward the bent-leg heel until the inner thigh gently stretches, then move forward to the start. Returning over your hands completes one repetition; finish the set before switching legs.', name: 'Adductor rock-back', side: 'Each side', type: 'Mobility' },
+  { area: 'Hip flexors', durationSeconds: 30, instruction: 'Kneel on one knee with the other foot flat in front, using padding or a wall for balance. Tuck your pelvis slightly and shift your whole body forward while keeping ribs stacked over hips and the low back neutral. Ease back when time ends, then change the kneeling leg.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Hamstrings', durationSeconds: 30, instruction: 'Lie on your back with one knee bent and foot on the floor. Lift the other leg, hold behind the thigh, and slowly straighten that knee until the back of the thigh feels a mild stretch while your hips stay level. Bend the knee to release when time ends, then switch legs.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Stretch' },
+  { area: 'Calves', durationSeconds: 30, instruction: 'Face a wall with both hands supported, one foot forward, and the other foot behind you pointing straight ahead. Keep the back knee straight and heel planted as you shift your body toward the wall until the back calf gently stretches. Step forward to release when time ends, then switch legs.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
 ]
 
 const fallbackRoutines = {
   flexibility: [
-    { area: 'Hamstrings', durationSeconds: 40, instruction: 'Hold steady at mild tension, then ease slightly farther only if comfortable.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Hip flexors', durationSeconds: 40, instruction: 'Keep ribs stacked and hold a sustained stretch without arching your back.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Adductors', durationSeconds: 40, instruction: 'Settle into mild inner-thigh tension and breathe normally throughout the hold.', name: 'Seated adductor stretch', side: 'Both sides', type: 'Flexibility' },
-    { area: 'Glutes', durationSeconds: 40, instruction: 'Hold a comfortable glute stretch without forcing the knee toward your chest.', name: 'Figure-four stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Calves', durationSeconds: 40, instruction: 'Keep the heel grounded and sustain mild calf tension.', name: 'Standing calf stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Chest', durationSeconds: 35, instruction: 'Hold a gentle chest opening with relaxed shoulders.', name: 'Doorway chest stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Hamstrings', durationSeconds: 40, instruction: 'Lie on your back with one knee bent and foot on the floor. Lift the other leg, hold behind the thigh, and slowly straighten that knee until the back of the thigh feels a mild stretch while your hips stay level. Bend the knee to release when time ends, then switch legs.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Hip flexors', durationSeconds: 40, instruction: 'Kneel on one knee with the other foot flat in front, using padding or a wall for balance. Tuck your pelvis slightly and shift your whole body forward while keeping ribs stacked and your low back neutral. Ease back when time ends, then change the kneeling leg.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Adductors', durationSeconds: 40, instruction: 'Sit tall with the soles of your feet together and let your knees fall outward. Hold your ankles, keep your back long, and hinge forward from the hips until both inner thighs gently stretch; do not press down on your knees. Return upright when time ends.', name: 'Seated adductor stretch', side: 'Both sides', type: 'Flexibility' },
+    { area: 'Glutes', durationSeconds: 40, instruction: 'Lie on your back with both knees bent and cross one ankle over the opposite thigh above the knee. Keep your head and hips down as you draw the supporting thigh toward your chest until the crossed-side glute gently stretches. Lower the legs to release when time ends, then switch sides.', name: 'Figure-four stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Calves', durationSeconds: 40, instruction: 'Face a wall with both hands supported, one foot forward, and the other foot behind you pointing straight ahead. Keep the back knee straight and heel planted as you shift toward the wall until the back calf gently stretches. Step forward to release when time ends, then switch legs.', name: 'Standing calf stretch', side: 'Each side', type: 'Flexibility' },
+    { area: 'Chest', durationSeconds: 35, instruction: 'Stand beside a doorway and place one forearm on the frame with the elbow slightly below shoulder height. Keep your shoulder down and turn your chest away until you feel a mild chest stretch without twisting your low back. Step out when time ends, then repeat with the opposite arm.', name: 'Doorway chest stretch', side: 'Each side', type: 'Flexibility' },
   ],
   mobility: fallbackRoutine.filter((exercise) => exercise.type === 'Mobility'),
 }
@@ -71,6 +71,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [routineComplete, setRoutineComplete] = useState(false)
   const [feedback, setFeedback] = useState({ completion: '', feeling: '', tightness: '', pain: '' })
   const [isSavingPlan, setIsSavingPlan] = useState(false)
+  const [savePlanMessage, setSavePlanMessage] = useState('')
 
   const plan = generatedPlan?.planType === planType ? generatedPlan : null
   const fallbackForGoal = getFallbackRoutine(plan?.planType, routineVariationRef.current)
@@ -221,23 +222,24 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     if (!plan || isSavingPlan) return
 
     setIsSavingPlan(true)
-    const stepStatuses = {
-      ...Object.fromEntries([...completedSteps].map((stepId) => [stepId, 'complete'])),
-      ...Object.fromEntries([...skippedSteps].map((stepId) => [stepId, 'skipped'])),
+    setSavePlanMessage('')
+    try {
+      const hasFeedback = Object.values(feedback).some(Boolean)
+      const saved = await onSaveRecoveryPlan?.({
+        ...plan,
+        routineProgress: {
+          completed: completedRoutineExercises.size,
+          total: routine.length,
+        },
+        ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
+      })
+      setSavePlanMessage(saved ? 'Saved to your Recovery history.' : 'The recovery plan could not be saved. Please try again.')
+    } catch (error) {
+      console.error('Unable to save recovery plan', error)
+      setSavePlanMessage('The recovery plan could not be saved. Please try again.')
+    } finally {
+      setIsSavingPlan(false)
     }
-    const hasFeedback = Object.values(feedback).some(Boolean)
-    const saved = await onSaveRecoveryPlan?.({
-      ...plan,
-      stepStatuses,
-      routineProgress: {
-        completed: completedRoutineExercises.size,
-        total: routine.length,
-      },
-      ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
-    })
-    setIsSavingPlan(false)
-
-    if (!saved) return
   }
 
   function toggleEquipment(option) {
@@ -472,9 +474,9 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <label>Pain<select value={feedback.pain} onChange={(event) => setFeedback({ ...feedback, pain: event.target.value })}><option value="">0–10</option>{Array.from({ length: 11 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
               </div>
               {feedback.feeling === 'Worse' && <p className="recovery-error">Feeling temporarily looser is not proof that an injury has healed. Stop and tell a qualified adult if symptoms worsen.</p>}
-              {!isReplayingSavedRoutine && <button className="primary-button" disabled={isSavingPlan} onClick={saveRecoveryPlan} type="button">{isSavingPlan ? 'Saving recovery plan...' : 'Save recovery plan'}</button>}
+              {!isReplayingSavedRoutine && <button className="primary-button" disabled={isSavingPlan || generatedPlanSaved} onClick={saveRecoveryPlan} type="button">{isSavingPlan ? 'Saving recovery plan...' : generatedPlanSaved ? 'Recovery plan saved' : 'Save recovery plan'}</button>}
               {isReplayingSavedRoutine && <p className="recovery-saved-message">Completed a favorite routine. This replay will not create a new recovery plan.</p>}
-              {!isReplayingSavedRoutine && generatedPlanSaved && <p className="recovery-saved-message">Saved to your Recovery history.</p>}
+              {!isReplayingSavedRoutine && (savePlanMessage || generatedPlanSaved) && <p className={savePlanMessage.startsWith('Saved') || generatedPlanSaved ? 'recovery-saved-message' : 'recovery-error'}>{savePlanMessage || 'Saved to your Recovery history.'}</p>}
             </div>}
           </section>
 
@@ -531,22 +533,56 @@ function formatCompletionRecency(value) {
 
 function buildRoutine(routine, availableMinutes, excludedExercises = [], fallback = fallbackRoutine) {
   const excluded = new Set(excludedExercises)
-  const individualSteps = routine.flatMap((exercise) => {
-    const side = String(exercise.side ?? '').toLowerCase()
-
-    if (!/each side|left and right|right and left/.test(side)) return excluded.has(getExerciseFamily(exercise.name)) ? [] : [exercise]
-
-    return ['Left', 'Right'].map((currentSide) => ({
-      ...exercise,
-      name: new RegExp(currentSide, 'i').test(exercise.name ?? '')
-        ? exercise.name
-        : `${exercise.name} - ${currentSide}`,
-      side: `${currentSide} side`,
-    })).filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
-  })
-
-  const alternatives = fallback.filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)) && !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
+  const expandAvailableExercises = (exercises) => exercises
+    .flatMap(expandUnilateralExercise)
+    .filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
+  const individualSteps = expandAvailableExercises(routine)
+  const alternatives = expandAvailableExercises(fallback)
+    .filter((exercise) => !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
   return constrainRoutine(individualSteps, availableMinutes, alternatives)
+}
+
+function expandUnilateralExercise(exercise) {
+  const name = String(exercise?.name ?? '')
+  const side = String(exercise?.side ?? '')
+  const instruction = String(exercise?.instruction ?? '')
+  const alreadySideSpecific = /\b(left|right)( side)?\b/i.test(side) || /\s-\s(left|right)$/i.test(name)
+  const explicitlyEachSide = /each side|left and right|right and left|one side at a time/i.test(side)
+  const switchesSides = /switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(instruction)
+  const knownUnilateralMovement = /single[- ]?(?:leg|arm)|half[- ]kneeling|figure[- ]four|open[- ]book|side[- ]lying|one[- ](?:arm|leg)|calf stretch|hamstring stretch|hip[- ]flexor stretch|doorway chest stretch|adductor rock[- ]back/i.test(name)
+
+  if (alreadySideSpecific || (!explicitlyEachSide && !switchesSides && !knownUnilateralMovement)) return [exercise]
+
+  return ['Left', 'Right'].map((currentSide) => ({
+    ...exercise,
+    name: `${getExerciseDisplayName(name)} - ${currentSide}`,
+    side: `${currentSide} side`,
+    instruction: makeInstructionSideSpecific(instruction, name, currentSide),
+  }))
+}
+
+function getExerciseDisplayName(name) {
+  return String(name).replace(/\s*[-–]\s*(left|right)$/i, '').trim()
+}
+
+function makeInstructionSideSpecific(instruction, name, side) {
+  const retained = String(instruction)
+    .split(/(?<=[.!?])\s+/)
+    .filter((sentence) => !/switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(sentence))
+    .join(' ')
+    .trim()
+  const loweredName = String(name).toLowerCase()
+  const setup = /calf stretch/.test(loweredName)
+    ? `Place your ${side.toLowerCase()} leg behind you as the stretching leg.`
+    : /hamstring stretch/.test(loweredName)
+      ? `Use your ${side.toLowerCase()} leg as the leg being stretched.`
+      : /hip[- ]flexor/.test(loweredName)
+        ? `Kneel on your ${side.toLowerCase()} knee to stretch the front of that hip.`
+        : /doorway chest/.test(loweredName)
+          ? `Place your ${side.toLowerCase()} forearm on the doorway.`
+          : `Set up with your ${side.toLowerCase()} side as the working or stretching side.`
+
+  return `${setup} ${retained} This timer is for the ${side.toLowerCase()} side only.`.trim()
 }
 
 function getExerciseFamily(name = '') {
