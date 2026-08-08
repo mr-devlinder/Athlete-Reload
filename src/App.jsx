@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { format, subDays } from 'date-fns'
 import { LensGlass, SVGFilters } from 'react-glassy'
 import 'react-glassy/styles.css'
@@ -9,12 +9,7 @@ import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
-import { HomeView } from './components/HomeView'
-import { NutritionView } from './components/NutritionView'
-import { HistoryView } from './components/HistoryView'
-import { RecoveryView } from './components/RecoveryView'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
-import { ScheduleView } from './components/ScheduleView'
 import {
   checkInDefaults,
   associations as initialAssociations,
@@ -23,6 +18,12 @@ import {
 } from './data/appData'
 import appLogo from './assets/athlete-reload-logo-transparent.png'
 import trainingHero from './assets/training-hero.png'
+
+const HomeView = lazy(() => import('./components/HomeView').then((module) => ({ default: module.HomeView })))
+const HistoryView = lazy(() => import('./components/HistoryView').then((module) => ({ default: module.HistoryView })))
+const NutritionView = lazy(() => import('./components/NutritionView').then((module) => ({ default: module.NutritionView })))
+const RecoveryView = lazy(() => import('./components/RecoveryView').then((module) => ({ default: module.RecoveryView })))
+const ScheduleView = lazy(() => import('./components/ScheduleView').then((module) => ({ default: module.ScheduleView })))
 import {
   clearCheckIns,
   clearPainReports,
@@ -35,7 +36,6 @@ import {
   createPainReports,
   createScheduleEvent,
   createShareAuditLog,
-  createTournament,
   createTrainingCheckout,
   deleteAssociation,
   deleteCheckIn,
@@ -47,10 +47,11 @@ import {
   deleteShareAuditLog,
   deleteTrainingCheckout,
   deleteTrainingCheckoutsForEvent,
-  deleteTournament,
+  deleteTournamentWithGames,
   loadAthleteData,
   loadAthleteProfile,
   loadPrivacyPreferences,
+  recordLegalConsent,
   updateAssociation,
   updateCheckIn,
   updatePainIssue,
@@ -60,7 +61,7 @@ import {
   upsertAthleteProfile,
   updateTrainingCheckout,
   updateScheduleEvent,
-  updateTournament,
+  saveTournamentWithGames,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { getSportContext } from './data/sportProfiles'
@@ -69,10 +70,11 @@ import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, ge
 import { getRecommendation, getTrendInsights } from './utils/readiness'
 import { getPersonalBaseline } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
-import { clearUserStorage, loadSavedState, saveState } from './utils/storage'
+import { canPersistGuestState, clearUserStorage, loadSavedState, saveState } from './utils/storage'
 import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
+import { useModalAccessibility } from './hooks/useModalAccessibility'
 import './App.css'
 
 const views = [
@@ -104,12 +106,6 @@ const views = [
 
 const privacyDefaults = {
   aiPersonalizationEnabled: true,
-  analyticsAllowed: false,
-  cloudSync: true,
-  coachIncludeNotes: false,
-  coachIncludePain: false,
-  coachIncludeNutrition: false,
-  localCopy: false,
   remindersEnabled: false,
 }
 
@@ -218,6 +214,21 @@ function getHydrationStatus(hydrationMl = 0) {
   if (progress >= 0.5) return 'Okay'
 
   return 'Poor'
+}
+
+function getMealNutritionBreakdown(entries = []) {
+  const mealNames = ['Breakfast', 'Lunch', 'Dinner', 'Snack']
+
+  return Object.fromEntries(mealNames.flatMap((meal) => {
+    const mealEntries = entries.filter((entry) => String(entry.meal ?? '').toLowerCase() === meal.toLowerCase())
+    if (mealEntries.length === 0) return []
+
+    return [[meal === 'Snack' ? 'Snacks' : meal, {
+      items: mealEntries.map((entry) => entry.name).filter(Boolean),
+      loggedItems: mealEntries.length,
+      totals: getNutritionTotals(mealEntries),
+    }]]
+  }))
 }
 
 function normalizeFivePointValue(value, fallback = 1) {
@@ -493,7 +504,7 @@ function getEventDateTime(event) {
   return date
 }
 
-function getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
+function _getLocalCheckoutRecommendation(checkout, event, preCheckIn) {
   const difficulty = Number(checkout.difficulty)
   const sessionLoad = Number(checkout.actualMinutes ?? 0) * difficulty
   const painWorsened = ['Slightly worse', 'Much worse'].includes(checkout.painChange)
@@ -657,6 +668,8 @@ function App() {
   const [onboardingAssociation, setOnboardingAssociation] = useState('Personal')
   const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
+  const isSigningOutRef = useRef(false)
+  const resetAccountStateRef = useRef(null)
   const [authEntryMode, setAuthEntryMode] = useState('landing')
   const [dataStatus, setDataStatus] = useState('ready')
   const [isEditingToday, setIsEditingToday] = useState(false)
@@ -678,6 +691,8 @@ function App() {
   })
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
+  const recommendationDialogRef = useModalAccessibility(Boolean(submittedRecommendation), () => setSubmittedRecommendation(null))
+  const aiErrorDialogRef = useModalAccessibility(Boolean(checkInAiError), () => setCheckInAiError(''))
   const [isAthleteProfileOpen, setIsAthleteProfileOpen] = useState(false)
   const [navLens, setNavLens] = useState(null)
   const lensFrameRef = useRef(null)
@@ -707,6 +722,7 @@ function App() {
   )
   const visualActiveView = navLens?.activeLabel ?? activeView
   const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
+  resetAccountStateRef.current = resetAccountState
   const todayIso = getTodayIso()
   const todayEvents = useMemo(
     () => sortScheduleEvents(schedule.filter((event) => event.date === todayIso)),
@@ -749,18 +765,29 @@ function App() {
       eventId: selectedCheckInEvent?.id ?? null,
       eventTime: selectedCheckInEvent?.time ?? '',
       eventTitle: selectedCheckInEvent?.title ?? 'Open training day',
+      hydration: getHydrationStatus(dailyWellness?.hydrationMl),
+      hydrationMl: Math.max(0, Number(dailyWellness?.hydrationMl ?? 0)),
       notes: '',
       plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
       session: getSessionFromEvent(selectedCheckInEvent) || getSessionFromSchedule(todayEvents),
       yesterdayLoad: getYesterdayLoadFromSchedule(schedule),
     }),
-    [checkIn, schedule, selectedCheckInEvent, todayEvents, todayIso],
+    [checkIn, dailyWellness?.hydrationMl, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
-  const nutritionContext = useMemo(() => ({
-    hydrationTargetMl: getHydrationTarget(athleteProfile, schedule, todayIso),
-    targets: getNutritionTargets(athleteProfile, schedule, todayIso),
-    totals: getNutritionTotals(dailyWellness?.nutritionEntries ?? []),
-  }), [athleteProfile, dailyWellness?.nutritionEntries, schedule, todayIso])
+  const nutritionContext = useMemo(() => {
+    const entries = dailyWellness?.nutritionEntries ?? []
+    const hydrationMl = Math.max(0, Number(dailyWellness?.hydrationMl ?? 0))
+
+    return {
+      hasFoodLogs: entries.length > 0,
+      hasHydrationLogs: hydrationMl > 0,
+      hydrationMl,
+      hydrationTargetMl: getHydrationTarget(athleteProfile, schedule, todayIso),
+      mealBreakdown: getMealNutritionBreakdown(entries),
+      targets: getNutritionTargets(athleteProfile, schedule, todayIso),
+      totals: entries.length > 0 ? getNutritionTotals(entries) : null,
+    }
+  }, [athleteProfile, dailyWellness?.hydrationMl, dailyWellness?.nutritionEntries, schedule, todayIso])
   const eventPreparationContext = useMemo(() => getCheckInPreparationContext({
     checkInTime: new Date(),
     checkouts,
@@ -799,8 +826,8 @@ function App() {
       sleepQuality: checkIn.sleepQuality,
       stress: checkIn.stress,
       yesterdayLoad: scheduleDrivenCheckIn.yesterdayLoad,
-      hydration: checkIn.hydration,
-      hydrationMl: checkIn.hydrationMl,
+      hydration: scheduleDrivenCheckIn.hydration,
+      hydrationMl: scheduleDrivenCheckIn.hydrationMl,
       injuryType: checkIn.injuryType,
       painType: checkIn.painType,
       painMap: checkIn.painMap,
@@ -817,8 +844,6 @@ function App() {
       checkIn.illnessSymptoms,
       checkIn.legHeaviness,
       checkIn.hurtsWhen,
-      checkIn.hydration,
-      checkIn.hydrationMl,
       checkIn.injuryType,
       checkIn.location,
       checkIn.notes,
@@ -831,6 +856,8 @@ function App() {
       checkIn.stress,
       recommendation.score,
       scheduleDrivenCheckIn.session,
+      scheduleDrivenCheckIn.hydration,
+      scheduleDrivenCheckIn.hydrationMl,
       scheduleDrivenCheckIn.yesterdayLoad,
       selectedCheckInEvent,
       todayIso,
@@ -851,6 +878,8 @@ function App() {
     () => getTrendInsights(history),
     [history],
   )
+
+  const resetDeletedSessionEvent = useEffectEvent(resetDeletedSession)
 
   useEffect(() => {
     if (!privacyPreferences.remindersEnabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return undefined
@@ -909,17 +938,17 @@ function App() {
     let isMounted = true
 
     async function savePendingOauthConsent(nextSession) {
-      const acceptedAt = localStorage.getItem('athlete-reload-pending-legal-consent')
-      if (!nextSession || !acceptedAt) return
-      const { error } = await supabase.auth.updateUser({
-        data: {
-          age_16_or_older_confirmed: true,
-          legal_accepted_at: acceptedAt,
-          legal_version: '2026-08-04',
-          sensitive_data_processing_consent: true,
-        },
-      })
-      if (!error) localStorage.removeItem('athlete-reload-pending-legal-consent')
+      if (!nextSession) return
+      const pendingSource = sessionStorage.getItem('athlete-reload-pending-legal-consent')
+      const metadata = nextSession.user?.user_metadata ?? {}
+      const source = pendingSource || (metadata.age_16_or_older_confirmed ? 'password_signup' : '')
+      if (!source) return
+      try {
+        await recordLegalConsent(source)
+        sessionStorage.removeItem('athlete-reload-pending-legal-consent')
+      } catch (error) {
+        console.error('Unable to record legal consent', error)
+      }
     }
 
     supabase.auth.getSession().then(({ data }) => {
@@ -935,6 +964,11 @@ function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       void savePendingOauthConsent(nextSession)
+      if (event === 'SIGNED_OUT') {
+        resetAccountStateRef.current?.()
+        return
+      }
+      isSigningOutRef.current = false
       setSession(nextSession)
       if (event === 'PASSWORD_RECOVERY') {
         setAuthEntryMode('reset-password')
@@ -955,7 +989,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (isSupabaseSession) {
+    if (!canPersistGuestState({
+      authReady: isAuthReady,
+      hasSupabaseSession: isSupabaseSession,
+      isSigningOut: isSigningOutRef.current,
+    })) {
       return
     }
 
@@ -976,7 +1014,7 @@ function App() {
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -999,7 +1037,7 @@ function App() {
         )
 
         if (userWasDeleted) {
-          await resetDeletedSession()
+          await resetDeletedSessionEvent()
           return
         }
 
@@ -1146,7 +1184,7 @@ function App() {
       )
 
       if (isMounted && userWasDeleted) {
-        await resetDeletedSession()
+        await resetDeletedSessionEvent()
       }
     }
 
@@ -1314,8 +1352,10 @@ function App() {
     }
 
     if (supabase) {
+      let savedEntry = null
+      const previousPainReports = painReports.filter((report) => report.sourceId === previousEntry?.id)
       try {
-        const savedEntry = isEditingToday && previousEntry?.id
+        savedEntry = isEditingToday && previousEntry?.id
           ? await updateCheckIn(previousEntry.id, savedCheckIn, finalRecommendation)
           : await createCheckIn(savedCheckIn, finalRecommendation)
         if (isEditingToday && previousEntry?.id) {
@@ -1346,6 +1386,19 @@ function App() {
         ])
       } catch (error) {
         console.error(error)
+        if (savedEntry) {
+          try {
+            await deletePainReportsForSource('check_in', savedEntry.id)
+            if (previousEntry?.id) {
+              await updateCheckIn(previousEntry.id, previousEntry, previousEntry.recommendation)
+              await createPainReports(previousPainReports)
+            } else {
+              await deleteCheckIn(savedEntry.id)
+            }
+          } catch (rollbackError) {
+            console.error('Check-in rollback failed', rollbackError)
+          }
+        }
         setDataStatus('error')
         setIsSavingCheckIn(false)
         return
@@ -1458,21 +1511,18 @@ function App() {
     }
 
     try {
-      const savedTournament = await createTournament(localTournament)
-      const savedGames = []
-
-      for (const game of games) {
-        savedGames.push(await createScheduleEvent({
+      const saved = await saveTournamentWithGames(
+        { ...localTournament, id: undefined },
+        games.map((game) => ({
           ...game,
-          tournamentId: savedTournament.id,
+          tournamentId: null,
           load: getDefaultLoadForEvent('Game'),
           title: 'Game',
           type: 'Game',
-        }))
-      }
-
-      setTournaments((current) => [...current, savedTournament])
-      setSchedule((current) => [...current, ...savedGames])
+        })),
+      )
+      setTournaments((current) => [...current, saved.tournament])
+      setSchedule((current) => [...current, ...saved.games])
       return true
     } catch (error) {
       console.error(error)
@@ -1482,28 +1532,29 @@ function App() {
   }
 
   async function editTournament(tournamentDraft, games) {
-    const existingGames = schedule.filter((event) => event.tournamentId === tournamentDraft.id)
-    const incomingIds = new Set(games.map((game) => game.id).filter(Boolean))
-
-    for (const oldGame of existingGames) {
-      if (!incomingIds.has(oldGame.id)) await removeScheduleItem(oldGame.id)
-    }
-
-    for (const game of games) {
-      const gameToSave = { ...game, tournamentId: tournamentDraft.id, load: 'High', title: 'Game', type: 'Game' }
-      if (game.id) await updateScheduleItem(game.id, gameToSave)
-      else await addScheduleItem(gameToSave)
-    }
-
     const updatedTournament = { ...tournamentDraft, id: tournamentDraft.id }
     if (!isSupabaseSession) {
+      setSchedule((current) => [
+        ...current.filter((event) => event.tournamentId !== tournamentDraft.id),
+        ...games.map((game) => ({ ...game, tournamentId: tournamentDraft.id, load: 'High', title: 'Game', type: 'Game' })),
+      ])
       setTournaments((current) => current.map((item) => item.id === updatedTournament.id ? updatedTournament : item))
       return true
     }
 
     try {
-      const saved = await updateTournament(updatedTournament.id, updatedTournament)
-      setTournaments((current) => current.map((item) => item.id === saved.id ? saved : item))
+      const saved = await saveTournamentWithGames(updatedTournament, games.map((game) => ({
+        ...game,
+        tournamentId: tournamentDraft.id,
+        load: 'High',
+        title: 'Game',
+        type: 'Game',
+      })))
+      setSchedule((current) => [
+        ...current.filter((event) => event.tournamentId !== tournamentDraft.id),
+        ...saved.games,
+      ])
+      setTournaments((current) => current.map((item) => item.id === saved.tournament.id ? saved.tournament : item))
       return true
     } catch (error) {
       console.error(error)
@@ -1514,13 +1565,23 @@ function App() {
 
   async function removeTournament(tournamentId) {
     const games = schedule.filter((event) => event.tournamentId === tournamentId)
-    for (const game of games) await removeScheduleItem(game.id)
-    setTournaments((current) => current.filter((tournament) => tournament.id !== tournamentId))
-
-    if (!isSupabaseSession) return
+    if (!isSupabaseSession) {
+      setSchedule((current) => current.filter((event) => event.tournamentId !== tournamentId))
+      setTournaments((current) => current.filter((tournament) => tournament.id !== tournamentId))
+      return
+    }
 
     try {
-      await deleteTournament(tournamentId)
+      await deleteTournamentWithGames(tournamentId)
+      const relatedSourceIds = new Set([
+        ...history.filter((entry) => games.some((game) => game.id === entry.eventId)).map((entry) => entry.id),
+        ...checkouts.filter((entry) => games.some((game) => game.id === entry.eventId)).map((entry) => entry.id),
+      ])
+      setSchedule((current) => current.filter((event) => event.tournamentId !== tournamentId))
+      setHistory((current) => current.filter((entry) => !games.some((game) => game.id === entry.eventId)))
+      setCheckouts((current) => current.filter((entry) => !games.some((game) => game.id === entry.eventId)))
+      setPainReports((current) => current.filter((report) => !relatedSourceIds.has(report.sourceId)))
+      setTournaments((current) => current.filter((tournament) => tournament.id !== tournamentId))
     } catch (error) {
       console.error(error)
       setDataStatus('error')
@@ -1755,6 +1816,7 @@ function App() {
 
   async function renameAssociation(id, name) {
     const trimmedName = name.trim()
+    const previousAssociations = associations
 
     if (!trimmedName) return
     if (trimmedName.toLowerCase() === 'personal') return
@@ -1771,12 +1833,15 @@ function App() {
       await updateAssociation(id, trimmedName)
     } catch (error) {
       console.error(error)
+      setAssociations(previousAssociations)
       setDataStatus('error')
     }
   }
 
   async function removeAssociation(id) {
     const association = associations.find((item) => item.id === id)
+    const previousAssociations = associations
+    const previousSchedule = schedule
 
     setAssociations((current) => current.filter((item) => item.id !== id))
 
@@ -1794,6 +1859,8 @@ function App() {
       await deleteAssociation(id)
     } catch (error) {
       console.error(error)
+      setAssociations(previousAssociations)
+      setSchedule(previousSchedule)
       setDataStatus('error')
     }
   }
@@ -1805,7 +1872,7 @@ function App() {
       painMap: normalizePainMapScale(checkout.painMap, preCheckIn?.pain),
     }
     let finalRecommendation = existingCheckout?.recommendation ?? null
-    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'loading'
+    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'openrouter' ? 'ai' : 'loading'
 
     if (supabase) {
       try {
@@ -1855,6 +1922,7 @@ function App() {
       }
 
       let savedPainReports = []
+      const previousPainReports = painReports.filter((report) => report.sourceId === existingCheckout?.id)
       try {
         if (existingCheckout?.id) {
           await deletePainReportsForSource('checkout', existingCheckout.id)
@@ -1872,7 +1940,19 @@ function App() {
         ))
       } catch (error) {
         console.error(error)
+        try {
+          await deletePainReportsForSource('checkout', savedCheckout.id)
+          if (existingCheckout?.id) {
+            await updateTrainingCheckout(existingCheckout.id, event, existingCheckout)
+            await createPainReports(previousPainReports)
+          } else {
+            await deleteTrainingCheckout(savedCheckout.id)
+          }
+        } catch (rollbackError) {
+          console.error('Checkout rollback failed', rollbackError)
+        }
         setDataStatus('error')
+        throw error
       }
 
       setCheckouts((current) => [
@@ -2153,6 +2233,7 @@ function App() {
   }
 
   async function removeShareAuditLog(id) {
+    const previousLogs = shareAuditLogs
     setShareAuditLogs((current) => current.filter((entry) => entry.id !== id))
 
     if (!isSupabaseSession || String(id).startsWith('share-')) return
@@ -2161,6 +2242,7 @@ function App() {
       await deleteShareAuditLog(id)
     } catch (error) {
       console.error(error)
+      setShareAuditLogs(previousLogs)
       setDataStatus('error')
     }
   }
@@ -2490,6 +2572,11 @@ function App() {
     setHistory([])
     setCheckouts([])
     setPainReports([])
+    setPainIssues([])
+    setSavedRoutines([])
+    setRecoveryCompletions([])
+    setDailyWellness({ date: todayIso, hydrationMl: 0, nutritionEntries: [] })
+    setNutritionHistory([])
   }
 
   function editTodayCheckIn() {
@@ -2504,21 +2591,30 @@ function App() {
   }
 
   async function signOut() {
-    if (supabase) {
-      await supabase.auth.signOut()
-    }
+    isSigningOutRef.current = true
+    clearUserStorage()
+    resetAccountState()
 
-    setSession(null)
-    setIsAppUnlocked(false)
-    setActiveView('Home')
+    if (supabase) {
+      const { error } = await supabase.auth.signOut({ scope: 'local' })
+      if (error) console.error('Unable to revoke the local session', error)
+    }
+    isSigningOutRef.current = false
   }
 
   async function resetDeletedSession() {
+    isSigningOutRef.current = true
     if (supabase) {
       await supabase.auth.signOut({ scope: 'local' })
     }
 
     clearUserStorage()
+    resetAccountState()
+    isSigningOutRef.current = false
+  }
+
+  function resetAccountState() {
+    isSigningOutRef.current = true
     setSchedule([])
     setAssociations([])
     setHistory([])
@@ -2762,7 +2858,8 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <Suspense fallback={<div className="auth-loading glass-panel">Loading Athlete Reload</div>}>
+      <main className="app-shell">
       <img className="hero-photo" src={trainingHero} alt="" />
       <div className="hero-overlay" />
       <SVGFilters>
@@ -2832,9 +2929,6 @@ function App() {
         onTouchMove={moveTouchLens}
         onTouchStart={showTouchLens}
         ref={navRef}
-        style={onboardingTour && !onboardingTour.endsWith('-nav')
-          ? { pointerEvents: 'none', visibility: 'hidden' }
-          : undefined}
       >
         {navLens && (
           <div
@@ -2956,6 +3050,7 @@ function App() {
             {activeView === 'Nutrition' && (
               <NutritionView
                 athleteProfile={athleteProfile}
+                isGuidedTour={onboardingTour === 'nutrition'}
                 nutritionHistory={nutritionHistory}
                 onSaveWellness={saveDailyWellness}
                 schedule={schedule}
@@ -3092,11 +3187,11 @@ function App() {
 
       {submittedRecommendation && (
         <div className="modal-backdrop">
-          <section className="event-modal recommendation-modal glass-panel" role="dialog" aria-modal="true">
+          <section aria-labelledby="recommendation-dialog-title" className="event-modal recommendation-modal glass-panel" ref={recommendationDialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
             <div className="schedule-header">
               <div>
                 <p className="eyebrow">AI report</p>
-                <h2>{submittedRecommendationContext.title}</h2>
+                <h2 id="recommendation-dialog-title">{submittedRecommendationContext.title}</h2>
               </div>
               <button className="ghost-close" onClick={() => setSubmittedRecommendation(null)} type="button">
                 Close
@@ -3128,6 +3223,8 @@ function App() {
             role="alertdialog"
             aria-modal="true"
             aria-labelledby="checkin-ai-error-title"
+            ref={aiErrorDialogRef}
+            tabIndex={-1}
           >
             <div className="schedule-header">
               <div>
@@ -3158,7 +3255,8 @@ function App() {
           onClose={() => setActiveLegalModal(null)}
         />
       )}
-    </main>
+      </main>
+    </Suspense>
   )
 }
 
@@ -3254,7 +3352,7 @@ const legalContentV2 = {
       {
         title: '4. Service Providers and AI Processing',
         body: [
-          'Athlete Reload uses Supabase for authentication, database storage, and server-side functions. Recommendation and voice-extraction requests may be sent through a server-side function to Google Gemini. Food searches may query food-data providers described by the search feature.',
+          'Athlete Reload uses Supabase for authentication, database storage, and server-side functions. Recommendation and voice-extraction requests may be sent through a server-side function to OpenRouter and the selected model provider. Food searches may query food-data providers described by the search feature.',
           'These providers process information only as needed to operate app features. API keys and service secrets are intended to stay server-side and are not stored in the browser.',
         ],
       },
@@ -3494,7 +3592,7 @@ const _legacyLegalContent = {
       {
         title: '4. Third-Party Services',
         body: [
-          'Athlete Reload uses Supabase for authentication and data storage. Recommendation requests may be sent to Google Gemini through a secure server-side function so the app can generate training guidance. API keys are not stored in the browser.',
+          'Athlete Reload uses Supabase for authentication and data storage. Recommendation requests may be sent to OpenRouter through a secure server-side function so the app can generate training guidance. API keys are not stored in the browser.',
         ],
       },
       {

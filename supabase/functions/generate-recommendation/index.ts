@@ -26,7 +26,8 @@ type Recommendation = {
   reportSections?: Array<{ id: string; title: string; summary: string; items: string[]; action?: string; actionLabel?: string }>
 }
 
-const requestWindows = new Map<string, number[]>()
+const recommendationModel = 'nvidia/nemotron-3-ultra-550b-a55b:free'
+const transcriptionModel = 'openrouter/free'
 
 Deno.serve(async (request) => {
   let stage = 'request_validation'
@@ -38,38 +39,40 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
-  const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
+  const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')
 
-  if (!geminiApiKey) {
-    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 503)
+  if (!openRouterApiKey) {
+    return jsonResponse({ error: 'Missing OPENROUTER_API_KEY secret' }, 503)
   }
 
   try {
     stage = 'parse_request'
     const body = await request.json()
-    const requester = getRequesterKey(request)
-    const now = Date.now()
-    const recent = (requestWindows.get(requester) ?? []).filter((time) => now - time < 60_000)
-    if (recent.length >= 3) return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429)
-    requestWindows.set(requester, [...recent, now])
+    if (!(await consumeRateLimit(request))) {
+      return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429)
+    }
+    if (body?.requestType === 'voice_transcribe') {
+      const transcript = await transcribeAudio(openRouterApiKey, body)
+      return jsonResponse({ transcript })
+    }
     if (body?.requestType === 'voice_extract') {
-      const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
+      const extractionResponse = await generateOpenRouterJson(openRouterApiKey, buildVoiceExtractionPrompt(body))
       return jsonResponse({ extraction: extractionResponse })
     }
-    stage = 'gemini_request'
-    const { response: geminiResponse, model } = await requestGemini(geminiApiKey, buildPrompt(body))
-    if (!geminiResponse.ok) {
-      const detail = await geminiResponse.text()
-      return jsonResponse({ error: 'Gemini request failed', detail }, 502)
+    stage = 'provider_request'
+    const response = await requestOpenRouter(openRouterApiKey, buildPrompt(body), recommendationModel)
+    if (!response.ok) {
+      const detail = await response.text()
+      return jsonResponse({ error: 'AI provider request failed', detail }, 502)
     }
 
-    stage = 'parse_gemini_response'
-    const data = await geminiResponse.json()
-    const text = extractOutputText(data)
+    stage = 'parse_provider_response'
+    const data = await response.json()
+    const text = extractOpenRouterText(data)
     stage = 'normalize_recommendation'
     const recommendation = normalizeRecommendation(parseJsonResponse(text), body)
 
-    return jsonResponse({ recommendation, source: 'gemini', model })
+    return jsonResponse({ recommendation, source: 'openrouter', model: data?.model ?? recommendationModel })
   } catch (error) {
     console.error(JSON.stringify({
       error: error instanceof Error ? error.message : String(error),
@@ -78,8 +81,8 @@ Deno.serve(async (request) => {
     const stageStatus = {
       parse_request: 520,
       build_prompt: 524,
-      gemini_request: 521,
-      parse_gemini_response: 522,
+      provider_request: 521,
+      parse_provider_response: 522,
       normalize_recommendation: 523,
     }[stage] ?? 500
     return jsonResponse({
@@ -90,24 +93,72 @@ Deno.serve(async (request) => {
   }
 })
 
-async function generateGeminiJson(apiKey: string, input: string) {
-  const { response } = await requestGemini(apiKey, input)
-  if (!response.ok) throw new Error('Gemini request failed')
-  return parseJsonResponse(extractOutputText(await response.json()))
+async function generateOpenRouterJson(apiKey: string, input: string) {
+  const response = await requestOpenRouter(apiKey, input, recommendationModel)
+  if (!response.ok) throw new Error('AI provider request failed')
+  return parseJsonResponse(extractOpenRouterText(await response.json()))
 }
 
-async function requestGemini(apiKey: string, input: string) {
-  const models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
-  let response: Response | null = null
-  for (const model of models) {
-    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: input }] }] }),
-    })
-    if (response.ok || ![429, 503].includes(response.status)) return { response, model }
+async function transcribeAudio(apiKey: string, payload: any) {
+  const audioBase64 = String(payload?.audioBase64 ?? '')
+  const mimeType = String(payload?.mimeType ?? 'audio/webm')
+  if (!audioBase64 || audioBase64.length > 20_000_000 || !mimeType.startsWith('audio/')) {
+    throw new Error('Invalid or oversized audio recording')
   }
-  return { response: response!, model: models[models.length - 1] }
+
+  const response = await requestOpenRouter(apiKey, [
+    { type: 'text', text: 'Transcribe this athlete voice note faithfully. Return only the spoken words, with no commentary.' },
+    { type: 'input_audio', input_audio: { data: audioBase64, format: getAudioFormat(mimeType) } },
+  ], transcriptionModel, false)
+  if (!response.ok) throw new Error('Audio transcription failed')
+  return extractOpenRouterText(await response.json()).trim()
+}
+
+async function requestOpenRouter(apiKey: string, content: string | any[], model: string, jsonOutput = true) {
+  return fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://mr-devlinder.github.io/Athlete-Reload/',
+      'X-OpenRouter-Title': 'Athlete Reload',
+    },
+    body: JSON.stringify({
+      messages: [{ role: 'user', content }],
+      model,
+      provider: { zdr: true },
+      ...(jsonOutput ? { response_format: { type: 'json_object' } } : {}),
+    }),
+  })
+}
+
+function extractOpenRouterText(data: any) {
+  const content = data?.choices?.[0]?.message?.content
+  if (typeof content === 'string' && content.trim()) return content
+  throw new Error('AI provider response did not include text output')
+}
+
+function getAudioFormat(mimeType: string) {
+  if (mimeType.includes('wav')) return 'wav'
+  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'mp4'
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3'
+  if (mimeType.includes('ogg')) return 'ogg'
+  return 'webm'
+}
+
+async function consumeRateLimit(request: Request) {
+  const projectUrl = Deno.env.get('SUPABASE_URL')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const authorization = request.headers.get('Authorization') ?? ''
+  if (!projectUrl || !anonKey || !authorization) return false
+
+  const response = await fetch(`${projectUrl}/rest/v1/rpc/consume_ai_request`, {
+    method: 'POST',
+    headers: { apikey: anonKey, Authorization: authorization, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_limit: 3, p_window_seconds: 60 }),
+  })
+  if (!response.ok) throw new Error('Unable to verify AI request limit')
+  return response.json()
 }
 
 function buildVoiceExtractionPrompt(payload: any) {
@@ -150,6 +201,42 @@ JSON shape:
 `
 }
 
+const readinessCalibrationGuidance = `
+Readiness score calibration (the model must choose the score):
+- Higher is better. Energy and sleep quality use 0 worst to 5 best. Soreness, fatigue, leg heaviness, illness symptoms, and stress use 0 none/low to 5 severe/high. Never treat 5/5 soreness or fatigue as favorable.
+- Treat 0-100 as a continuous scale, not a set of buckets. First form a holistic readiness judgment, then place it precisely within the appropriate region according to the number, severity, duration, event relevance, and confidence of favorable and adverse signals. Do not calculate from a fixed deduction table.
+- Use the full range and do not default to 85, 88, 92, or another familiar number. Adjacent scores should represent small real differences; larger evidence changes should move the score farther.
+- Evaluate five dimensions before choosing the score: current physical state, sleep and mental state, active pain/illness and movement function, fit for this event's demands, and supported recent workload/preparation context. Current direct evidence carries the most weight.
+- 100 is the rare ceiling: every relevant current input is unequivocally optimal, sleep and recovery are exceptional, there is no pain/illness or functional concern, preparation evidence is fully supportive when available, recent context adds no concern, and there is no meaningful contradictory or uncertain key signal. Do not award 100 merely because the sliders look generally good.
+- 97-99 means an exceptionally clean check-in that is almost indistinguishable from ideal, with at most negligible uncertainty and no actionable limitation.
+- 94-96 means excellent readiness with one minor but real consideration that does not require a meaningful participation change.
+- 90-93 means very strong readiness with a small current limitation or supported preparation concern worth mentioning.
+- 80-89 means strong readiness with one or two minor limitations that deserve a small adjustment but do not materially change participation.
+- 65-79 means mixed readiness: at least one meaningful concern such as elevated fatigue, soreness, heaviness, stress, poor sleep, illness, preparation uncertainty, or current pain should change warm-up, load, monitoring, or participation.
+- 45-64 means clearly reduced readiness with multiple adverse signals or one substantial concern requiring a controlled or modified plan.
+- 20-44 means very limited readiness with serious current concerns, major functional effects, or multiple strongly adverse signals.
+- 1-19 is exceptionally poor readiness with severe or compounding red flags and little evidence that normal participation is appropriate.
+- 0 is the rare floor: reserve it for the most extreme, unequivocal combination of severe current red flags and inability to participate normally. A single bad input must never produce 0.
+- Zero reported pain is favorable but cannot cancel severe fatigue, soreness, illness, poor sleep, or other adverse inputs. Event difficulty alone does not lower readiness.
+- Personal baselines may soften or strengthen an interpretation, but never reverse the direction of a scale or erase an extreme current value.
+- Missing optional food or hydration logs are neutral and must not be deducted. Missing a key readiness answer may reduce confidence, but should affect the score only when that uncertainty materially prevents a reliable event-readiness judgment.
+- Before returning JSON, verify that score, label, tone, summary, concerns, and event plan tell the same story. Do not describe preparation as excellent when the score inputs contain meaningful adverse signals.
+`
+
+const checkoutCalibrationGuidance = `
+Post-event recovery score calibration (the model must choose the score):
+- Higher is better and means the athlete handled the completed event well with a more favorable immediate recovery outlook. It is not a workload score and not a medical clearance score.
+- Post-event fatigue and soreness use 1 low to 5 high. Difficulty uses 0 easy to 10 maximal. Never treat high fatigue, high soreness, worsening/new pain, changed movement, cramping, concerning symptoms, or stopping early as favorable.
+- Treat 0-100 as continuous. Place the score precisely according to participation, workload response, fatigue/soreness severity, pain and movement changes, symptoms, performance response, and recovery window; do not use a fixed deduction table or default number.
+- 90-100 requires a completed event with a normal or better body response, low fatigue/soreness, no concerning symptoms, and no meaningful recovery complication.
+- 80-89 indicates a generally good response with ordinary manageable fatigue or one minor recovery need.
+- 65-79 indicates a demanding response or multiple moderate recovery needs that should change the immediate plan.
+- 45-64 indicates substantial fatigue/soreness, incomplete participation, worsened symptoms, changed movement, or another significant recovery concern.
+- 0-44 is reserved for severe symptoms, major functional change, or a response needing prompt adult or professional follow-up.
+- Reserve 100 for a rare unequivocally ideal post-event response and 0 for a rare extreme response with severe compounding concerns. Ordinary good or bad sessions should not reach either endpoint.
+- Verify that score, recovery label, tone, summary, and priorities are internally consistent.
+`
+
 function buildPrompt(payload: unknown) {
   if ((payload as any)?.requestType === 'post_checkout') {
     return buildCompactPostCheckoutPrompt(payload)
@@ -174,14 +261,16 @@ Use the athlete's current check-in, selected event, athlete profile, current nut
 Current pain rule: checkIn.painMap and checkIn.pain are the sole source of truth for active pain and restrictions. History may identify patterns but must never turn resolved pain into a current restriction.
 
 Calibration principles:
-- Infer readiness holistically from the current check-in, the demands of this specific event, preparation status, personal baseline, recent workload/recovery, profile, and schedule. Do not calculate the score from a fixed deduction table and do not anchor ordinary combinations to preset score ranges.
+- Infer readiness holistically from the current check-in, this event's demands, preparation status, personal baseline, recent workload/recovery, profile, and schedule. The bands below are interpretation anchors, not a fixed deduction table.
+${readinessCalibrationGuidance}
 - A readiness score describes how prepared this athlete appears for this event at this time. Event difficulty alone is not poor readiness, and one minor concern must not dominate otherwise strong information.
-- Weight evidence by relevance and confidence. Current symptoms outweigh history; a well-established personal baseline is more informative than a generic assumption; missing nutrition logs mean unknown rather than deficient.
-- Keep the score, label, summary, concerns, and recommendations internally consistent. Explain only the few factors that materially changed the outlook.
+- Weight evidence by relevance and confidence. Current symptoms outweigh history; a well-established personal baseline is more informative than a generic assumption. Confidence and readiness are different: missing optional logs reduce evidence, not readiness, and must not cap an otherwise exceptional score.
+- Keep the score, label, summary, concerns, and recommendations internally consistent. In breakdown, include only the 2-6 factors that materially moved the AI's assessment; favorable values are positive, adverse values are negative, and neutral or unknown values are omitted.
 - Escalate only genuine red flags such as severe or rapidly worsening pain, pain at rest, inability to bear weight, obvious swelling/deformity, neurological symptoms, chest/breathing symptoms, fainting/confusion, head-injury symptoms, or suspected bone stress injury.
 - Avoid/focus should be practical instructions for this event, not generic wellness filler.
 - Give an event plan, not a binary clearance verdict. Explain what the athlete can do, what to change, how to warm up, when to reassess, and what to do afterward.
 - Make each list item a complete, specific instruction of about 8-20 words.
+- Keep the visible report concise: each section summary should be one short sentence and each section should contain at most three non-repeated items.
 - Legacy preparation/during/recovery arrays are storage compatibility only. Put the visible, non-duplicated report content in reportSections.
 - Do not use numeric pain cutoffs or phrases such as "exceeds 3/10" in the recommendation. Describe meaningful changes plainly, such as sharp pain, worsening symptoms, altered movement, or inability to perform the motion normally.
 - Use the event type, sport, association, duration, intensity, surface, environment, and every selected pain area together. Tailor each modification to the athlete's sport and the actual event demands: upper-body symptoms may affect overhead work, throwing, catching, lifting, bracing, or contact; lower-body symptoms may affect sprinting, jumping, cutting, kicking, landing, or lifting; trunk symptoms may affect rotation, bracing, and contact. Head or neck symptoms require the red-flag rules.
@@ -190,7 +279,8 @@ Calibration principles:
 - When scheduleContext includes a Rest Day, describe it only as planned rest/recovery context. A scheduled Rest Day is not proof that the athlete is recovered and must never override current wellness, pain, or red-flag information.
 - When event.tournament is present, account for the tournament date range and its scheduled games. A short turnaround to the next match should favor practical recovery, symptom monitoring, and avoiding unnecessary extra work; do not treat a tournament game like an isolated event.
 - Consider expected duration, surface, indoor/outdoor environment, location/weather when present, expected difficulty, leg heaviness, numeric illness symptoms (0 none, 5 unwell), sleep quality (5 best, 0 worst), numeric stress (0 low, 5 high), and every selected pain area's type, trigger, trend, and affected movement. If previousCheckout is present, use only its session difficulty, duration, completion, physical response, pain change, performance/focus data, saved recoveryPlan action statuses or feedback, and previousRecoveryCompletion as the prior-session context.
-- Use eventPreparationContext as the only fuel and hydration assessment for this check-in. Its statuses are broad, time-adjusted event-preparation signals, not full-day target completion scores. Do not reconstruct or imply a full-day comparison.
+- Use eventPreparationContext as the only fuel and hydration assessment for this check-in. When loggedNutrition is present, use its Breakfast, Lunch, Dinner, and Snacks breakdown plus totals in relation to event timing. When loggedHydrationMl is present, use it with the time-adjusted hydration status. These are broad event-preparation signals, not full-day target completion scores.
+- When loggedNutrition or loggedHydrationMl is null, that category is unlogged. Do not score it positively or negatively, do not call zero intake, do not mention a deficit, and do not let missing logs lower or cap readiness. Give only a neutral normal-baseline suggestion if useful.
 - For early-morning events or events shortly after waking, explicitly state that full-day food and hydration progress is not expected. Missing logs mean insufficient data, not under-fueled or underhydrated.
 - Respect eventPreparationContext timing. When an event begins soon, suggest only gradual sipping and, if useful, a small familiar snack if tolerated; never recommend rapidly drinking a large amount or eating a large meal to catch up.
 - Use event duration, planned load, recent fuel/hydration evidence, prior-evening evidence when available, and earlierCompletedEvents to tailor practical event preparation. Do not require exact meal counts, perfect nutrient timing, or exact foods.
@@ -232,6 +322,9 @@ Never use, repeat, or address the athlete by their name or display name. Write d
 The event has already ended. Create a practical recovery plan from only the supplied checkout data.
 Do not give participation clearance for the completed event. Do not diagnose injuries.
 Escalate new or worsening pain, changed movement, breathing trouble, dizziness, confusion, or severe symptoms to an adult, coach, athletic trainer, or medical professional.
+${checkoutCalibrationGuidance}
+Keep the response concise and easy to scan. Use one short sentence per summary and no more than three non-repeated items in any section.
+Use nutritionContext mealBreakdown and hydrationMl only when hasFoodLogs or hasHydrationLogs is true. If a category is unlogged, omit it from the score and assessment rather than treating it as zero intake or a recovery failure.
 
 Return ONLY valid JSON with this exact shape:
 {
@@ -273,6 +366,8 @@ Never use, repeat, or address the athlete by their name or display name. Write d
 Use only the athlete's edited words below. Do not invent missing measurements or pretend the athlete answered the detailed check-in fields.
 Create a practical event recommendation from the information that is actually present. Clearly state what is unknown and keep the plan conservative when important details are missing.
 This is not medical advice or clearance. Direct the athlete to a parent, coach, athletic trainer, or qualified healthcare professional for red flags.
+${readinessCalibrationGuidance}
+Keep the visible recommendation concise: one short sentence per summary and no more than three non-repeated items per section.
 
 Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, breakdown, and reportSections. reportSections may use only main-concerns when meaningful, event-demand, personalized-warm-up, fuel-hydration, pain-guidance only when current pain was explicitly reported, and motivational-quote. Omit any section that cannot be supported by the athlete's words and supplied event context.
 
@@ -321,6 +416,9 @@ Build an actionable recovery plan from the athlete's latest completed checkout, 
 
 Important behavior:
 - PRIMARY ROUTINE CONTRACT (${planType}): ${planTypeDirective}
+- Recovery plans are intentionally scoreless. Calibrate the plan's urgency, length, exercise selection, and wording from the current body response, completed workload when relevant, recovery window, and next event rather than inventing a readiness number.
+- Keep the visible recovery guidance concise and easy to scan: one short sentence per summary, no more than three non-repeated items per report section, and only instructions that materially affect this athlete's recovery.
+- Match the response strength to the evidence. Normal manageable post-event fatigue should produce ordinary recovery guidance; high fatigue/soreness, worsening or new pain, changed movement, concerning symptoms, or a short turnaround should produce more protective and specific guidance. Never let zero pain erase other adverse recovery signals.
 - currentRecoveryContext is the sole source of truth for current pain and restrictions. A missing body part or severity 0 is not active pain and must not cause protection language, altered exercises, painAware=true, or a restriction. recentPainReports are history only and must never override currentRecoveryContext.
 - The PRIMARY ROUTINE CONTRACT controls the routine goal, exercise selection and order, recovery steps, timeline, action, summary, and insights. Athlete context may personalize this contract or remove unsafe movements, but must not replace it with a generic recovery plan.
 - When planType is last-checkout or competition, connect the plan to the supplied completed event. For every other plan type, do not imply that a completed event caused the request and do not invent why the athlete selected it. Build the requested routine outcome, then personalize it with athleteProfile, weeklyWorkloadContext, recentEvents, recoveryCompletions, currentRecoveryContext, nutritionContext, and future schedule.
@@ -333,6 +431,7 @@ Important behavior:
 - Use actual minutes, session difficulty, participation, session content, surface, sport, position, current soreness, pain before versus after, new symptoms, changed movement, and the next event's timing together.
 - Generate 2-4 ranked Recovery Priorities inside reportSections. Each must be specific to the selected plan, current context, and recovery window.
 - Use dailyWellness, nutritionContext, selected goals, and dietary preferences to make food and hydration steps practical. Use what is already logged that day; do not prescribe exact medical nutrition quantities or claim a meal repairs an injury.
+- Use nutritionContext mealBreakdown only when hasFoodLogs is true, and use hydrationMl only when hasHydrationLogs is true. When either category is unlogged, omit it as an assessment factor and provide only neutral baseline guidance if relevant; never describe missing logs as zero intake or a deficit.
 - Include normal recovery habits such as fluids, a normal meal or snack, sleep, a cooldown, and comfortable mobility when appropriate. Do not prescribe exact medical or nutrition quantities.
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
 - A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.
@@ -402,22 +501,6 @@ function getRecoveryPlanTypeDirective(planType: string, targetedAreas: unknown) 
   return directives[planType] ?? directives['last-checkout']
 }
 
-function extractOutputText(data: any) {
-  if (typeof data?.output_text === 'string') return data.output_text
-
-  const generatedText = data?.candidates?.[0]?.content?.parts
-    ?.map((part: any) => part?.text ?? '')
-    .join('')
-  if (generatedText) return generatedText
-
-  const modelStep = data?.steps?.find((step: any) => step?.type === 'model_output')
-  const textPart = modelStep?.content?.find((part: any) => part?.type === 'text')
-
-  if (typeof textPart?.text === 'string') return textPart.text
-
-  throw new Error('Gemini response did not include text output')
-}
-
 function stripJsonFence(value: string) {
   return value
     .trim()
@@ -449,15 +532,13 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
   const during = stringArray(value.during).slice(0, 5)
   const recovery = stringArray(value.recovery).slice(0, 5)
   const sectionFallbacks = getSectionFallbacks(payload)
-  const tone = calibration.tone ?? (['danger', 'warning', 'caution', 'ready'].includes(value.tone)
-    ? value.tone
-    : calibratedScore >= 84
-      ? 'ready'
-      : calibratedScore >= 70
-        ? 'caution'
-        : calibratedScore >= 55
-          ? 'warning'
-          : 'danger')
+  const tone = calibration.tone ?? (calibratedScore >= 80
+    ? 'ready'
+    : calibratedScore >= 65
+      ? 'caution'
+      : calibratedScore >= 45
+        ? 'warning'
+        : 'danger')
 
   return {
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
@@ -557,7 +638,7 @@ function normalizeReportSections(value: unknown, payload: any) {
       if (suppliedSectionIds.has('sleep-rest-guidance') && /sleep|bed|nap|rest/.test(text)) return false
       if (suppliedSectionIds.has('pain-guidance') && /pain|sore|symptom|swelling/.test(text)) return false
       return true
-    }).map(uniqueText).filter(Boolean).slice(0, 5)
+    }).map(uniqueText).filter(Boolean).slice(0, 3)
     if (!summary && items.length === 0) return []
     return [{
       id,
@@ -884,19 +965,6 @@ function clampNumber(value: any, min: number, max: number) {
   if (!Number.isFinite(number)) return 60
 
   return Math.max(min, Math.min(max, Math.round(number)))
-}
-
-function getRequesterKey(request: Request) {
-  const token = request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
-      if (payload?.sub) return `user:${payload.sub}`
-    } catch {
-      // The Supabase gateway validates the token; use the network key only if its payload cannot be decoded.
-    }
-  }
-  return `network:${request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown'}`
 }
 
 function jsonResponse(body: unknown, status = 200) {

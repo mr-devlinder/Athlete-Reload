@@ -1,14 +1,32 @@
 import { createPortal } from 'react-dom'
 import { useState } from 'react'
-import { generateAiRecommendation } from '../lib/aiRecommendations'
+import { generateAiRecommendation, transcribeVoiceAudio } from '../lib/aiRecommendations'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 export function VoiceDraftButton({ logType = 'check_in', onApply, onQuickSave }) {
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState('idle')
   const [transcript, setTranscript] = useState('')
   const [message, setMessage] = useState('')
-  const recorder = useAudioRecorder({ onTranscript: setTranscript })
+  const dialogRef = useModalAccessibility(open, close)
+  const recorder = useAudioRecorder({
+    onAudio: async (audio) => {
+      setStatus('transcribing')
+      setMessage('Transcribing your recording...')
+      try {
+        const audioBase64 = await blobToBase64(audio)
+        const captured = await transcribeVoiceAudio({ audioBase64, mimeType: audio.type })
+        setTranscript(captured)
+        setMessage('Transcription ready. Review it before continuing.')
+      } catch (error) {
+        setMessage(error.message || 'The recording could not be transcribed. You can type your entry instead.')
+      } finally {
+        setStatus('idle')
+      }
+    },
+    onTranscript: setTranscript,
+  })
 
   function openModal() {
     setMessage('')
@@ -50,14 +68,14 @@ export function VoiceDraftButton({ logType = 'check_in', onApply, onQuickSave })
       <button className="secondary-button compact-action" onClick={openModal} type="button">{logType === 'post_checkout' ? 'Quick checkout' : 'Quick check-in'}</button>
       {open && createPortal(
         <div className="modal-backdrop" onClick={close}>
-          <section className="voice-checkin-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+          <section aria-label={logType === 'post_checkout' ? 'Quick checkout' : 'Quick check-in'} className="voice-checkin-modal glass-panel" onClick={(event) => event.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
             <div className="schedule-header">
               <div><p className="eyebrow">{logType === 'post_checkout' ? 'Quick checkout' : 'Quick check-in'}</p><h2>Tell us how you feel.</h2></div>
               <button className="ghost-close" onClick={close} type="button">Close</button>
             </div>
             <p className="field-description">Speak or type your entry. You can edit the transcript before it is used.</p>
-            <button className={recorder.isRecording ? 'primary-button listening' : 'primary-button'} disabled={status === 'processing' || recorder.status === 'requesting'} onClick={recorder.isRecording ? () => recorder.stop() : recorder.start} type="button">
-              {recorder.isRecording ? `Stop recording (${formatRecordingTime(recorder.elapsedSeconds)})` : recorder.status === 'requesting' ? 'Waiting for permission...' : status === 'processing' ? 'Reading voice...' : 'Start voice'}
+            <button className={recorder.isRecording ? 'primary-button listening' : 'primary-button'} disabled={status !== 'idle' || recorder.status === 'requesting'} onClick={recorder.isRecording ? () => recorder.stop() : recorder.start} type="button">
+              {recorder.isRecording ? `Stop recording (${formatRecordingTime(recorder.elapsedSeconds)})` : recorder.status === 'requesting' ? 'Waiting for permission...' : status === 'transcribing' ? 'Transcribing...' : status === 'processing' ? 'Reading voice...' : 'Start voice'}
             </button>
             {recorder.isRecording && <p className="recording-indicator" role="status"><span aria-hidden="true" />Recording {formatRecordingTime(recorder.elapsedSeconds)}</p>}
             <label className="voice-transcript-field">Edit what was captured
@@ -71,4 +89,13 @@ export function VoiceDraftButton({ logType = 'check_in', onApply, onQuickSave })
       )}
     </>
   )
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('The recording could not be read'))
+    reader.onload = () => resolve(String(reader.result).split(',')[1] ?? '')
+    reader.readAsDataURL(blob)
+  })
 }

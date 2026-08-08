@@ -29,6 +29,7 @@ const tourSteps = {
     readTarget: '[data-tour="check-in-page"]',
     requiresReadThrough: true,
     instantEntry: true,
+    pageWalkthrough: true,
     target: '[data-tour="check-in-page"]',
     title: 'Check in before training',
   },
@@ -44,6 +45,7 @@ const tourSteps = {
     body: 'Log meals, serving sizes, calories, macros, and water here. Check-in and recovery recommendations use what you have logged for that day.',
     eyebrow: 'Step 3 of 6',
     instantEntry: true,
+    pageWalkthrough: true,
     target: '[data-tour="nutrition-page"]',
     title: 'Fueling lives in one place',
   },
@@ -59,6 +61,7 @@ const tourSteps = {
     body: 'After a checkout, generate a time-based mobility and stretching plan, complete the guided routine, and save feedback to history.',
     eyebrow: 'Step 4 of 6',
     instantEntry: true,
+    pageWalkthrough: true,
     target: '[data-tour="recovery-page"]',
     title: 'Turn checkout data into recovery',
   },
@@ -75,6 +78,7 @@ const tourSteps = {
     bubbleTarget: '[data-tour="home-intro"]',
     eyebrow: 'Step 5 of 6',
     instantEntry: true,
+    pageWalkthrough: true,
     target: '[data-tour="home-page"]',
     title: 'Home is your overview',
   },
@@ -90,6 +94,7 @@ const tourSteps = {
     body: 'Review previous check-ins, checkouts, recommendations, pain reports, and weekly patterns here.',
     eyebrow: 'Step 6 of 6',
     instantEntry: true,
+    pageWalkthrough: true,
     target: '[data-tour="history-page"]',
     title: 'History shows the bigger picture',
   },
@@ -121,7 +126,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
   useEffect(() => {
     if (!isFormOpen) return undefined
 
-    const topOffset = Math.ceil(calloutHeight || 140)
+    const topOffset = Math.ceil(calloutHeight || 140) + 28
     document.body.style.setProperty('--guided-tour-form-top', `${topOffset}px`)
 
     return () => document.body.style.removeProperty('--guided-tour-form-top')
@@ -200,7 +205,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
       measure()
       targetObserver = new ResizeObserver(scheduleUpdate)
       targetObserver.observe(target)
-      unlockScroll = step.requiresReadThrough || target.matches('.event-modal') ? () => {} : lockTourScrolling()
+      unlockScroll = step.pageWalkthrough || target.matches('.event-modal') ? () => {} : lockTourScrolling()
       window.addEventListener('resize', scheduleUpdate)
       window.addEventListener('scroll', scheduleUpdate, true)
     }
@@ -258,7 +263,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
       {!isFormOpen && !locksTarget && getBlockers(targetRect).map((style, index) => (
         <div className={`guided-tour-blocker${step.navigationStep ? ' guided-tour-navigation-blocker' : ''}`} key={index} style={style} />
       ))}
-      {locksTarget && <div className="guided-tour-full-blocker" />}
+      {locksTarget && <div className={`guided-tour-full-blocker${step.pageWalkthrough ? ' guided-tour-page-blocker' : ''}`} />}
       <div
         className="guided-tour-spotlight"
         style={{
@@ -273,7 +278,7 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
         <p className="eyebrow">{isFormOpen ? 'Create your first event' : step.eyebrow}</p>
         <h2>{isFormOpen ? 'Fill out the event form' : step.title}</h2>
         <p>{isFormOpen ? 'Complete the event details, then tap Create event.' : step.body}</p>
-        {step.requiresReadThrough && !hasReadThrough && <p className="guided-tour-progress">Scroll through the Check-in page to continue.</p>}
+        {step.requiresReadThrough && !hasReadThrough && <p className="guided-tour-progress">Scroll through the page to continue.</p>}
         <div className="guided-tour-actions">
           {!isFormOpen && phase !== 'schedule' && <button className="auth-switch" onClick={onBack} type="button">Back</button>}
           {!isFormOpen && <button className="ghost-close" onClick={onFinish} type="button">Skip tour</button>}
@@ -287,6 +292,12 @@ export function GuidedTour({ onBack, onFinish, onNext, phase }) {
 function scrollTourTargetIntoView(target, phase) {
   if (target.matches('.event-modal')) {
     target.scrollTo({ top: 0, behavior: 'auto' })
+    return
+  }
+
+  if (tourSteps[phase]?.pageWalkthrough) {
+    window.scrollTo({ top: 0, behavior: 'auto' })
+    target.scrollTo?.({ top: 0, behavior: 'auto' })
     return
   }
 
@@ -409,6 +420,12 @@ function getCalloutStyle(rect, isFormOpen, calloutHeight, phase) {
     const top = clampTop(rect.top + 22)
 
     return { left: `${left}px`, top: `${top}px`, width: `${width}px` }
+  }
+
+
+  if (tourSteps[phase]?.pageWalkthrough) {
+    const top = isMobile ? 14 : 88
+    return { left: `${maxLeft}px`, top: `${top}px`, width: `${width}px` }
   }
 
   const left = Math.min(Math.max(14, rect.left), maxLeft)

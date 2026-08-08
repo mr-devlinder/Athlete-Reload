@@ -15,10 +15,9 @@ Deno.serve(async (request) => {
 
   const projectUrl = Deno.env.get('SUPABASE_URL')
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
-  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const authorization = request.headers.get('Authorization')
 
-  if (!projectUrl || !anonKey || !serviceRoleKey || !authorization) {
+  if (!projectUrl || !anonKey || !authorization) {
     return respond({ error: 'Unable to verify this request' }, 401)
   }
 
@@ -57,20 +56,12 @@ Deno.serve(async (request) => {
     return respond({ error: 'A recent password or two-factor confirmation is required' }, 403)
   }
 
-  const adminHeaders = {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
-  }
-  const userId = encodeURIComponent(user.id)
-
-  for (const table of ['pain_reports', 'training_checkouts', 'check_ins']) {
-    const deleted = await fetch(`${projectUrl}/rest/v1/${table}?user_id=eq.${userId}`, {
-      method: 'DELETE',
-      headers: adminHeaders,
-    })
-
-    if (!deleted.ok) return respond({ error: 'Unable to clear health history' }, 500)
-  }
+  const cleared = await fetch(`${projectUrl}/rest/v1/rpc/clear_complete_health_data`, {
+    method: 'POST',
+    headers: { apikey: anonKey, Authorization: authorization, 'Content-Type': 'application/json' },
+    body: '{}',
+  })
+  if (!cleared.ok) return respond({ error: 'Unable to clear health data' }, 500)
 
   return respond({ cleared: true })
 })

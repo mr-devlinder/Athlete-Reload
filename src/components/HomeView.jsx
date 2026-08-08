@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
@@ -15,7 +15,6 @@ const athleteQuotes = [
 ]
 
 export function HomeView({
-  athleteProfile,
   checkouts,
   history,
   painIssues = [],
@@ -39,10 +38,32 @@ export function HomeView({
   const todayPlan = getTodayPlan(schedule, history, checkouts, now)
   const recovery = getRecoverySummary(recentHistory, previousHistory)
   const workload = getWorkloadSummary(schedule, checkouts)
-  const painWatchlist = getPainWatchlist(history, painReports)
   const painTimelines = getPainTimelines(history, painReports)
   const athleteQuote = athleteQuotes[Math.abs(differenceInCalendarDays(now, new Date(2020, 0, 1))) % athleteQuotes.length]
   const weeklySignals = getWeeklySignals(history)
+  const dashboardGridRef = useRef(null)
+
+  useEffect(() => {
+    const grid = dashboardGridRef.current
+    if (!grid || typeof ResizeObserver === 'undefined') return undefined
+
+    const updateCardSpan = (card) => {
+      const styles = window.getComputedStyle(grid)
+      const rowHeight = Number.parseFloat(styles.gridAutoRows) || 8
+      const rowGap = Number.parseFloat(styles.rowGap) || 12
+      const span = Math.max(1, Math.ceil((card.getBoundingClientRect().height + rowGap) / (rowHeight + rowGap)))
+      card.style.setProperty('--home-card-row-span', span)
+    }
+    const cards = [...grid.children]
+    const observer = new ResizeObserver((entries) => entries.forEach((entry) => updateCardSpan(entry.target)))
+
+    cards.forEach((card) => {
+      updateCardSpan(card)
+      observer.observe(card)
+    })
+
+    return () => observer.disconnect()
+  }, [athleteQuote.quote, painIssues, painReports, todayPlan.length, weeklySignals.length])
 
   return (
     <div className="home-view" data-tour="home-page">
@@ -101,7 +122,7 @@ export function HomeView({
         />
       </section>
 
-      <section className="home-panels dashboard-main">
+      <section className="home-dashboard-grid" ref={dashboardGridRef}>
         <article className="home-panel today-flow-panel">
           <div className="panel-heading">
             <span>Today</span>
@@ -166,9 +187,6 @@ export function HomeView({
             </>
           )}
         </article>
-      </section>
-
-      <section className="home-panels">
         <article className="home-panel weekly-signals-panel">
           <div className="panel-heading">
             <span>Weekly signals</span>
@@ -219,9 +237,6 @@ export function HomeView({
         </article>
 
         <PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} />
-      </section>
-
-      <section className="home-panels">
         <article className="home-panel">
           <div className="panel-heading">
             <span>Pain timeline</span>
@@ -236,7 +251,7 @@ export function HomeView({
           </div>
         </article>
 
-        <article className="home-panel">
+        <article className="home-panel home-quote-panel">
           <div className="panel-heading">
             <span>Daily encouragement</span>
           </div>
@@ -553,7 +568,7 @@ function getCheckInReminder(schedule, history, now) {
   })
 }
 
-function getPainWatchlist(history, painReports) {
+function _getPainWatchlist(history, painReports) {
   const grouped = new Map()
   const reportSourceIds = new Set(
     painReports
@@ -738,7 +753,7 @@ function addPainGroup(grouped, label, score) {
   })
 }
 
-function getPatterns(history, checkouts, painWatchlist) {
+function _getPatterns(history, checkouts, painWatchlist) {
   const datedRecords = [...history, ...checkouts]
     .filter((entry) => entry.date)
     .sort((first, second) => first.date.localeCompare(second.date))
@@ -1025,7 +1040,7 @@ function getEventCountdown(event, now) {
   return `${Math.ceil(minutes / 1440)}d`
 }
 
-function getSportInsight(profile, nextEvent, checkouts, painWatchlist) {
+function _getSportInsight(profile, nextEvent, checkouts, painWatchlist) {
   const sport = profile?.sport || 'your sport'
   const position = profile?.position ? ` as a ${profile.position}` : ''
   const recentLoad = checkouts.slice(0, 3).reduce((total, entry) => total + Number(entry.actualMinutes ?? 0) * Number(entry.difficulty ?? 0), 0)

@@ -213,7 +213,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
 function CheckoutComparison({ checkout, onEdit }) {
   return (
     <div className="checkout-comparison">
-      {checkout.recommendation?._source === 'gemini' && (
+      {checkout.recommendation?._source === 'openrouter' && (
         <RecoveryPlanCard
           recommendation={checkout.recommendation}
           recommendationStatus="ai"

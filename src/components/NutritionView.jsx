@@ -7,12 +7,13 @@ import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOption
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 const imperialWaterAmounts = [8, 16, 20, 32, 64]
 const metricWaterAmounts = [250, 500, 750, 1000]
 const mealCards = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
 
-export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWellness, schedule }) {
+export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionHistory = [], onSaveWellness, schedule }) {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [selectedDate, setSelectedDate] = useState(today)
   const [isDateOpen, setIsDateOpen] = useState(false)
@@ -53,7 +54,7 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
             {isDateOpen && <div className="nutrition-date-popover"><label>Choose a date<input autoFocus type="date" value={selectedDate} onChange={(event) => { setSelectedDate(event.target.value); setIsDateOpen(false) }} /></label><button onClick={() => { setSelectedDate(today); setIsDateOpen(false) }} type="button">Jump to today</button></div>}
           </div>
         </div>
-        <button className="nutrition-detail-button" onClick={() => setDetailsOpen(true)} type="button" aria-label="View nutrition details">↔</button>
+        <button className="nutrition-detail-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button" aria-label="View nutrition details">↔</button>
       </section>
 
       <section className="nutrition-calorie-card">
@@ -75,7 +76,7 @@ export function NutritionView({ athleteProfile, nutritionHistory = [], onSaveWel
 
       <section className="nutrition-meals-section">
         <div className="nutrition-section-title"><h2>Meals</h2><span>{entries.length} logged</span></div>
-        <div className="nutrition-meal-grid">{mealCards.map((meal) => <MealCard key={meal} meal={meal} entries={entries} onOpen={() => setOpenMeal(meal === 'Snacks' ? 'Snack' : meal)} onLog={() => setLoggingMeal(meal === 'Snacks' ? 'Snack' : meal)} />)}</div>
+        <div className="nutrition-meal-grid">{mealCards.map((meal) => <MealCard disabled={isGuidedTour} key={meal} meal={meal} entries={entries} onOpen={() => setOpenMeal(meal === 'Snacks' ? 'Snack' : meal)} onLog={() => setLoggingMeal(meal === 'Snacks' ? 'Snack' : meal)} />)}</div>
       </section>
 
       <p className="nutrition-target-note">{targets.reason}</p>
@@ -92,9 +93,9 @@ function NutritionModalPortal({ children }) {
   return createPortal(children, document.body)
 }
 
-function MealCard({ entries, meal, onLog, onOpen }) {
+function MealCard({ disabled = false, entries, meal, onLog, onOpen }) {
   const mealEntries = entries.filter((entry) => entry.meal === (meal === 'Snacks' ? 'Snack' : meal))
-  return <article className="nutrition-meal-card nutrition-meal-card-clickable" onClick={onOpen}><div className="nutrition-meal-icon" aria-hidden="true"><MealIcon meal={meal} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <p>{mealEntries.length} food{mealEntries.length === 1 ? '' : 's'} · {Math.round(getNutritionTotals(mealEntries).calories)} cal</p>}</div><button className="nutrition-log-button" onClick={(event) => { event.stopPropagation(); onLog() }} type="button">Log</button></article>
+  return <article className="nutrition-meal-card nutrition-meal-card-clickable" onClick={disabled ? undefined : onOpen}><div className="nutrition-meal-icon" aria-hidden="true"><MealIcon meal={meal} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <p>{mealEntries.length} food{mealEntries.length === 1 ? '' : 's'} · {Math.round(getNutritionTotals(mealEntries).calories)} cal</p>}</div><button className="nutrition-log-button" disabled={disabled} onClick={(event) => { event.stopPropagation(); if (!disabled) onLog() }} type="button">Log</button></article>
 }
 
 function MealIcon({ meal }) {
@@ -123,6 +124,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const scannerSessionRef = useRef(0)
   const mountedRef = useRef(true)
   const voiceRecorderRef = useRef(null)
+  useModalAccessibility(true, closeModal)
   const isScanning = !['idle', 'error'].includes(scannerStatus)
   const voiceRecorder = useAudioRecorder({
     maxSeconds: 45,
@@ -387,6 +389,7 @@ function normalizeBarcode(value) {
 }
 
 function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) {
+  useModalAccessibility(true, onClose)
   const existingServing = parseStoredServing(food)
   const nutrientKeys = ['calories', 'protein', 'carbohydrates', 'fats', 'fiber', 'sugar', 'saturatedFat', 'polyunsaturatedFat', 'monounsaturatedFat', 'transFat', 'cholesterol', 'sodium', 'potassium', 'vitaminA', 'vitaminC', 'vitaminD', 'vitaminE', 'vitaminK', 'calcium', 'iron']
   const baseFood = { ...food, servingSize: existingServing.servingSize }
@@ -484,12 +487,14 @@ function Macro({ label, tone, target, unit, value }) { return <div className={`n
 function Progress({ target, tone, value }) { return <div className={`nutrition-progress ${tone}`}><span style={{ width: `${target ? Math.min(100, (Number(value) / Number(target)) * 100) : 0}%` }} /></div> }
 
 function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete, onEdit }) {
+  useModalAccessibility(true, onClose)
   const mealEntries = entries.filter((entry) => entry.meal === meal)
   const totals = getNutritionTotals(mealEntries)
   return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => { const serving = parseStoredServing(entry); return <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{serving.servingSize} · {serving.servings} serving{serving.servings === 1 ? '' : 's'}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article> })}</div></section></div>
 }
 
 function NutritionDetailsModal({ entries, hydrationMl, onClose, targets, totals, unitSystem }) {
+  useModalAccessibility(true, onClose)
   const mealTotals = Object.entries(entries.reduce((result, entry) => { const meal = entry.meal || 'Other'; result[meal] = (result[meal] || 0) + Number(entry.calories || 0); return result }, {})).map(([name, calories]) => ({ name, calories })).filter((item) => item.calories > 0)
   const colors = ['#2f8cff', '#6aa76d', '#e8b04f', '#f08b46', '#a878d8', '#6b879f']
   const nutrients = [['Fiber', totals.fiber, 'g'], ['Sugar', totals.sugar, 'g'], ['Saturated fat', totals.saturatedFat, 'g'], ['Polyunsaturated fat', totals.polyunsaturatedFat, 'g'], ['Monounsaturated fat', totals.monounsaturatedFat, 'g'], ['Trans fat', totals.transFat, 'g'], ['Cholesterol', totals.cholesterol, 'mg'], ['Sodium', totals.sodium, 'mg'], ['Potassium', totals.potassium, 'mg'], ['Vitamin A', totals.vitaminA, 'mcg RAE'], ['Vitamin C', totals.vitaminC, 'mg'], ['Vitamin D', totals.vitaminD, 'mcg'], ['Vitamin E', totals.vitaminE, 'mg'], ['Vitamin K', totals.vitaminK, 'mcg'], ['Calcium', totals.calcium, 'mg'], ['Iron', totals.iron, 'mg']]

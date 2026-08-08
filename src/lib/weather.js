@@ -1,7 +1,7 @@
 export async function getEventWeather(city) {
   if (!city?.trim()) return null
 
-  const place = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&countryCode=US&name=${encodeURIComponent(city.trim())}`).then((response) => response.json())
+  const place = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=1&name=${encodeURIComponent(city.trim())}`).then((response) => response.json())
   const result = place.results?.[0]
   if (!result) throw new Error('Enter a valid U.S. city.')
 
@@ -16,7 +16,7 @@ export async function searchUsCities(query) {
   const name = query?.trim()
   if (!name || name.length < 2) return []
 
-  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&countryCode=US&name=${encodeURIComponent(name)}`)
+  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&name=${encodeURIComponent(name)}`)
   if (!response.ok) throw new Error('City search is temporarily unavailable.')
 
   const data = await response.json()

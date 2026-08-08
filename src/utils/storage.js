@@ -1,5 +1,9 @@
 const storageKey = 'athlete-reload-state'
 
+export function canPersistGuestState({ authReady, hasSupabaseSession, isSigningOut }) {
+  return authReady && !hasSupabaseSession && !isSigningOut
+}
+
 export function loadSavedState() {
   try {
     const savedState = window.localStorage.getItem(storageKey)

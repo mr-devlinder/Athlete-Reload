@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 import { SectionHeading } from './SectionHeading'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
 
@@ -33,6 +34,8 @@ export function AccountPrivacyView({
   const [identities, setIdentities] = useState([])
   const [isClearHistoryModalOpen, setIsClearHistoryModalOpen] = useState(false)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const deleteDialogRef = useModalAccessibility(isDeleteModalOpen, () => setIsDeleteModalOpen(false))
+  const clearHealthDialogRef = useModalAccessibility(isClearHistoryModalOpen, () => setIsClearHistoryModalOpen(false))
   const [isDeletingAccount, setIsDeletingAccount] = useState(false)
   const [clearHistoryForm, setClearHistoryForm] = useState({ code: '', confirmation: '', password: '' })
   const [deleteForm, setDeleteForm] = useState({ code: '', confirmation: '', password: '' })
@@ -729,10 +732,10 @@ export function AccountPrivacyView({
           </div>
           <div className="data-control-section danger-data-section">
             <div>
-              <h3>Clear health history</h3>
-              <p className="settings-copy">Removes saved check-ins, checkouts, and pain reports while keeping your account and schedule.</p>
+              <h3>Clear health data</h3>
+              <p className="settings-copy">Removes wellness, nutrition, pain, check-in, checkout, voice, and recovery records while keeping your account and schedule.</p>
             </div>
-            <button className="remove-button compact-action" onClick={() => setIsClearHistoryModalOpen(true)} type="button">Clear health history</button>
+            <button className="remove-button compact-action" onClick={() => setIsClearHistoryModalOpen(true)} type="button">Clear health data</button>
           </div>
           <div className="data-control-section">
             <div>
@@ -762,9 +765,9 @@ export function AccountPrivacyView({
 
       {isDeleteModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsDeleteModalOpen(false)}>
-          <section className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+          <section aria-labelledby="delete-account-title" className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} ref={deleteDialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
             <div className="schedule-header">
-              <SectionHeading eyebrow="Permanent action" title="Delete your account?" />
+              <div id="delete-account-title"><SectionHeading eyebrow="Permanent action" title="Delete your account?" /></div>
               <button className="ghost-close" onClick={() => setIsDeleteModalOpen(false)} type="button">Close</button>
             </div>
             <p className="settings-copy">This permanently deletes your Athlete Reload account and its saved health, schedule, check-in, checkout, association, and preference data.</p>
@@ -792,12 +795,12 @@ export function AccountPrivacyView({
 
       {isClearHistoryModalOpen && (
         <div className="modal-backdrop" onClick={() => setIsClearHistoryModalOpen(false)}>
-          <section className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+          <section aria-labelledby="clear-health-title" className="event-modal delete-account-modal glass-panel" onClick={(event) => event.stopPropagation()} ref={clearHealthDialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
             <div className="schedule-header">
-              <SectionHeading eyebrow="Protected action" title="Clear health history?" />
+              <div id="clear-health-title"><SectionHeading eyebrow="Protected action" title="Clear all health data?" /></div>
               <button className="ghost-close" onClick={() => setIsClearHistoryModalOpen(false)} type="button">Close</button>
             </div>
-            <p className="settings-copy">This permanently removes your saved check-ins, checkouts, and pain reports. Your account and schedule remain intact.</p>
+            <p className="settings-copy">This permanently removes wellness, nutrition, pain, check-in, checkout, voice, and recovery records. Your account and schedule remain intact.</p>
             <form className="settings-form" onSubmit={clearHealthHistory}>
               <label className="select-field">
                 Type CLEAR to confirm

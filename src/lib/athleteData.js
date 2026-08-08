@@ -2,7 +2,7 @@ import { format, parseISO } from 'date-fns'
 import { supabase } from './supabaseClient'
 import { estimatePlannedMinutes, isAllDayEvent, isOtherActivityEvent } from '../utils/events'
 import { normalizePainMapScale } from '../data/bodyPainMap'
-import { fluidOuncesToMilliliters, inchesToCentimeters, milesToMeters, millilitersToFluidOunces, poundsToKilograms, yardsToMeters } from '../utils/units'
+import { fluidOuncesToMilliliters, inchesToCentimeters, milesToMeters, poundsToKilograms, yardsToMeters } from '../utils/units'
 
 function normalizeFivePointValue(value, fallback = 1) {
   const number = Number(value)
@@ -80,12 +80,6 @@ function toScheduleRow(event) {
     updated_at: new Date().toISOString(),
     venue: event.venue ?? '',
   }
-}
-
-function toLegacyScheduleRow(event) {
-  const row = toScheduleRow(event)
-  delete row.sport_workload
-  return row
 }
 
 function fromAssociationRow(row) {
@@ -206,14 +200,6 @@ function toCheckInRow(checkIn, recommendation) {
   }
 }
 
-function toLegacyCheckInRow(checkIn, recommendation) {
-  const row = toCheckInRow(checkIn, recommendation)
-  const legacyHydration = Number(checkIn.hydrationOz)
-  delete row.hydration_ml
-  row.hydration_oz = Math.max(0, Math.round(millilitersToFluidOunces(checkIn.hydrationMl) ?? (Number.isFinite(legacyHydration) ? legacyHydration : 0)))
-  return row
-}
-
 function fromCheckoutRow(row) {
   return {
     actualMinutes: row.actual_minutes,
@@ -320,12 +306,6 @@ function toPainReportRow(report) {
 function fromPrivacyPreferencesRow(row) {
   return {
     aiPersonalizationEnabled: row.ai_personalization_enabled !== false,
-    analyticsAllowed: row.analytics_allowed,
-    cloudSync: row.cloud_sync,
-    coachIncludeNotes: row.coach_include_notes,
-    coachIncludePain: row.coach_include_pain,
-    coachIncludeNutrition: Boolean(row.coach_include_nutrition),
-    localCopy: row.local_copy,
     remindersEnabled: Boolean(row.reminders_enabled),
   }
 }
@@ -453,23 +433,9 @@ function toDailyWellnessRow(wellness) {
   }
 }
 
-function toLegacyDailyWellnessRow(wellness) {
-  const row = toDailyWellnessRow(wellness)
-  const legacyHydration = Number(wellness.hydrationOz)
-  delete row.hydration_ml
-  row.hydration_oz = Math.max(0, Math.round(millilitersToFluidOunces(wellness.hydrationMl) ?? (Number.isFinite(legacyHydration) ? legacyHydration : 0)))
-  return row
-}
-
 function toPrivacyPreferencesRow(preferences) {
   return {
     ai_personalization_enabled: preferences.aiPersonalizationEnabled !== false,
-    analytics_allowed: Boolean(preferences.analyticsAllowed),
-    cloud_sync: Boolean(preferences.cloudSync),
-    coach_include_notes: Boolean(preferences.coachIncludeNotes),
-    coach_include_pain: Boolean(preferences.coachIncludePain),
-    coach_include_nutrition: Boolean(preferences.coachIncludeNutrition),
-    local_copy: Boolean(preferences.localCopy),
     reminders_enabled: Boolean(preferences.remindersEnabled),
     updated_at: new Date().toISOString(),
   }
@@ -586,6 +552,19 @@ export async function createShareAuditLog(entry) {
   return fromShareAuditRow(data)
 }
 
+export async function recordLegalConsent(source) {
+  const { data, error } = await supabase.rpc('record_legal_consent', {
+    p_age_16_or_older_confirmed: true,
+    p_categories: ['terms', 'privacy', 'sensitive_wellness_data'],
+    p_policy_version: '2026-08-04',
+    p_privacy_version: '2026-08-04',
+    p_source: source,
+    p_terms_version: '2026-08-04',
+  })
+  if (error) throw error
+  return data
+}
+
 export async function deleteShareAuditLog(id) {
   const { error } = await supabase
     .from('share_audit_log')
@@ -629,22 +608,31 @@ export async function deleteTournament(id) {
   if (error) throw error
 }
 
+export async function saveTournamentWithGames(tournament, games) {
+  const tournamentRow = { ...toTournamentRow(tournament), id: tournament.id }
+  const gameRows = games.map((game) => ({ ...toScheduleRow(game), id: game.id }))
+  const { data, error } = await supabase.rpc('save_tournament_with_games', {
+    p_games: gameRows,
+    p_tournament: tournamentRow,
+  })
+  if (error) throw error
+  return {
+    games: data.games.map(fromScheduleRow),
+    tournament: fromTournamentRow(data.tournament),
+  }
+}
+
+export async function deleteTournamentWithGames(tournamentId) {
+  const { error } = await supabase.rpc('delete_tournament_with_games', { p_tournament_id: tournamentId })
+  if (error) throw error
+}
+
 export async function upsertDailyWellness(wellness) {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('daily_wellness')
     .upsert(toDailyWellnessRow(wellness), { onConflict: 'user_id,wellness_date' })
     .select('*')
     .single()
-
-  if (isMissingColumn(error, 'hydration_ml')) {
-    const retry = await supabase
-      .from('daily_wellness')
-      .upsert(toLegacyDailyWellnessRow(wellness), { onConflict: 'user_id,wellness_date' })
-      .select('*')
-      .single()
-    data = retry.data
-    error = retry.error
-  }
 
   if (error) throw error
 
@@ -757,27 +745,6 @@ export async function upsertAthleteProfile(profile) {
     .select('*')
     .single()
 
-  if (error && /column .* does not exist|schema cache/i.test(error.message ?? '')) {
-    const legacyProfile = toAthleteProfileRow(profile)
-    delete legacyProfile.age_years
-    delete legacyProfile.dietary_preferences
-    delete legacyProfile.goals
-    delete legacyProfile.tracking_preferences
-    delete legacyProfile.height_cm
-    delete legacyProfile.weight_kg
-    delete legacyProfile.unit_system
-    legacyProfile.height_inches = profile.heightCm ? Number(profile.heightCm) / 2.54 : null
-    legacyProfile.weight_lbs = profile.weightKg ? Number(profile.weightKg) / 0.45359237 : null
-    const fallback = await supabase
-      .from('athlete_profiles')
-      .upsert(legacyProfile, { onConflict: 'user_id' })
-      .select('*')
-      .single()
-
-    if (fallback.error) throw fallback.error
-    return { ...profile, ...fromAthleteProfileRow(fallback.data) }
-  }
-
   if (error) throw error
 
   return fromAthleteProfileRow(data)
@@ -827,17 +794,11 @@ export async function deleteAssociation(id) {
 }
 
 export async function createScheduleEvent(event) {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('schedule_events')
     .insert(toScheduleRow(event))
     .select('*')
     .single()
-
-  if (isMissingColumn(error, 'sport_workload')) {
-    const retry = await supabase.from('schedule_events').insert(toLegacyScheduleRow(event)).select('*').single()
-    data = retry.data
-    error = retry.error
-  }
 
   if (error) throw error
 
@@ -845,18 +806,12 @@ export async function createScheduleEvent(event) {
 }
 
 export async function updateScheduleEvent(id, event) {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('schedule_events')
     .update(toScheduleRow(event))
     .eq('id', id)
     .select('*')
     .single()
-
-  if (isMissingColumn(error, 'sport_workload')) {
-    const retry = await supabase.from('schedule_events').update(toLegacyScheduleRow(event)).eq('id', id).select('*').single()
-    data = retry.data
-    error = retry.error
-  }
 
   if (error) throw error
 
@@ -870,17 +825,11 @@ export async function deleteScheduleEvent(id) {
 }
 
 export async function createCheckIn(checkIn, recommendation) {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('check_ins')
     .insert(toCheckInRow(checkIn, recommendation))
     .select('*')
     .single()
-
-  if (isMissingColumn(error, 'hydration_ml')) {
-    const retry = await supabase.from('check_ins').insert(toLegacyCheckInRow(checkIn, recommendation)).select('*').single()
-    data = retry.data
-    error = retry.error
-  }
 
   if (error) throw error
 
@@ -888,18 +837,12 @@ export async function createCheckIn(checkIn, recommendation) {
 }
 
 export async function updateCheckIn(id, checkIn, recommendation) {
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('check_ins')
     .update(toCheckInRow(checkIn, recommendation))
     .eq('id', id)
     .select('*')
     .single()
-
-  if (isMissingColumn(error, 'hydration_ml')) {
-    const retry = await supabase.from('check_ins').update(toLegacyCheckInRow(checkIn, recommendation)).eq('id', id).select('*').single()
-    data = retry.data
-    error = retry.error
-  }
 
   if (error) throw error
 
@@ -1058,12 +1001,6 @@ function isMissingRecommendationColumn(error) {
   return String(error.message ?? error.details ?? '')
     .toLowerCase()
     .includes('recommendation_json')
-}
-
-function isMissingColumn(error, column) {
-  if (!error) return false
-  const message = String(error.message ?? error.details ?? '').toLowerCase()
-  return message.includes(column.toLowerCase()) && /column|schema cache/.test(message)
 }
 
 function normalizeLegacySportWorkload(workload = {}, units) {

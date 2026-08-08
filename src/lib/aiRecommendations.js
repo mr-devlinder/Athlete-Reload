@@ -1,6 +1,6 @@
 import { supabase, supabasePublishableKey, supabaseUrl } from './supabaseClient'
 
-async function callRecommendationFunction(payload) {
+async function callRecommendationFunction(payload, { signal } = {}) {
   if (!supabase) {
     throw new Error('Supabase is not configured')
   }
@@ -23,6 +23,7 @@ async function callRecommendationFunction(payload) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(requestBody),
+    signal,
   })
   const data = await response.json().catch(() => ({}))
 
@@ -53,23 +54,20 @@ function withoutPersonalization(payload) {
 }
 
 export async function generateAiRecommendation(payload, { personalize = true } = {}) {
-  let timeoutId
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(new Error('Recommendation request timed out')), 60000)
 
   try {
-    const data = await Promise.race([
-      callRecommendationFunction(personalize ? payload : withoutPersonalization(payload)),
-      new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error('Recommendation request timed out'))
-        }, 60000)
-      }),
-    ])
+    const data = await callRecommendationFunction(
+      personalize ? payload : withoutPersonalization(payload),
+      { signal: controller.signal },
+    )
 
-    if (!data?.recommendation || data?.source !== 'gemini') {
-      throw new Error('Gemini recommendation response was not confirmed')
+    if (!data?.recommendation || data?.source !== 'openrouter') {
+      throw new Error('AI recommendation response was not confirmed')
     }
 
-    return { ...data.recommendation, _source: 'gemini' }
+    return { ...data.recommendation, _source: 'openrouter' }
   } finally {
     clearTimeout(timeoutId)
   }
@@ -79,4 +77,10 @@ export async function extractVoiceLog(payload) {
   const data = await callRecommendationFunction({ ...payload, requestType: 'voice_extract' })
   if (!data?.extraction) throw new Error('Voice draft could not be understood')
   return data.extraction
+}
+
+export async function transcribeVoiceAudio({ audioBase64, mimeType }) {
+  const data = await callRecommendationFunction({ audioBase64, mimeType, requestType: 'voice_transcribe' })
+  if (!data?.transcript) throw new Error('The recording could not be transcribed')
+  return data.transcript
 }

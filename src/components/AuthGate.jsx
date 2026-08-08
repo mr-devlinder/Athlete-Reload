@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import appLogo from '../assets/athlete-reload-logo-transparent.png'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 const authDefaults = {
   email: '',
@@ -22,6 +24,7 @@ export function AuthGate({
   const [mode, setMode] = useState(initialMode)
   const [authForm, setAuthForm] = useState(authDefaults)
   const [authMessage, setAuthMessage] = useState('')
+  const [emailNotice, setEmailNotice] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mfaChallenge, setMfaChallenge] = useState(null)
   const [mfaCode, setMfaCode] = useState('')
@@ -54,6 +57,15 @@ export function AuthGate({
     setAuthMessage('Unable to complete that request. Check your information and try again.')
   }
 
+  function showEmailNotice(title, message) {
+    setAuthMessage('')
+    setEmailNotice({
+      email: authForm.email.trim(),
+      message,
+      title,
+    })
+  }
+
   async function startPasswordReset() {
     setAuthMessage('')
 
@@ -78,7 +90,10 @@ export function AuthGate({
       return
     }
 
-    setAuthMessage('If that email can receive resets, Supabase will send a secure link.')
+    showEmailNotice(
+      'Check your email',
+      'If an account exists for this address, a secure password reset link is on the way.',
+    )
   }
 
   async function resendVerification() {
@@ -106,7 +121,10 @@ export function AuthGate({
       return
     }
 
-    setAuthMessage('If verification is available for that address, a new email is on the way.')
+    showEmailNotice(
+      'Verification email sent',
+      'If verification is available for this address, a new confirmation email is on the way.',
+    )
   }
 
   async function startMfaChallenge(session) {
@@ -152,7 +170,7 @@ export function AuthGate({
     }
 
     setIsSubmitting(true)
-    if (isSigningUp) localStorage.setItem(pendingLegalConsentKey, new Date().toISOString())
+    if (isSigningUp) sessionStorage.setItem(pendingLegalConsentKey, 'oauth_signup')
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
@@ -161,7 +179,7 @@ export function AuthGate({
     })
 
     if (error) {
-      localStorage.removeItem(pendingLegalConsentKey)
+      sessionStorage.removeItem(pendingLegalConsentKey)
       setIsSubmitting(false)
       setAuthMessage('Unable to start social sign-in. Check that this provider is enabled in Supabase.')
     }
@@ -285,7 +303,10 @@ export function AuthGate({
     }
 
     if (isSigningUp) {
-      setAuthMessage('Check your email to finish creating your account.')
+      showEmailNotice(
+        'Confirm your email',
+        'We sent a confirmation link to finish creating your Athlete Reload account.',
+      )
       return
     }
 
@@ -549,7 +570,47 @@ export function AuthGate({
           </button>
         )}
       </form>
+      {emailNotice && createPortal(
+        <EmailSentDialog notice={emailNotice} onClose={() => setEmailNotice(null)} />,
+        document.body,
+      )}
     </section>
+  )
+}
+
+function EmailSentDialog({ notice, onClose }) {
+  const dialogRef = useModalAccessibility(true, onClose)
+
+  return (
+    <div className="auth-email-backdrop" onMouseDown={onClose}>
+      <section
+        aria-describedby="auth-email-description"
+        aria-labelledby="auth-email-title"
+        aria-modal="true"
+        className="auth-email-dialog glass-panel"
+        onMouseDown={(event) => event.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <button aria-label="Close email confirmation" className="ghost-close auth-email-close" onClick={onClose} type="button">
+          Close
+        </button>
+        <div className="auth-email-icon" aria-hidden="true">
+          <span>&#10003;</span>
+        </div>
+        <p className="eyebrow">Email sent</p>
+        <h2 id="auth-email-title">{notice.title}</h2>
+        <p id="auth-email-description">{notice.message}</p>
+        <strong className="auth-email-address">{notice.email}</strong>
+        <div className="auth-email-help">
+          Open the email and follow the secure link. If it does not arrive shortly, check your spam or junk folder.
+        </div>
+        <button autoFocus className="primary-button" onClick={onClose} type="button">
+          Got it
+        </button>
+      </section>
+    </div>
   )
 }
 

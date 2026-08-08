@@ -151,6 +151,11 @@ export function getCheckInPreparationContext({
     checkInTime: checkInTime.toISOString(),
     eventStartTime: getEventStart(event)?.toISOString() ?? null,
     timeOfDayExpectation: getTimeOfDayExpectation(checkInTime),
+    loggedNutrition: nutritionContext.hasFoodLogs ? {
+      mealBreakdown: nutritionContext.mealBreakdown ?? {},
+      totals: nutritionContext.totals ?? null,
+    } : null,
+    loggedHydrationMl: nutritionContext.hasHydrationLogs ? Number(dailyWellness.hydrationMl) : null,
     fuel: getEventFuelContext({
       checkInTime,
       entries: dailyWellness.nutritionEntries ?? [],

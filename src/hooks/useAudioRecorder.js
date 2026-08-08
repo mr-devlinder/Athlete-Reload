@@ -1,18 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 
-export function useAudioRecorder({ maxSeconds = 120, onTranscript } = {}) {
+export function useAudioRecorder({ maxSeconds = 120, onAudio, onTranscript } = {}) {
   const mountedRef = useRef(true)
   const streamRef = useRef(null)
   const recorderRef = useRef(null)
   const recognitionRef = useRef(null)
+  const chunksRef = useRef([])
   const timerRef = useRef(null)
   const intentionalStopRef = useRef(false)
+  const cancelledRecordingRef = useRef(false)
   const transcriptHandlerRef = useRef(onTranscript)
+  const audioHandlerRef = useRef(onAudio)
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('idle')
 
   transcriptHandlerRef.current = onTranscript
+  audioHandlerRef.current = onAudio
 
   function releaseStream() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -21,13 +25,17 @@ export function useAudioRecorder({ maxSeconds = 120, onTranscript } = {}) {
 
   function stop({ cancelled = false } = {}) {
     intentionalStopRef.current = true
+    cancelledRecordingRef.current = cancelled
     window.clearInterval(timerRef.current)
     timerRef.current = null
     recognitionRef.current?.stop?.()
     recognitionRef.current = null
-    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
-    recorderRef.current = null
-    releaseStream()
+    if (recorderRef.current?.state === 'recording') {
+      recorderRef.current.stop()
+    } else {
+      recorderRef.current = null
+      releaseStream()
+    }
     if (mountedRef.current) setStatus(cancelled ? 'idle' : 'ready')
   }
 
@@ -41,6 +49,7 @@ export function useAudioRecorder({ maxSeconds = 120, onTranscript } = {}) {
 
     setStatus('requesting')
     intentionalStopRef.current = false
+    cancelledRecordingRef.current = false
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
       if (!mountedRef.current || intentionalStopRef.current) {
@@ -49,6 +58,20 @@ export function useAudioRecorder({ maxSeconds = 120, onTranscript } = {}) {
       }
       streamRef.current = stream
       recorderRef.current = new MediaRecorder(stream)
+      chunksRef.current = []
+      recorderRef.current.ondataavailable = (event) => {
+        if (event.data?.size) chunksRef.current.push(event.data)
+      }
+      recorderRef.current.onstop = () => {
+        const chunks = chunksRef.current
+        const mimeType = recorderRef.current?.mimeType || chunks[0]?.type || 'audio/webm'
+        chunksRef.current = []
+        recorderRef.current = null
+        releaseStream()
+        if (!cancelledRecordingRef.current && chunks.length) {
+          audioHandlerRef.current?.(new Blob(chunks, { type: mimeType }))
+        }
+      }
       recorderRef.current.start(1000)
 
       const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -66,6 +89,15 @@ export function useAudioRecorder({ maxSeconds = 120, onTranscript } = {}) {
           if (!intentionalStopRef.current && event.error === 'not-allowed') {
             setError('Microphone access was denied. Enable it in this site\'s browser settings, then try again.')
             stop({ cancelled: true })
+          }
+        }
+        recognition.onend = () => {
+          if (!intentionalStopRef.current && recorderRef.current?.state === 'recording') {
+            try {
+              recognition.start()
+            } catch {
+              setError('Live transcription stopped. Your recording will still be transcribed after you stop.')
+            }
           }
         }
         recognitionRef.current = recognition

@@ -301,6 +301,99 @@
   line-height: 1.4;
 }
 
+.auth-email-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: grid;
+  place-items: center;
+  padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  overflow-y: auto;
+  background: rgba(18, 25, 36, 0.54);
+  backdrop-filter: blur(8px);
+}
+
+.auth-email-dialog {
+  position: relative;
+  display: grid;
+  width: min(440px, 100%);
+  max-height: calc(100svh - 40px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  padding: 30px;
+  overflow-y: auto;
+  border-radius: 28px;
+  text-align: center;
+  box-shadow: 0 28px 80px rgba(18, 25, 36, 0.28);
+}
+
+.auth-email-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.auth-email-icon {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin: 8px auto 18px;
+  border-radius: 22px;
+  color: #fff;
+  font-size: 30px;
+  font-weight: 950;
+  background: linear-gradient(145deg, #26b97e, #1975cf);
+  box-shadow: 0 14px 30px rgba(38, 185, 126, 0.25);
+}
+
+.auth-email-dialog .eyebrow {
+  margin: 0 0 5px;
+}
+
+.auth-email-dialog h2 {
+  margin: 0;
+  font-size: clamp(25px, 7vw, 32px);
+}
+
+.auth-email-dialog > p:not(.eyebrow) {
+  margin: 12px 0 14px;
+  color: #606976;
+  line-height: 1.55;
+}
+
+.auth-email-address {
+  display: block;
+  max-width: 100%;
+  padding: 12px 14px;
+  overflow-wrap: anywhere;
+  border: 1px solid rgba(25, 117, 207, 0.16);
+  border-radius: 14px;
+  color: #175d9f;
+  background: rgba(47, 140, 255, 0.08);
+}
+
+.auth-email-help {
+  margin: 16px 0 20px;
+  padding: 14px;
+  border-radius: 14px;
+  color: #555f6d;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.5;
+  background: rgba(30, 39, 55, 0.055);
+}
+
+@media (max-width: 520px) {
+  .auth-email-dialog {
+    padding: 26px 20px 20px;
+    border-radius: 24px;
+  }
+
+  .auth-email-close {
+    top: 12px;
+    right: 12px;
+  }
+}
+
 .auth-switch {
   border: 0;
   background: transparent;
@@ -3117,6 +3210,25 @@ textarea {
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
 }
 
+.home-dashboard-grid {
+  display: grid;
+  grid-auto-flow: dense;
+  grid-auto-rows: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.home-dashboard-grid > .home-panel {
+  grid-row-end: span var(--home-card-row-span, 1);
+  min-width: 0;
+}
+
+.home-quote-panel {
+  min-height: 0;
+  align-content: start;
+}
+
 .today-event-list,
 .pain-watch-list {
   display: grid;
@@ -5201,11 +5313,6 @@ body.modal-open {
   background: rgba(17, 20, 28, 0.22);
 }
 
-.nav-tabs.tour-hidden-mobile {
-  visibility: hidden;
-  pointer-events: none;
-}
-
 .guided-tour-spotlight {
   position: fixed;
   z-index: 2147483641;
@@ -5232,7 +5339,23 @@ body.modal-open {
 }
 
 .guided-tour-form-callout {
-  z-index: 2147483650;
+  z-index: 2147483647;
+  border-color: rgba(67, 155, 255, 0.95);
+  box-shadow: 0 22px 64px rgba(18, 24, 34, 0.3), 0 0 0 4px rgba(67, 155, 255, 0.28);
+}
+
+.guided-tour-event-form .modal-backdrop {
+  z-index: 2147483644;
+}
+
+.guided-tour-event-form .event-modal {
+  position: relative;
+  z-index: 2147483645;
+}
+
+.guided-tour-page-blocker {
+  background: transparent;
+  touch-action: pan-y;
 }
 
 .guided-tour h2,
@@ -6504,14 +6627,20 @@ body.modal-open {
 }
 
 @media (max-width: 1060px) {
+  .nav-tabs.tour-hidden-mobile {
+    visibility: hidden;
+    pointer-events: none;
+  }
+
   .guided-tour-event-form .event-modal {
-    max-height: calc(100dvh - var(--guided-tour-form-top, 140px));
+    max-height: calc(100dvh - var(--guided-tour-form-top, 140px) - max(10px, env(safe-area-inset-bottom)));
     padding-top: 20px !important;
   }
 
   .guided-tour-event-form .modal-backdrop {
     align-items: start;
     padding-top: var(--guided-tour-form-top, 140px);
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
     touch-action: pan-y;
   }
 
@@ -6819,6 +6948,7 @@ body.modal-open {
   .event-meta-grid,
   .stat-grid,
   .home-panels,
+  .home-dashboard-grid,
   .simulator-grid,
   .comparison-grid,
   .pain-timeline,
@@ -6830,6 +6960,14 @@ body.modal-open {
   .history-detail-grid,
   .modal-form {
     grid-template-columns: 1fr;
+  }
+
+  .home-dashboard-grid {
+    grid-auto-rows: auto;
+  }
+
+  .home-dashboard-grid > .home-panel {
+    grid-row-end: auto;
   }
 
   .recommendation-sections {
