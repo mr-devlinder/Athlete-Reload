@@ -1,31 +1,33 @@
 {
   "name": "Athlete Reload",
   "short_name": "Athlete Reload",
-  "start_url": "/",
+  "id": "/Athlete-Reload/",
+  "start_url": "/Athlete-Reload/",
+  "scope": "/Athlete-Reload/",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "/android-chrome-192x192.png",
+      "src": "/Athlete-Reload/android-chrome-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/android-chrome-512x512.png",
+      "src": "/Athlete-Reload/android-chrome-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/maskable-icon-192x192.png",
+      "src": "/Athlete-Reload/maskable-icon-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/maskable-icon-512x512.png",
+      "src": "/Athlete-Reload/maskable-icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
