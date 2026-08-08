@@ -641,6 +641,12 @@ function attachTournamentContext(event, tournaments, schedule) {
   }
 }
 
+function getRecoveryRoutineSignature(plan) {
+  const routine = plan?.routine ?? plan
+  const exercises = routine?.exercises?.map((exercise) => `${exercise.name}|${exercise.side ?? ''}|${exercise.durationSeconds ?? exercise.reps ?? ''}`) ?? []
+  return `${routine?.title ?? ''}::${exercises.join('::')}`
+}
+
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
@@ -664,6 +670,7 @@ function App() {
   const [generatedRecoveryCheckoutId, setGeneratedRecoveryCheckoutId] = useState(null)
   const [isGeneratedRecoveryPlanSaved, setIsGeneratedRecoveryPlanSaved] = useState(false)
   const [recoveryPlanStatus, setRecoveryPlanStatus] = useState('idle')
+  const recoveryPlanSaveInFlightRef = useRef(false)
   const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
     scoreLabel: 'readiness',
     session: '',
@@ -1938,6 +1945,7 @@ function App() {
   }
 
   async function generateRecoveryPlan({ equipment, planType, targetedAreas, timeAvailable }) {
+    recoveryPlanSaveInFlightRef.current = false
     const latestCheckout = [...checkouts]
       .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
 
@@ -2026,9 +2034,9 @@ function App() {
   async function saveRecoveryPlan(plan) {
     const checkoutId = generatedRecoveryCheckoutId
     const checkout = checkouts.find((item) => item.id === checkoutId)
-    const completedEvent = schedule.find((event) => event.id === checkout?.eventId)
 
-    if (!plan) return false
+    if (!plan || recoveryPlanSaveInFlightRef.current || isGeneratedRecoveryPlanSaved) return false
+    recoveryPlanSaveInFlightRef.current = true
 
     const completion = {
       completedAt: new Date().toISOString(),
@@ -2044,49 +2052,29 @@ function App() {
         : completion
       setRecoveryCompletions((current) => [savedCompletion, ...current.filter((item) => item.id !== savedCompletion.id)])
     } catch (error) {
+      recoveryPlanSaveInFlightRef.current = false
       console.error('Unable to save recovery history', error)
       setDataStatus('error')
       return false
     }
 
-    if (!checkout || !completedEvent) {
-      setIsGeneratedRecoveryPlanSaved(true)
-      return true
-    }
-
-    const updatedCheckout = {
-      ...checkout,
-      recommendation: {
-        ...(checkout.recommendation ?? {}),
-        recoveryPlan: plan,
-      },
-    }
-
-    setCheckouts((current) => [updatedCheckout, ...current.filter((item) => item.id !== checkout.id)])
-
-    if (isSupabaseSession) {
-      try {
-        const savedCheckout = await updateTrainingCheckout(checkout.id, completedEvent, updatedCheckout)
-        setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
-      } catch (error) {
-        console.error('Recovery history saved, but checkout could not be updated', error)
-        setDataStatus('error')
-      }
-    }
     setIsGeneratedRecoveryPlanSaved(true)
     return true
   }
 
   async function favoriteRecoveryRoutine(entry) {
-    const plan = entry?.recommendation?.recoveryPlan
+    const plan = entry?.details?.plan ?? entry?.recommendation?.recoveryPlan
     if (!plan?.routine) return
 
-    const existing = savedRoutines.find((routine) => routine.sourceCheckoutId === entry.id)
+    const sourceCheckoutId = entry.sourceCheckoutId ?? (entry.recommendation?.recoveryPlan ? entry.id : null)
+    const existing = savedRoutines.find((routine) => sourceCheckoutId
+      ? routine.sourceCheckoutId === sourceCheckoutId
+      : getRecoveryRoutineSignature(routine.routine) === getRecoveryRoutineSignature(plan))
     const routine = {
       ...existing,
       isFavorite: !existing?.isFavorite,
       routine: plan,
-      sourceCheckoutId: entry.id,
+      sourceCheckoutId,
       title: plan.routine.title ?? 'Recovery routine',
     }
 

@@ -187,6 +187,10 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
   const recoveryItems = checkouts.filter((item) => (
     item.entry.recommendation?.recoveryPlan && !completedRecoveryCheckoutIds.has(item.entry.id)
   ))
+  const recoveryRecords = [
+    ...recoveryCompletions.map((item) => ({ ...item, historyKind: 'recovery-completion' })),
+    ...recoveryItems.map((item) => ({ ...item, historyKind: 'recovery' })),
+  ].sort((first, second) => getHistoryItemSortValue(second) - getHistoryItemSortValue(first))
 
   return (
     <>
@@ -246,37 +250,24 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
 
       <div className="history-subsection">
         <p className="eyebrow">Recovery</p>
-        {recoveryItems.length === 0 && recoveryCompletions.length === 0 ? (
+        {recoveryRecords.length === 0 ? (
           <p>No saved recovery plans this week.</p>
         ) : (
-          <>{recoveryCompletions.map((item) => {
-            const plan = item.entry.details?.plan
+          recoveryRecords.map((item) => {
+            const isCompletion = item.historyKind === 'recovery-completion'
+            const plan = isCompletion ? item.entry.details?.plan : item.entry.recommendation?.recoveryPlan
             const exerciseCount = plan?.routine?.exercises?.length ?? item.entry.details?.exerciseCount ?? 0
-            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`recovery-completion-${item.entry.id}`} kind="recovery-completion" onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
+            const savedAt = isCompletion ? item.entry.completedAt : item.entry.createdAt
+
+            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`${item.historyKind}-${item.entry.id}`} kind={item.historyKind} onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
               <span className="history-record-kind recovery-record-kind">Saved</span>
               <div>
-                <p className="eyebrow">{format(parseISO(item.entry.completedAt), 'MMM d, yyyy · h:mm a')}</p>
+                <p className="eyebrow">{savedAt ? format(parseISO(savedAt), 'MMM d, yyyy · h:mm a') : formatCheckoutDate(item.entry)}</p>
                 <strong>{plan?.routine?.title ?? 'Recovery routine'}</strong>
                 <small>{plan?.routine?.durationMinutes ?? '—'} min routine · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}</small>
               </div>
             </HistoryRow>
-          })}{recoveryItems.map((item) => (
-            <HistoryRow
-              className="history-row recovery-history-row"
-              entry={item.entry}
-              key={`recovery-${item.entry.id}`}
-              kind="recovery"
-              onDeleteEntry={onDeleteEntry}
-              onSelectEntry={onSelectEntry}
-            >
-              <span className="history-record-kind recovery-record-kind">Recovery</span>
-              <div>
-                <p className="eyebrow">{formatCheckoutDate(item.entry)}</p>
-                <strong>{item.entry.recommendation.recoveryPlan.routine?.title ?? 'Recovery plan'}</strong>
-                <small>{item.entry.recommendation.recoveryPlan.routine?.durationMinutes ?? 10} min routine · {item.entry.recommendation.recoveryPlan.routine?.exercises?.length ?? 0} exercises</small>
-              </div>
-            </HistoryRow>
-          ))}</>
+          })
         )}
       </div>
     </>
@@ -411,7 +402,7 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSy
   }
 
   if (entry.historyKind === 'recovery-completion') {
-    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} />
+    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
   }
 
   const detailSections = getCheckInDetailSections(entry, unitSystem)
@@ -581,8 +572,9 @@ function getReadinessBand(score) {
   return 'readiness-red'
 }
 
-function RecoveryCompletionHistoryModal({ entry, onClose }) {
+function RecoveryCompletionHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
   const plan = entry.details?.plan
+  const savedRoutine = findSavedRecoveryRoutine(savedRoutines, plan, entry.sourceCheckoutId)
 
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
@@ -598,10 +590,18 @@ function RecoveryCompletionHistoryModal({ entry, onClose }) {
         </div>
         <div className="history-detail-grid recovery-history-summary">
           <span><strong>Saved</strong>{format(parseISO(entry.completedAt), 'MMM d, yyyy · h:mm a')}</span>
+          <span><strong>Routine type</strong>{formatRecoveryPlanType(plan?.planType)}</span>
           <span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span>
           <span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span>
+          <span><strong>Body areas</strong>{getRecoveryRoutineAreas(plan?.routine)}</span>
+          <span><strong>Equipment</strong>{getRecoveryRoutineEquipment(plan?.routine)}</span>
         </div>
         {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan details are available.</p>}
+        {plan?.routine && (
+          <button className={`secondary-button recovery-modal-favorite ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
+            {savedRoutine?.isFavorite ? 'Favorited routine' : 'Favorite routine'}
+          </button>
+        )}
       </section>
     </div>
   )
@@ -609,7 +609,7 @@ function RecoveryCompletionHistoryModal({ entry, onClose }) {
 
 function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
   const plan = entry.recommendation?.recoveryPlan
-  const savedRoutine = savedRoutines.find((routine) => routine.sourceCheckoutId === entry.id)
+  const savedRoutine = findSavedRecoveryRoutine(savedRoutines, plan, entry.id)
 
   return (
     <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
@@ -629,11 +629,20 @@ function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines
           </button>
         </div>
         {plan?.routine && (
-          <button className={`secondary-button compact-action ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
+          <div className="history-detail-grid recovery-history-summary">
+            <span><strong>Routine type</strong>{formatRecoveryPlanType(plan.planType)}</span>
+            <span><strong>Routine length</strong>{plan.routine.durationMinutes ?? '—'} min</span>
+            <span><strong>Exercises</strong>{plan.routine.exercises?.length ?? '—'}</span>
+            <span><strong>Body areas</strong>{getRecoveryRoutineAreas(plan.routine)}</span>
+            <span><strong>Equipment</strong>{getRecoveryRoutineEquipment(plan.routine)}</span>
+          </div>
+        )}
+        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan for this session.</p>}
+        {plan?.routine && (
+          <button className={`secondary-button recovery-modal-favorite ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
             {savedRoutine?.isFavorite ? 'Favorited routine' : 'Favorite routine'}
           </button>
         )}
-        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan for this session.</p>}
       </section>
     </div>
   )
@@ -655,14 +664,21 @@ function SavedRecoveryPlan({ plan }) {
           <ol>
             {routine.exercises.map((exercise, index) => (
               <li key={`${exercise.name}-${index}`}>
-                <div className="saved-recovery-exercise-heading">
-                  <span>{exercise.type ?? 'Mobility'}</span>
-                  <b>{exercise.name}</b>
-                  <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
-                </div>
-                {exercise.instruction && <p>{exercise.instruction}</p>}
-                {exercise.feel && <small><strong>You should feel:</strong> {exercise.feel}</small>}
-                {exercise.avoid && <small><strong>Avoid:</strong> {exercise.avoid}</small>}
+                <details className="saved-recovery-exercise">
+                  <summary>
+                    <b>{exercise.name}</b>
+                  </summary>
+                  <div className="saved-recovery-exercise-plan">
+                    <div className="saved-recovery-exercise-meta">
+                      <span>{exercise.type ?? 'Mobility'}</span>
+                      <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
+                    </div>
+                    {exercise.instruction && <p>{exercise.instruction}</p>}
+                    {exercise.feel && <small><strong>You should feel:</strong> {exercise.feel}</small>}
+                    {exercise.avoid && <small><strong>Avoid:</strong> {exercise.avoid}</small>}
+                    {exercise.why && <small><strong>Why it is included:</strong> {exercise.why}</small>}
+                  </div>
+                </details>
               </li>
             ))}
           </ol>
@@ -670,6 +686,33 @@ function SavedRecoveryPlan({ plan }) {
       )}
     </section>
   )
+}
+
+function formatRecoveryPlanType(value) {
+  if (!value) return 'Recovery routine'
+  return String(value).split('-').map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
+}
+
+function getRecoveryRoutineAreas(routine) {
+  const areas = [...new Set(routine?.exercises?.map((exercise) => exercise.area).filter(Boolean) ?? [])]
+  return areas.join(', ') || 'Full body'
+}
+
+function getRecoveryRoutineEquipment(routine) {
+  const equipment = [...new Set(routine?.exercises?.map((exercise) => exercise.equipment).filter((item) => item && item.toLowerCase() !== 'none') ?? [])]
+  return equipment.join(', ') || 'None'
+}
+
+function findSavedRecoveryRoutine(savedRoutines, plan, sourceCheckoutId) {
+  if (sourceCheckoutId) return savedRoutines.find((routine) => routine.sourceCheckoutId === sourceCheckoutId)
+  const signature = getRecoveryRoutineSignature(plan)
+  return savedRoutines.find((routine) => getRecoveryRoutineSignature(routine.routine) === signature)
+}
+
+function getRecoveryRoutineSignature(plan) {
+  const routine = plan?.routine ?? plan
+  const exercises = routine?.exercises?.map((exercise) => `${exercise.name}|${exercise.side ?? ''}|${exercise.durationSeconds ?? exercise.reps ?? ''}`) ?? []
+  return `${routine?.title ?? ''}::${exercises.join('::')}`
 }
 
 function formatHistoryDate(entry) {
@@ -880,7 +923,7 @@ function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
       weeks: [...year.weeks.values()]
         .map((week) => ({
           ...week,
-          items: week.items.sort((first, second) => getHistoryItemSortValue(second).localeCompare(getHistoryItemSortValue(first))),
+          items: week.items.sort((first, second) => getHistoryItemSortValue(second) - getHistoryItemSortValue(first)),
         }))
         .sort((first, second) => second.key.localeCompare(first.key)),
     }))
@@ -888,9 +931,11 @@ function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
 }
 
 function getHistoryItemSortValue(item) {
-  const time = item.entry.eventTime ?? item.entry.time ?? ''
+  const exactTime = item.entry.completedAt ?? item.entry.createdAt
+  if (exactTime) return new Date(exactTime).getTime()
 
-  return `${item.date} ${time}`
+  const time = item.entry.eventTime ?? item.entry.time ?? '12:00'
+  return new Date(`${item.date}T${time}`).getTime()
 }
 
 function getCurrentWeekKey() {

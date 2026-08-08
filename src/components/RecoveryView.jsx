@@ -57,6 +57,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const equipmentPickerRef = useRef(null)
   const equipmentMenuRef = useRef(null)
   const routineVariationRef = useRef(0)
+  const recoverySaveStartedRef = useRef(false)
   const [timeAvailable, setTimeAvailable] = useState('15 minutes')
   const [planType, setPlanType] = useState('last-checkout')
   const [targetedAreas, setTargetedAreas] = useState([])
@@ -72,6 +73,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [feedback, setFeedback] = useState({ completion: '', feeling: '', tightness: '', pain: '' })
   const [isSavingPlan, setIsSavingPlan] = useState(false)
   const [savePlanMessage, setSavePlanMessage] = useState('')
+  const [savedRoutinesOpen, setSavedRoutinesOpen] = useState(false)
 
   const plan = generatedPlan?.planType === planType ? generatedPlan : null
   const fallbackForGoal = getFallbackRoutine(plan?.planType, routineVariationRef.current)
@@ -196,6 +198,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   }
 
   function handleGenerate() {
+    recoverySaveStartedRef.current = false
     routineVariationRef.current += 1
     setRoutineFeedback(null)
     setRoutineComplete(false)
@@ -219,8 +222,9 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   }
 
   async function saveRecoveryPlan() {
-    if (!plan || isSavingPlan) return
+    if (!plan || isSavingPlan || generatedPlanSaved || recoverySaveStartedRef.current) return
 
+    recoverySaveStartedRef.current = true
     setIsSavingPlan(true)
     setSavePlanMessage('')
     try {
@@ -233,8 +237,10 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
         },
         ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
       })
+      if (!saved) recoverySaveStartedRef.current = false
       setSavePlanMessage(saved ? 'Saved to your Recovery history.' : 'The recovery plan could not be saved. Please try again.')
     } catch (error) {
+      recoverySaveStartedRef.current = false
       console.error('Unable to save recovery plan', error)
       setSavePlanMessage('The recovery plan could not be saved. Please try again.')
     } finally {
@@ -359,6 +365,9 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'last-checkout' && !latestCheckout) || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
                 {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
               </button>
+              <button aria-expanded={savedRoutinesOpen} className="load-saved-routines-button" onClick={() => setSavedRoutinesOpen((current) => !current)} type="button">
+                Load saved routines
+              </button>
             </div>
             {planType === 'last-checkout' && !latestCheckout && <p className="recovery-context-note">No checkout is available yet. Choose another plan type to build a standalone routine.</p>}
             {generationStatus === 'error' && <p className="recovery-error">The recovery plan could not be generated. Check your connection and try again.</p>}
@@ -366,17 +375,17 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               <p className="recovery-context-note">Last recovery completed {formatCompletionRecency(recentCompletion.completedAt)}. This is considered when pacing the next plan.</p>
             )}
           </div>
-          {savedRoutines.some((routine) => routine.isFavorite) && (
+          {savedRoutinesOpen && (
             <div className="saved-routine-library">
-              <strong>Favorite routines</strong>
-              <div>
+              <strong>Saved routines</strong>
+              {savedRoutines.some((routine) => routine.isFavorite) ? <div>
                 {savedRoutines.filter((routine) => routine.isFavorite).map((routine) => (
                   <button key={routine.id} onClick={() => onReplaySavedRoutine?.(routine)} type="button">
                     <span>{routine.title}</span>
                     <em>Replay</em>
                   </button>
                 ))}
-              </div>
+              </div> : <p className="recovery-context-note">Favorite a routine from Recovery history to load it here.</p>}
             </div>
           )}
       </section>

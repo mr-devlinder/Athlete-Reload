@@ -2487,8 +2487,26 @@ textarea {
 
 .recovery-generator-controls {
   display: grid;
-  grid-template-columns: 170px 170px max-content;
+  grid-template-columns: 170px 170px max-content max-content;
   align-items: end;
+}
+
+.load-saved-routines-button {
+  min-height: 42px;
+  padding: 10px 16px;
+  border: 1px solid #111;
+  border-radius: 12px;
+  background: #111;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.load-saved-routines-button:hover,
+.load-saved-routines-button[aria-expanded='true'] {
+  background: #2a2a2a;
 }
 
 .recovery-generator-controls > label,
@@ -6030,6 +6048,11 @@ body.modal-open {
   min-width: 0;
 }
 
+.recovery-modal-favorite {
+  width: 100%;
+  margin-top: 18px;
+}
+
 .history-detail-sections {
   display: grid;
   gap: 16px;
@@ -6153,11 +6176,47 @@ body.modal-open {
   font-size: 12px;
 }
 
-.saved-recovery-exercise-heading {
+.saved-recovery-exercise summary,
+.saved-recovery-exercise-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px;
+}
+
+.saved-recovery-exercise summary {
+  position: relative;
+  padding-right: 28px;
+  color: #30353e;
+  cursor: pointer;
+  list-style: none;
+}
+
+.saved-recovery-exercise summary::-webkit-details-marker {
+  display: none;
+}
+
+.saved-recovery-exercise summary::after {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  color: #226fc9;
+  content: '+';
+  font-size: 18px;
+  font-weight: 900;
+  transform: translateY(-50%);
+}
+
+.saved-recovery-exercise[open] summary::after {
+  content: '−';
+}
+
+.saved-recovery-exercise-plan {
+  display: grid;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(23, 23, 23, 0.07);
 }
 
 .saved-recovery-routine li p,
@@ -6712,7 +6771,8 @@ body.modal-open {
   .recovery-generator-controls .equipment-field,
   .recovery-generator-controls select,
   .recovery-generator-controls .equipment-picker-button,
-  .recovery-generator-controls .primary-button {
+  .recovery-generator-controls .primary-button,
+  .recovery-generator-controls .load-saved-routines-button {
     width: 100%;
   }
 
