@@ -442,6 +442,12 @@ function toPrivacyPreferencesRow(preferences) {
 }
 
 export async function loadAthleteData() {
+  const { data: compatibility, error: compatibilityError } = await supabase.rpc('get_release_compatibility')
+  if (compatibilityError || Number(compatibility?.schemaVersion) < 20260809000830) {
+    const error = new Error('Athlete Reload needs a service update before your data can be loaded.')
+    error.code = 'SCHEMA_VERSION_MISMATCH'
+    throw error
+  }
   const [
     scheduleResponse,
     associationsResponse,

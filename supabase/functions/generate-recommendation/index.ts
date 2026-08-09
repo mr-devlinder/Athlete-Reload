@@ -5,6 +5,7 @@ const corsHeaders = {
 }
 
 type Recommendation = {
+  schemaVersion: number
   action: string
   avoid: string[]
   breakdown: Array<{ label: string; value: number }>
@@ -24,10 +25,12 @@ type Recommendation = {
   timeline?: Array<{ title: string; items: string[] }>
   routine?: { title: string; summary: string; durationMinutes: number; painAware: boolean; exercises: any[] }
   reportSections?: Array<{ id: string; title: string; summary: string; items: string[]; action?: string; actionLabel?: string }>
+  contextFactors?: string[]
+  contextSnapshot?: Record<string, unknown>
+  targets?: Record<string, unknown>
 }
 
-const recommendationModel = 'nvidia/nemotron-3-ultra-550b-a55b:free'
-const transcriptionModel = 'openrouter/free'
+const recommendationModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
 
 Deno.serve(async (request) => {
   let stage = 'request_validation'
@@ -39,10 +42,10 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed' }, 405)
   }
 
-  const openRouterApiKey = Deno.env.get('OPENROUTER_API_KEY')
+  const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
 
-  if (!openRouterApiKey) {
-    return jsonResponse({ error: 'Missing OPENROUTER_API_KEY secret' }, 503)
+  if (!geminiApiKey) {
+    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 503)
   }
 
   try {
@@ -52,51 +55,52 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429)
     }
     if (body?.requestType === 'voice_transcribe') {
-      const transcript = await transcribeAudio(openRouterApiKey, body)
+      const transcript = await transcribeAudio(geminiApiKey, body)
       return jsonResponse({ transcript })
     }
     if (body?.requestType === 'voice_extract') {
-      const extractionResponse = await generateOpenRouterJson(openRouterApiKey, buildVoiceExtractionPrompt(body))
+      const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
       return jsonResponse({ extraction: extractionResponse })
     }
-    stage = 'provider_request'
-    const response = await requestOpenRouter(openRouterApiKey, buildPrompt(body), recommendationModel)
+    stage = 'gemini_request'
+    const { response, model } = await requestGemini(geminiApiKey, [{ text: buildPrompt(body) }], true)
     if (!response.ok) {
       const detail = await response.text()
-      return jsonResponse({ error: 'AI provider request failed', detail }, 502)
+      return jsonResponse({ error: 'Gemini request failed', detail }, 502)
     }
 
-    stage = 'parse_provider_response'
+    stage = 'parse_gemini_response'
     const data = await response.json()
-    const text = extractOpenRouterText(data)
+    const text = extractGeminiText(data)
     stage = 'normalize_recommendation'
     const recommendation = normalizeRecommendation(parseJsonResponse(text), body)
 
-    return jsonResponse({ recommendation, source: 'openrouter', model: data?.model ?? recommendationModel })
+    return jsonResponse({ recommendation, provider: 'gemini', source: 'gemini', model })
   } catch (error) {
+    const correlationId = crypto.randomUUID()
     console.error(JSON.stringify({
+      correlationId,
       error: error instanceof Error ? error.message : String(error),
       stage,
     }))
     const stageStatus = {
       parse_request: 520,
       build_prompt: 524,
-      provider_request: 521,
-      parse_provider_response: 522,
+      gemini_request: 521,
+      parse_gemini_response: 522,
       normalize_recommendation: 523,
     }[stage] ?? 500
     return jsonResponse({
       error: 'Unable to generate recommendation',
-      detail: error instanceof Error ? error.message : String(error),
-      stage,
+      correlationId,
     }, stageStatus)
   }
 })
 
-async function generateOpenRouterJson(apiKey: string, input: string) {
-  const response = await requestOpenRouter(apiKey, input, recommendationModel)
-  if (!response.ok) throw new Error('AI provider request failed')
-  return parseJsonResponse(extractOpenRouterText(await response.json()))
+async function generateGeminiJson(apiKey: string, input: string) {
+  const { response } = await requestGemini(apiKey, [{ text: input }], true)
+  if (!response.ok) throw new Error('Gemini request failed')
+  return parseJsonResponse(extractGeminiText(await response.json()))
 }
 
 async function transcribeAudio(apiKey: string, payload: any) {
@@ -106,44 +110,37 @@ async function transcribeAudio(apiKey: string, payload: any) {
     throw new Error('Invalid or oversized audio recording')
   }
 
-  const response = await requestOpenRouter(apiKey, [
-    { type: 'text', text: 'Transcribe this athlete voice note faithfully. Return only the spoken words, with no commentary.' },
-    { type: 'input_audio', input_audio: { data: audioBase64, format: getAudioFormat(mimeType) } },
-  ], transcriptionModel, false)
+  const { response } = await requestGemini(apiKey, [
+    { text: 'Transcribe this athlete voice note faithfully. Return only the spoken words, with no commentary.' },
+    { inline_data: { data: audioBase64, mime_type: mimeType } },
+  ], false)
   if (!response.ok) throw new Error('Audio transcription failed')
-  return extractOpenRouterText(await response.json()).trim()
+  return extractGeminiText(await response.json()).trim()
 }
 
-async function requestOpenRouter(apiKey: string, content: string | any[], model: string, jsonOutput = true) {
-  return fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://mr-devlinder.github.io/Athlete-Reload/',
-      'X-OpenRouter-Title': 'Athlete Reload',
-    },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content }],
-      model,
-      provider: { zdr: true },
-      ...(jsonOutput ? { response_format: { type: 'json_object' } } : {}),
-    }),
-  })
+async function requestGemini(apiKey: string, parts: any[], jsonOutput: boolean) {
+  let response: Response | null = null
+  for (const model of recommendationModels) {
+    response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts }],
+        ...(jsonOutput ? { generationConfig: { responseMimeType: 'application/json' } } : {}),
+      }),
+    })
+    if (response.ok || ![429, 503].includes(response.status)) return { response, model }
+  }
+  return { response: response!, model: recommendationModels[recommendationModels.length - 1] }
 }
 
-function extractOpenRouterText(data: any) {
-  const content = data?.choices?.[0]?.message?.content
-  if (typeof content === 'string' && content.trim()) return content
-  throw new Error('AI provider response did not include text output')
-}
-
-function getAudioFormat(mimeType: string) {
-  if (mimeType.includes('wav')) return 'wav'
-  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'mp4'
-  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3'
-  if (mimeType.includes('ogg')) return 'ogg'
-  return 'webm'
+function extractGeminiText(data: any) {
+  const text = data?.candidates?.[0]?.content?.parts
+    ?.map((part: any) => part?.text ?? '')
+    .join('')
+    .trim()
+  if (text) return text
+  throw new Error('Gemini response did not include text output')
 }
 
 async function consumeRateLimit(request: Request) {
@@ -305,7 +302,8 @@ JSON shape:
   "preparation": array of 3 to 5 ordered warm-up or preparation instructions,
   "during": array of 3 to 5 instructions for the event's drills, reps, pace, contact, or intensity,
   "recovery": array of 2 to 4 specific after-event actions,
-  "reportSections": array in this order: main-concerns only when a meaningful issue changes preparation, event-demand, personalized-warm-up, fuel-hydration, pain-guidance only with current pain, motivational-quote. Each item is {"id":"exact-id","title":"display title","summary":"specific 1-2 sentence interpretation","items":["0-4 non-duplicated actionable details"]}. Event demand must follow the actual selected activity rather than the athlete's primary sport. Fuel-hydration must use event timing and logged intake; when intake is unlogged, give a normal proportional baseline without claiming a deficit. Motivational quote must be short, original, and matched to the readiness outlook.
+  "contextFactors": array of 2-8 short labels naming only the supplied factors that materially shaped this plan,
+  "reportSections": array in this order: readiness-status, warm-up-focus, hydration-target, fueling-target, during-event-fueling only when relevant, performance-focus, pain-guidance only with current pain, fatigue-load only when relevant, environment-guidance only with reliable environment data, event-preparation, pre-event-timeline. Each item is {"id":"exact-id","title":"display title","summary":"specific 1-2 sentence interpretation","items":["0-4 non-duplicated actionable details"]}. Use athleteContext.targets as authoritative ranges; never invent or alter numeric targets. The timeline uses only relevant steps labeled 2-3 hours before, 30-60 minutes before, warm-up, or during event. Recommendations must change materially with sport, position, event type, duration, intensity, current symptoms, environment, and turnaround.
   "reasons": array of 1 to 5 concrete reasons,
   "breakdown": array of score factors like [{"label":"Sleep","value":-8}]
 }
@@ -340,14 +338,13 @@ Return ONLY valid JSON with this exact shape:
   "during": ["1 to 2 actions for the next two hours"],
   "recovery": ["3 to 5 ordered actions for tonight"],
   "reportSections": [
-    {"id":"event-summary","title":"Event Summary","summary":"one sentence including actual duration, intensity, participation, completion and meaningful plan difference","items":[]},
-    {"id":"planned-vs-actual","title":"Planned vs. Actual","summary":"one sentence comparison","items":[]},
-    {"id":"workload-summary","title":"Workload Summary","summary":"plain-language meaning of minutes multiplied by effort","items":[]},
-    {"id":"body-response","title":"Body Response","summary":"expected versus unusual response; omit only when no response data exists","items":[]},
-    {"id":"session-quality","title":"Performance or Session Quality","summary":"neutral interpretation, never judgment","items":[]},
-    {"id":"recovery-demand","title":"Recovery Demand","summary":"how much recovery is likely needed and why","items":[]},
-    {"id":"immediate-priorities","title":"Immediate Priorities","summary":"short lead-in","items":["2-4 highest value actions"]},
-    {"id":"next-event-impact","title":"Next Event Impact","summary":"include only when a future event is supplied; do not automatically recommend skipping","items":[]}
+    {"id":"session-summary","title":"Session Summary","summary":"actual duration, effort, participation and expected-versus-actual comparison","items":[]},
+    {"id":"recovery-status","title":"Recovery Status","summary":"Normal recovery, Higher recovery need, or Take extra care, followed by the main reason","items":[]},
+    {"id":"hydration-recovery","title":"Hydration","summary":"use athleteContext.targets.recovery.rehydrationMl exactly when present; otherwise give a baseline without false precision","items":[]},
+    {"id":"nutrition-recovery","title":"Nutrition","summary":"use athleteContext.targets.recovery carbohydrate/protein ranges exactly and choose snack or meal","items":[]},
+    {"id":"cooldown","title":"Cooldown","summary":"short event-specific movement only when participation occurred","items":[]},
+    {"id":"new-pain-soreness","title":"New Pain or Soreness","summary":"only current checkout symptoms and immediate action","items":[]},
+    {"id":"next-few-hours","title":"Next Few Hours","summary":"short lead-in","items":["exactly 2-3 highest-value actions"]}
   ],
   "nextEventWarning": "short warning or empty string",
   "reasons": ["1 to 5 reasons tied to the checkout"],
@@ -369,7 +366,7 @@ This is not medical advice or clearance. Direct the athlete to a parent, coach, 
 ${readinessCalibrationGuidance}
 Keep the visible recommendation concise: one short sentence per summary and no more than three non-repeated items per section.
 
-Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, breakdown, and reportSections. reportSections may use only main-concerns when meaningful, event-demand, personalized-warm-up, fuel-hydration, pain-guidance only when current pain was explicitly reported, and motivational-quote. Omit any section that cannot be supported by the athlete's words and supplied event context.
+Return ONLY valid JSON in the same recommendation shape used by the app, including action, label, summary, score, tone, preparation, during, recovery, reasons, avoid, focus, reassess, intensity, nextEventWarning, breakdown, contextFactors, and reportSections. reportSections may use only readiness-status, warm-up-focus, hydration-target, fueling-target, during-event-fueling when relevant, performance-focus, pain-guidance only when current pain was explicitly reported, fatigue-load, environment-guidance only with supplied data, event-preparation, and pre-event-timeline. Omit any section that cannot be supported by the athlete's words and supplied event context.
 
 Quick check-in text:
 ${String(payload?.quickTranscript ?? '').trim()}
@@ -380,6 +377,7 @@ ${String(payload?.quickTranscript ?? '').trim()}
 function formatPostCheckoutData(payload: any) {
   return [
     ['athleteProfile', payload?.athleteProfile],
+    ['athleteContext', payload?.athleteContext],
     ['checkout', payload?.checkout],
     ['completedEvent', payload?.completedEvent],
     ['dailyWellness', payload?.dailyWellness],
@@ -430,7 +428,7 @@ Important behavior:
 - Use recentPainReports by latest body area state. A zero-severity follow-up means that area is no longer currently painful, though previous history can still justify sensible monitoring.
 - Use actual minutes, session difficulty, participation, session content, surface, sport, position, current soreness, pain before versus after, new symptoms, changed movement, and the next event's timing together.
 - Generate 2-4 ranked Recovery Priorities inside reportSections. Each must be specific to the selected plan, current context, and recovery window.
-- Use dailyWellness, nutritionContext, selected goals, and dietary preferences to make food and hydration steps practical. Use what is already logged that day; do not prescribe exact medical nutrition quantities or claim a meal repairs an injury.
+- Use dailyWellness, nutritionContext, selected goals, and dietary preferences to make food and hydration steps practical. Numeric ranges may come only from athleteContext.targets and must be repeated without modification; never invent quantities or claim a meal repairs an injury.
 - Use nutritionContext mealBreakdown only when hasFoodLogs is true, and use hydrationMl only when hasHydrationLogs is true. When either category is unlogged, omit it as an assessment factor and provide only neutral baseline guidance if relevant; never describe missing logs as zero intake or a deficit.
 - Include normal recovery habits such as fluids, a normal meal or snack, sleep, a cooldown, and comfortable mobility when appropriate. Do not prescribe exact medical or nutrition quantities.
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
@@ -469,7 +467,8 @@ JSON shape:
   "tone": "ready" | "caution" | "warning" | "danger",
   "summary": "one short sentence",
   "action": "one short paragraph describing the priority tonight",
-  "reportSections": [{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on current nutrition and this session","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"practical guidance without claiming exact fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]}],
+  "contextFactors": ["2-8 supplied factors that materially shaped this plan"],
+  "reportSections": [{"id":"recovery-status","title":"Recovery Status","summary":"estimated demand and primary drivers","items":[]},{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"active-recovery-rest","title":"Active Recovery or Rest","summary":"which is more useful now and why","items":[]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on supplied targets and logs","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"use supplied target ranges without claiming measured fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]},{"id":"recovery-timeline","title":"Recovery Timeline","summary":"remainder of today through the next relevant checkpoint","items":[]},{"id":"next-event-impact","title":"Tomorrow or Next Event","summary":"include only when future schedule is supplied","items":[]}],
   "planType": "${planType}",
   "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","durationSeconds":30,"setup":"exact starting body position and equipment placement","movement":"step-by-step movement direction plus what must remain still","completionCue":"how to know one repetition or hold is complete","sideCue":"how and when to switch sides, or state that both sides move together","why":"short reason this movement fits the selected routine type and athlete context","feel":"specific muscle or area that should work or stretch","avoid":"specific form faults and symptoms that mean stop"}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
@@ -541,6 +540,10 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
         : 'danger')
 
   return {
+    schemaVersion: 2,
+    contextFactors: stringArray(value.contextFactors).slice(0, 8),
+    contextSnapshot: payload?.athleteContext ?? {},
+    targets: payload?.athleteContext?.targets ?? {},
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
     planType: stringOrFallback(value?.planType, String(payload?.planType ?? 'last-checkout')),
     action,
@@ -610,10 +613,10 @@ function normalizeReportSections(value: unknown, payload: any) {
   const usedContent = new Set<string>()
   const suppliedSectionIds = new Set(value.map((section: any) => String(section?.id ?? '').toLowerCase()))
   const allowedIds = new Set(payload?.requestType === 'post_checkout'
-    ? ['event-summary', 'planned-vs-actual', 'workload-summary', 'body-response', 'session-quality', 'recovery-demand', 'immediate-priorities', 'next-event-impact']
+    ? ['session-summary', 'recovery-status', 'hydration-recovery', 'nutrition-recovery', 'cooldown', 'new-pain-soreness', 'next-few-hours']
     : payload?.requestType === 'recovery_plan'
-      ? ['recovery-priorities', 'nutrition-guidance', 'hydration-guidance', 'sleep-rest-guidance', 'pain-guidance']
-      : ['main-concerns', 'event-demand', 'personalized-warm-up', 'fuel-hydration', 'pain-guidance', 'motivational-quote'])
+      ? ['recovery-status', 'recovery-priorities', 'active-recovery-rest', 'nutrition-guidance', 'hydration-guidance', 'sleep-rest-guidance', 'pain-guidance', 'recovery-timeline', 'next-event-impact']
+      : ['readiness-status', 'warm-up-focus', 'hydration-target', 'fueling-target', 'during-event-fueling', 'performance-focus', 'pain-guidance', 'fatigue-load', 'environment-guidance', 'event-preparation', 'pre-event-timeline'])
   const uniqueText = (text: unknown) => {
     const value = String(text ?? '').trim()
     const key = value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -645,8 +648,8 @@ function normalizeReportSections(value: unknown, payload: any) {
       title: getReportSectionTitle(id, payload?.requestType),
       summary,
       items,
-      action: id === 'personalized-warm-up' ? 'warmup' : undefined,
-      actionLabel: id === 'personalized-warm-up' ? stringOrFallback(section?.actionLabel, 'Open full warm-up') : undefined,
+      action: id === 'warm-up-focus' ? 'warmup' : undefined,
+      actionLabel: id === 'warm-up-focus' ? stringOrFallback(section?.actionLabel, 'Open warm-up focus') : undefined,
     }]
   }).slice(0, 8)
 }
@@ -654,11 +657,13 @@ function normalizeReportSections(value: unknown, payload: any) {
 function getReportSectionTitle(id: string, requestType?: string) {
   if (id === 'pain-guidance') return requestType === 'recovery_plan' ? 'Pain Specific Guidance' : 'Pain and Soreness Guidance'
   const titles: Record<string, string> = {
-    'main-concerns': 'Main Concerns', 'event-demand': 'Event Demand', 'personalized-warm-up': 'Personalized Warm Up',
-    'fuel-hydration': 'Fuel and Hydration', 'motivational-quote': 'Motivation',
-    'event-summary': 'Event Summary', 'planned-vs-actual': 'Planned vs. Actual Comparison', 'workload-summary': 'Workload Summary',
-    'body-response': 'Body Response', 'session-quality': 'Performance or Session Quality', 'recovery-demand': 'Recovery Demand',
-    'immediate-priorities': 'Immediate Priorities', 'next-event-impact': 'Next Event Impact', 'recovery-priorities': 'Recovery Priorities',
+    'readiness-status': 'Readiness', 'warm-up-focus': 'Warm-up Focus', 'hydration-target': 'Hydration Target',
+    'fueling-target': 'Fueling Target', 'during-event-fueling': 'During-event Fueling', 'performance-focus': 'Performance Focus',
+    'fatigue-load': 'Fatigue and Load', 'environment-guidance': 'Environment Guidance', 'event-preparation': 'Event-specific Preparation',
+    'pre-event-timeline': 'Quick Timeline', 'session-summary': 'Session Summary', 'recovery-status': 'Recovery Status',
+    'hydration-recovery': 'Hydration', 'nutrition-recovery': 'Nutrition', 'cooldown': 'Cooldown',
+    'new-pain-soreness': 'New Pain or Soreness', 'next-few-hours': 'Next Few Hours', 'next-event-impact': 'Next Event Impact',
+    'recovery-priorities': 'Recovery Priorities', 'active-recovery-rest': 'Active Recovery or Rest', 'recovery-timeline': 'Recovery Timeline',
     'nutrition-guidance': 'Nutrition Guidance', 'hydration-guidance': 'Hydration Guidance', 'sleep-rest-guidance': 'Sleep and Rest Guidance',
   }
   return titles[id] ?? id.replace(/-/g, ' ')
@@ -684,7 +689,7 @@ function normalizeRecoverySteps(value: any, fallback: string[]) {
       .filter((step) => step && typeof step === 'object')
       .slice(0, 6)
       .map((step, index) => ({
-        id: `recovery-step-${index}`,
+        id: 'recovery-step-' + index,
         title: stringOrFallback(step.title, 'Recovery action'),
         why: stringOrFallback(step.why, 'This supports recovery after the completed session.'),
         when: stringOrFallback(step.when, index === 0 ? 'Right now' : 'Tonight'),
@@ -694,7 +699,7 @@ function normalizeRecoverySteps(value: any, fallback: string[]) {
   if (steps.length > 0) return steps
 
   return fallback.slice(0, 6).map((title, index) => ({
-    id: `recovery-step-${index}`,
+    id: 'recovery-step-' + index,
     title,
     why: 'This supports recovery after the completed session.',
     when: index === 0 ? 'Right now' : 'Tonight',

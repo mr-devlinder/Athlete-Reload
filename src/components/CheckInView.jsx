@@ -87,6 +87,7 @@ export function CheckInView({
       <div className="form-panel">
         <div className="checkin-tour-intro" data-tour="check-in-intro">
           <SectionHeading eyebrow={todayLabel} title="Check-in." />
+          <p className="page-header-description">Capture how ready your body feels before the selected event.</p>
 
           {eventOptions.length > 0 && (
             <EventPicker

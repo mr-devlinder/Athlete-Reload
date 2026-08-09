@@ -72,7 +72,7 @@ export function HomeView({
           eyebrow="Athlete Reload"
           title="Training dashboard."
         />
-        <p>
+        <p className="page-header-description">
           A live view of readiness, workload, pain patterns, and today&apos;s
           event flow from your saved check-ins and checkouts.
         </p>

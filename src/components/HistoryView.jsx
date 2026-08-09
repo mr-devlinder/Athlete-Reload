@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { format, parseISO, startOfWeek, startOfYear } from 'date-fns'
+import { format, parseISO, startOfYear } from 'date-fns'
+import { localDateKey, mondayWeekStart, parseLocalCalendarDate } from '../utils/calendarDate'
 import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
@@ -82,7 +83,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   return (
     <div className="history-view" data-tour="history-page">
       <div className="schedule-header">
-        <SectionHeading eyebrow="History" title="Patterns are the product." />
+        <div className="page-header-copy"><SectionHeading eyebrow="History" title="Patterns are the product." /><p className="page-header-description">Review readiness, workload, pain, and recovery over time.</p></div>
         <div className="history-actions">
           <button
             className="remove-button compact-action"
@@ -890,13 +891,14 @@ function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
   const items = [
     ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
     ...checkouts.map((entry) => ({ date: entry.date, entry, kind: 'checkout' })),
-    ...recoveryCompletions.map((entry) => ({ date: entry.completedAt?.slice(0, 10), entry, kind: 'recovery-completion' })),
+    ...recoveryCompletions.map((entry) => ({ date: localDateKey(entry.completedAt), entry, kind: 'recovery-completion' })),
   ].filter((item) => item.date)
 
   items.forEach((item) => {
-    const itemDate = parseISO(item.date)
+    const itemDate = parseLocalCalendarDate(item.date)
+    if (!itemDate) return
     const yearStart = startOfYear(itemDate)
-    const weekStart = startOfWeek(itemDate)
+    const weekStart = mondayWeekStart(itemDate)
     const yearKey = format(yearStart, 'yyyy')
     const weekKey = format(weekStart, 'yyyy-MM-dd')
     const year = years.get(yearKey) ?? {
@@ -931,15 +933,14 @@ function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
 }
 
 function getHistoryItemSortValue(item) {
-  const exactTime = item.entry.completedAt ?? item.entry.createdAt
-  if (exactTime) return new Date(exactTime).getTime()
-
   const time = item.entry.eventTime ?? item.entry.time ?? '12:00'
-  return new Date(`${item.date}T${time}`).getTime()
+  const calendarTime = new Date(`${item.date}T${time}`).getTime()
+  const exactTime = new Date(item.entry.completedAt ?? item.entry.createdAt ?? '').getTime()
+  return calendarTime + (Number.isFinite(exactTime) ? exactTime % 86_400_000 : 0)
 }
 
 function getCurrentWeekKey() {
-  return format(startOfWeek(new Date()), 'yyyy-MM-dd')
+  return format(mondayWeekStart(new Date()), 'yyyy-MM-dd')
 }
 
 function getCurrentYearKey() {

@@ -275,7 +275,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
         <div>
           <p className="eyebrow">Recovery</p>
           <h1>Give your body a chance to reload.</h1>
-          <p>Turn the latest checkout into a practical recovery plan that fits the session you actually completed.</p>
+          <p className="page-header-description">Turn the latest checkout into a practical recovery plan that fits the session you actually completed.</p>
         </div>
       </section>
 

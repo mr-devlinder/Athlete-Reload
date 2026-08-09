@@ -29,6 +29,7 @@ export function AccountPrivacyView({
   tournaments = [],
 }) {
   const [message, setMessage] = useState('')
+  const [openConnectionAction, setOpenConnectionAction] = useState(null)
   const [openShareAuditAction, setOpenShareAuditAction] = useState(null)
   const [activeSection, setActiveSection] = useState('account')
   const [identities, setIdentities] = useState([])
@@ -123,6 +124,25 @@ export function AccountPrivacyView({
     if (error) {
       setMessage('Unable to start account connection. Check that this provider and manual linking are enabled in Supabase.')
     }
+  }
+
+  async function disconnectProvider(identity) {
+    setMessage('')
+    setOpenConnectionAction(null)
+
+    if (!identity?.raw || identities.length < 2) {
+      setMessage('Connect another sign-in method before removing this one.')
+      return
+    }
+
+    const { error } = await supabase.auth.unlinkIdentity(identity.raw)
+    if (error) {
+      setMessage('Unable to remove that connected account. Make sure another sign-in method is available.')
+      return
+    }
+
+    setIdentities((current) => current.filter((item) => item.id !== identity.raw.id && item.identity_id !== identity.raw.identity_id))
+    setMessage(`${providerOptions.find((provider) => provider.id === identity.provider)?.label ?? 'Account'} connection removed.`)
   }
 
   async function loadMfaFactors() {
@@ -495,15 +515,15 @@ export function AccountPrivacyView({
 
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="Settings sections">
-          {[['account', 'Account'], ['security', 'Security'], ['data', 'Data']].map(([key, label]) => (
+          {[['account', 'Account'], ['preferences', 'Preferences'], ['security', 'Security'], ['data', 'Data']].map(([key, label]) => (
             <button className={activeSection === key ? 'active' : ''} key={key} onClick={() => setActiveSection(key)} type="button">
               {label}
             </button>
           ))}
         </aside>
         <div className="settings-grid">
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
-          <h2>Login Security</h2>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'account'}>
+          <div className="settings-panel-heading"><div><span>Sign-in details</span><h2>Your account</h2></div><p>The email address and verification state used to protect this account.</p></div>
           <div className="account-status">
             <span>Email</span>
             <strong>{session?.user?.email}</strong>
@@ -519,7 +539,7 @@ export function AccountPrivacyView({
           )}
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
+        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
           <h2>Event reminders</h2>
           <p className="settings-copy">When Athlete Reload is open, you can receive browser reminders to check in before an event and complete checkout after it starts. Your browser may still need its own notification permission.</p>
           <label className="settings-toggle">
@@ -528,7 +548,7 @@ export function AccountPrivacyView({
           </label>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
+        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
           <h2>AI personalization</h2>
           <p className="settings-copy">When enabled, recommendations may use your profile, prior training, pain, recovery, and nutrition context. When disabled, AI receives only the current request and event details needed to generate the feature you asked for.</p>
           <label className="settings-toggle">
@@ -537,26 +557,39 @@ export function AccountPrivacyView({
           </label>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
+        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
           <h2>Device permissions</h2>
           <p className="settings-copy">Camera access is requested only when you start barcode scanning. Microphone access is requested only when you start voice entry or voice search, and the resulting transcript can be reviewed before use. Notification access is requested only when you enable event reminders. Athlete Reload does not request photo-library, precise device-location, or health-platform permissions.</p>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'account'}>
           <h2>Connected accounts</h2>
-          <p className="settings-copy">These are the sign-in providers already connected to this account.</p>
+          <p className="settings-copy">Use any connected identity to sign in to the same Athlete Reload account.</p>
           <div className="connection-list">
             {providerOptions.map((provider) => {
-              const connected = getConnectedProviders(identities).some((identity) => identity.provider === provider.id)
+              const identity = getConnectedProviders(identities, session?.user).find((item) => item.provider === provider.id)
+              const connected = Boolean(identity)
 
               return (
                 <div className="connection-row" key={provider.id}>
-                  <span className="connection-provider">
-                    <img src={`${brandIconBase}${provider.id}.svg`} alt="" aria-hidden="true" />
-                    {provider.label}
-                  </span>
+                  <div className="connection-provider">
+                    {provider.icon ? <img src={`${brandIconBase}${provider.icon}.svg`} alt="" aria-hidden="true" /> : <span className="connection-email-icon" aria-hidden="true">@</span>}
+                    <span><strong>{provider.label}</strong>{identity?.display && <small>{identity.display}</small>}</span>
+                  </div>
                   {connected ? (
-                    <strong>Connected</strong>
+                    <div className="connection-actions">
+                      <span className="connection-status"><i aria-hidden="true" />Connected</span>
+                      {identity.raw && provider.id !== 'email' && (
+                        <div className="connection-menu-wrap">
+                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button">•••</button>
+                          {openConnectionAction === identity.id && (
+                            <div className="connection-menu" role="menu">
+                              <button onClick={() => disconnectProvider(identity)} role="menuitem" type="button">Remove connection</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <button className="secondary-button compact-action" onClick={() => connectProvider(provider.id)} type="button">Connect</button>
                   )}
@@ -566,8 +599,8 @@ export function AccountPrivacyView({
           </div>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'account'}>
-          <h2>Change Email</h2>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'account'}>
+          <div className="settings-panel-heading"><div><span>Account access</span><h2>Change email</h2></div><p>We will send confirmation links before the new address becomes active.</p></div>
           <form className="settings-form" onSubmit={updateEmail}>
             <label className="select-field">
               New email
@@ -853,16 +886,41 @@ function ShareAuditRow({ entry, onDelete, onToggle, openId }) {
   )
 }
 
-function getConnectedProviders(identities) {
-  return identities
+function getConnectedProviders(identities, user) {
+  const connected = identities
     .filter((identity) => providerOptions.some((provider) => provider.id === identity.provider))
-    .map((identity) => ({ id: identity.identity_id ?? identity.id ?? identity.provider, provider: identity.provider }))
+    .map((identity) => ({
+      display: getIdentityDisplay(identity, user),
+      id: identity.identity_id ?? identity.id ?? identity.provider,
+      provider: identity.provider,
+      raw: identity,
+    }))
+
+  if (user?.email && !connected.some((identity) => identity.provider === 'email')) {
+    connected.unshift({ display: user.email, id: 'email', provider: 'email' })
+  }
+
+  return connected
+}
+
+function getIdentityDisplay(identity, user) {
+  const data = identity.identity_data ?? {}
+  if (identity.provider === 'email') return data.email ?? user?.email ?? ''
+  if (identity.provider === 'github') return formatUsername(data.user_name ?? data.preferred_username ?? data.login ?? data.name)
+  if (identity.provider === 'discord') return formatUsername(data.full_name ?? data.user_name ?? data.preferred_username ?? data.name)
+  return data.email ?? data.full_name ?? data.name ?? ''
+}
+
+function formatUsername(value) {
+  const username = String(value ?? '').trim()
+  return username && !username.includes('@') ? `@${username.replace(/^@/, '')}` : username
 }
 
 const providerOptions = [
-  { id: 'google', label: 'Google' },
-  { id: 'github', label: 'GitHub' },
-  { id: 'discord', label: 'Discord' },
+  { id: 'email', label: 'Email' },
+  { icon: 'google', id: 'google', label: 'Google' },
+  { icon: 'github', id: 'github', label: 'GitHub' },
+  { icon: 'discord', id: 'discord', label: 'Discord' },
 ]
 
 function getQrSource(qrCode) {

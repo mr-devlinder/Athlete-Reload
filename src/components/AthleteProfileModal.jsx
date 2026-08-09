@@ -4,12 +4,14 @@ import { SectionHeading } from './SectionHeading'
 import { getPositionOptions, isDominantSideRelevant, sportOptions } from '../data/sportProfiles'
 import { dietaryOptions, goalOptions } from '../data/profileOptions'
 import { ProfileMeasurements } from './ProfileMeasurements'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 export function AthleteProfileModal({ profile, onClose, onSave }) {
   const [draft, setDraft] = useState(profile ?? {})
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState('')
   const positionOptions = getPositionOptions(draft.sport)
+  const dialogRef = useModalAccessibility(true, onClose)
 
   function toggleListValue(field, value) {
     setDraft((current) => {
@@ -108,9 +110,9 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
 
   return createPortal(
     <div className="modal-backdrop athlete-profile-backdrop" onClick={onClose}>
-      <section className="event-modal athlete-profile-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+      <section aria-labelledby="athlete-profile-title" className="event-modal athlete-profile-modal glass-panel" onClick={(event) => event.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
         <div className="schedule-header">
-          <SectionHeading eyebrow="Athlete profile" title="Your training context." />
+          <div id="athlete-profile-title"><SectionHeading eyebrow="Athlete profile" title="Your training context." /></div>
           <button className="ghost-close" onClick={onClose} type="button">Close</button>
         </div>
 

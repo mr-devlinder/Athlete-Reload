@@ -8,6 +8,7 @@ import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
 import { getSportWorkloadFields } from '../data/sportProfiles'
 import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 const painChanges = ['Improved', 'Unchanged', 'Slightly worse', 'Much worse']
 const participationLevels = ['Full', 'Modified', 'Partial', 'Did not participate']
@@ -26,6 +27,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
     eventType: event.type,
   })
   const relevantSessionContentOptions = getSessionContentOptions(event)
+  const dialogRef = useModalAccessibility(true, onClose)
 
   useEffect(() => {
     document.body.classList.add('modal-open')
@@ -69,13 +71,13 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
 
   return createPortal(
     <div className="modal-backdrop">
-      <section className="event-modal checkout-modal glass-panel" role="dialog" aria-modal="true">
+      <section aria-labelledby="checkout-dialog-title" className="event-modal checkout-modal glass-panel" ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
         <div className="checkout-modal-surface">
           <div className="schedule-header">
-            <SectionHeading
+            <div id="checkout-dialog-title"><SectionHeading
               eyebrow={checkout && !isEditing ? 'Planned vs actual' : 'Checkout'}
               title={event.title || event.type}
-            />
+            /></div>
             <button className="ghost-close" onClick={onClose} type="button">
               Close
             </button>
@@ -109,6 +111,28 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
                 onChange={(changeEvent) => updateDraft('actualMinutes', changeEvent.target.value)}
               />
             </label>
+            {draft.participation !== 'Did not participate' && (
+              <label className="compact-field">
+                Fluids during the event
+                <select value={draft.hydrationDuring} onChange={(changeEvent) => updateDraft('hydrationDuring', changeEvent.target.value)}>
+                  <option value="Not tracked">Not tracked</option>
+                  <option value="None">None</option>
+                  <option value="Some">Some</option>
+                  <option value="Regular access">Regular access</option>
+                </select>
+              </label>
+            )}
+            {draft.participation !== 'Did not participate' && Number(draft.actualMinutes) >= 60 && (
+              <label className="compact-field">
+                Fuel during the event
+                <select value={draft.fuelDuring} onChange={(changeEvent) => updateDraft('fuelDuring', changeEvent.target.value)}>
+                  <option value="Not tracked">Not tracked</option>
+                  <option value="None">None</option>
+                  <option value="Snack or gel">Snack, gel, or chews</option>
+                  <option value="Meal between efforts">Meal between efforts</option>
+                </select>
+              </label>
+            )}
             {workloadFields.map((field) => (
               <SportWorkloadField
                 field={field}
@@ -213,7 +237,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
 function CheckoutComparison({ checkout, onEdit }) {
   return (
     <div className="checkout-comparison">
-      {checkout.recommendation?._source === 'openrouter' && (
+      {checkout.recommendation?._source === 'gemini' && (
         <RecoveryPlanCard
           recommendation={checkout.recommendation}
           recommendationStatus="ai"
@@ -234,7 +258,9 @@ function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
     completionLevel: checkout?.completionLevel ?? 'Full',
     difficulty: checkout?.difficulty ?? loadToDifficulty(event.load),
     fatigueAffectedTechnique: checkout?.fatigueAffectedTechnique ?? false,
+    fuelDuring: checkout?.fuelDuring ?? 'Not tracked',
     heatSymptoms: checkout?.heatSymptoms ?? [],
+    hydrationDuring: checkout?.hydrationDuring ?? 'Not tracked',
     mentalFocus: checkout?.mentalFocus ?? 3,
     motivation: checkout?.motivation ?? 3,
     movementChanged: checkout?.movementChanged ?? false,

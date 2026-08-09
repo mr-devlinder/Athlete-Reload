@@ -267,10 +267,10 @@ export function ScheduleView({
   return (
     <div className="schedule-view">
       <div className="schedule-header">
-        <SectionHeading
-          eyebrow="Team training mode"
-          title="Training calendar."
-        />
+        <div className="page-header-copy">
+          <SectionHeading eyebrow="Schedule" title="Training calendar." />
+          <p className="page-header-description">Plan practices, events, rest days, and competition weekends.</p>
+        </div>
         <div className="schedule-actions">
           <button
             aria-expanded={isActionsMenuOpen}

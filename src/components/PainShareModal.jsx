@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
 export function PainShareModal({ issue, summary, onClose, onConfirm }) {
   const [recipient, setRecipient] = useState('')
   const [confirmed, setConfirmed] = useState(false)
   const [error, setError] = useState('')
   const [isCreating, setIsCreating] = useState(false)
+  const dialogRef = useModalAccessibility(true, onClose)
 
   async function createReport() {
     if (!confirmed || isCreating) return
@@ -37,9 +39,9 @@ export function PainShareModal({ issue, summary, onClose, onConfirm }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <section className="event-modal pain-share-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
+      <section aria-labelledby="pain-share-title" className="event-modal pain-share-modal glass-panel" onClick={(event) => event.stopPropagation()} ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
         <p className="eyebrow">Sensitive health information</p>
-        <h2>Create a pain summary.</h2>
+        <h2 id="pain-share-title">Create a pain summary.</h2>
         <p>This creates a printable summary for a trainer, parent, coach, or healthcare professional. Athlete Reload does not make a diagnosis or replace an evaluation.</p>
         <label className="compact-field">Sharing with<input value={recipient} onChange={(event) => setRecipient(event.target.value)} placeholder="Example: Athletic trainer" /></label>
         <label className="share-confirmation"><input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />I understand this report may contain personal health information and want to continue.</label>

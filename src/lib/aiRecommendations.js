@@ -1,4 +1,5 @@
 import { supabase, supabasePublishableKey, supabaseUrl } from './supabaseClient'
+import { friendlyFeatureError, recordOperationalEvent } from './operationalEvents'
 
 async function callRecommendationFunction(payload, { signal } = {}) {
   if (!supabase) {
@@ -8,7 +9,7 @@ async function callRecommendationFunction(payload, { signal } = {}) {
   const { data: { session } } = await supabase.auth.getSession()
 
   if (!session?.access_token) {
-    throw new Error('Your session has expired. Please sign in again before generating a recommendation.')
+    throw new Error('Please sign in again before generating your guidance.')
   }
 
   const requestBody = payload
@@ -28,7 +29,8 @@ async function callRecommendationFunction(payload, { signal } = {}) {
   const data = await response.json().catch(() => ({}))
 
   if (!response.ok) {
-    throw new Error(data?.detail || data?.error || `Edge Function request failed (${response.status})`)
+    await recordOperationalEvent('ai', `RECOMMENDATION_${response.status}`)
+    throw new Error(friendlyFeatureError('ai'))
   }
 
   return data
@@ -50,7 +52,15 @@ const personalizationFields = [
 ]
 
 function withoutPersonalization(payload) {
-  return Object.fromEntries(Object.entries(payload).filter(([key]) => !personalizationFields.includes(key)))
+  const currentRequest = Object.fromEntries(Object.entries(payload).filter(([key]) => !personalizationFields.includes(key)))
+  if (payload.athleteContext) {
+    currentRequest.athleteContext = {
+      ...payload.athleteContext,
+      athlete: {},
+      recent: {},
+    }
+  }
+  return currentRequest
 }
 
 export async function generateAiRecommendation(payload, { personalize = true } = {}) {
@@ -63,11 +73,12 @@ export async function generateAiRecommendation(payload, { personalize = true } =
       { signal: controller.signal },
     )
 
-    if (!data?.recommendation || data?.source !== 'openrouter') {
-      throw new Error('AI recommendation response was not confirmed')
+    if (!data?.recommendation || !['gemini', 'openrouter'].includes(data?.source)) {
+      await recordOperationalEvent('ai', 'INVALID_RECOMMENDATION_RESPONSE')
+      throw new Error(friendlyFeatureError('ai'))
     }
 
-    return { ...data.recommendation, _source: 'openrouter' }
+    return { ...data.recommendation, _source: data.provider === 'gemini' ? 'gemini' : data.source }
   } finally {
     clearTimeout(timeoutId)
   }

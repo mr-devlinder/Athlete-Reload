@@ -10,6 +10,7 @@ import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
+import { DialogShell } from './components/DialogShell'
 import {
   checkInDefaults,
   associations as initialAssociations,
@@ -17,13 +18,25 @@ import {
   todayLabel,
 } from './data/appData'
 import appLogo from './assets/athlete-reload-logo-transparent.png'
-import trainingHero from './assets/training-hero.png'
 
-const HomeView = lazy(() => import('./components/HomeView').then((module) => ({ default: module.HomeView })))
-const HistoryView = lazy(() => import('./components/HistoryView').then((module) => ({ default: module.HistoryView })))
-const NutritionView = lazy(() => import('./components/NutritionView').then((module) => ({ default: module.NutritionView })))
-const RecoveryView = lazy(() => import('./components/RecoveryView').then((module) => ({ default: module.RecoveryView })))
-const ScheduleView = lazy(() => import('./components/ScheduleView').then((module) => ({ default: module.ScheduleView })))
+const viewLoaders = {
+  Home: () => import('./components/HomeView'),
+  History: () => import('./components/HistoryView'),
+  Nutrition: () => import('./components/NutritionView'),
+  Recovery: () => import('./components/RecoveryView'),
+  Schedule: () => import('./components/ScheduleView'),
+}
+const viewModules = Object.fromEntries(Object.entries(viewLoaders).map(([key, load]) => [key, { load, promise: null }]))
+function loadView(name) {
+  const entry = viewModules[name]
+  entry.promise ??= entry.load()
+  return entry.promise
+}
+const HomeView = lazy(() => loadView('Home').then((module) => ({ default: module.HomeView })))
+const HistoryView = lazy(() => loadView('History').then((module) => ({ default: module.HistoryView })))
+const NutritionView = lazy(() => loadView('Nutrition').then((module) => ({ default: module.NutritionView })))
+const RecoveryView = lazy(() => loadView('Recovery').then((module) => ({ default: module.RecoveryView })))
+const ScheduleView = lazy(() => loadView('Schedule').then((module) => ({ default: module.ScheduleView })))
 import {
   clearCheckIns,
   clearPainReports,
@@ -64,6 +77,7 @@ import {
   saveTournamentWithGames,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
+import { buildAthleteContext, buildFallbackRecommendation } from './lib/recommendationContext'
 import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
@@ -668,6 +682,8 @@ function App() {
   const [onboardingAssociation, setOnboardingAssociation] = useState('Personal')
   const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
+  const [isStartupComplete, setIsStartupComplete] = useState(false)
+  const [areViewsReady, setAreViewsReady] = useState(false)
   const isSigningOutRef = useRef(false)
   const resetAccountStateRef = useRef(null)
   const [authEntryMode, setAuthEntryMode] = useState('landing')
@@ -880,6 +896,16 @@ function App() {
   )
 
   const resetDeletedSessionEvent = useEffectEvent(resetDeletedSession)
+
+  useEffect(() => {
+    let active = true
+    Promise.all(Object.keys(viewModules).map(loadView)).then(() => {
+      if (active) setAreViewsReady(true)
+    }).catch(() => {
+      // A failed view import will surface through the app error boundary on reload.
+    })
+    return () => { active = false }
+  }, [])
 
   useEffect(() => {
     if (!privacyPreferences.remindersEnabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return undefined
@@ -1310,7 +1336,7 @@ function App() {
       painMap: normalizePainMapScale(rawSavedCheckIn.painMap, rawSavedCheckIn.pain),
     }
     let finalRecommendation = savedCheckIn.quickRecommendation ?? null
-    const finalRecommendationStatus = 'ai'
+    let finalRecommendationStatus = 'ai'
 
     if (!savedCheckIn.quickRecommendation) {
       try {
@@ -1320,8 +1346,22 @@ function App() {
             && String(completion.completedAt ?? '').startsWith(selectedCheckInEvent?.date ?? todayIso),
         )
 
+        const generatedAt = new Date().toISOString()
+        const event = attachTournamentContext(selectedCheckInEvent, tournaments, schedule)
+        const scheduleContext = getRecommendationScheduleContext(schedule, selectedCheckInEvent)
+        const recentEvents = checkouts.slice(0, 4).map(withoutNotes)
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
+          athleteContext: buildAthleteContext({
+            athleteProfile,
+            checkIn: savedCheckIn,
+            event,
+            generatedAt,
+            nutritionContext,
+            recentEvents,
+            recentPainReports: painReports,
+            scheduleContext,
+          }),
           baseline: getPersonalBaseline(history, selectedCheckInEvent),
           checkIn: withoutNotes(savedCheckIn),
           eventPreparationContext: getCheckInPreparationContext({
@@ -1333,21 +1373,28 @@ function App() {
             nutritionHistory,
             schedule,
           }),
-          event: attachTournamentContext(selectedCheckInEvent, tournaments, schedule),
-          generatedAt: new Date().toISOString(),
+          event,
+          generatedAt,
           nutritionContext,
-          recentEvents: checkouts.slice(0, 4).map(withoutNotes),
+          recentEvents,
           sportContext: getSportContext({ athleteProfile, event: selectedCheckInEvent }),
           previousCheckout: getPreviousCheckoutRecommendationContext(previousCheckout, savedCheckIn),
           previousRecoveryCompletion: withoutNotes(previousRecoveryCompletion),
           requestType: 'check_in',
-          scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
+          scheduleContext,
         }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
       } catch (error) {
         console.error('Check-in AI recommendation failed', error)
-        setCheckInAiError(error?.message || 'The AI recommendation could not be generated. Please try again.')
-        setIsSavingCheckIn(false)
-        return
+        finalRecommendation = buildFallbackRecommendation('check_in', buildAthleteContext({
+          athleteProfile,
+          checkIn: savedCheckIn,
+          event: selectedCheckInEvent,
+          nutritionContext,
+          recentEvents: checkouts,
+          recentPainReports: painReports,
+          scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
+        }))
+        finalRecommendationStatus = 'local'
       }
     }
 
@@ -1872,31 +1919,56 @@ function App() {
       painMap: normalizePainMapScale(checkout.painMap, preCheckIn?.pain),
     }
     let finalRecommendation = existingCheckout?.recommendation ?? null
-    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'openrouter' ? 'ai' : 'loading'
+    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'loading'
 
     if (supabase) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, event)
 
+        const generatedAt = new Date().toISOString()
+        const completedEvent = attachTournamentContext(event, tournaments, schedule)
+        const scheduleContext = getRecommendationScheduleContext(schedule, event)
+        const recentEvents = checkouts.filter((item) => item.id !== existingCheckout?.id).slice(0, 4).map(withoutNotes)
         finalRecommendation = await generateAiRecommendation({
           athleteProfile,
+          athleteContext: buildAthleteContext({
+            athleteProfile,
+            checkIn: preCheckIn,
+            checkout,
+            event: completedEvent,
+            generatedAt,
+            nutritionContext,
+            recentEvents,
+            recentPainReports: painReports,
+            scheduleContext,
+          }),
           checkout: withoutNotes(checkout),
-          completedEvent: attachTournamentContext(event, tournaments, schedule),
+          completedEvent,
           dailyWellness: getCheckoutWellnessContext(dailyWellness, nutritionContext),
-          generatedAt: new Date().toISOString(),
+          generatedAt,
           nextScheduledEvent: getNextScheduledEvent(schedule, event),
           nutritionContext,
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
-          recentEvents: checkouts.filter((item) => item.id !== existingCheckout?.id).slice(0, 4).map(withoutNotes),
+          recentEvents,
           requestType: 'post_checkout',
-          scheduleContext: getRecommendationScheduleContext(schedule, event),
+          scheduleContext,
           sportContext: getSportContext({ athleteProfile, event, workload: checkout.sportWorkload }),
         }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
         finalRecommendationStatus = 'ai'
       } catch (error) {
         console.error(error)
-        throw new Error(`AI recovery plan failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+        finalRecommendation = buildFallbackRecommendation('post_checkout', buildAthleteContext({
+          athleteProfile,
+          checkIn: preCheckIn,
+          checkout,
+          event,
+          nutritionContext,
+          recentEvents: checkouts,
+          recentPainReports: painReports,
+          scheduleContext: getRecommendationScheduleContext(schedule, event),
+        }))
+        finalRecommendationStatus = 'local'
       }
     }
 
@@ -2075,25 +2147,39 @@ function App() {
     setIsReplayingSavedRoutine(false)
 
     try {
+      const generatedAt = new Date().toISOString()
+      const scheduleContext = getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent)
+      const recentEvents = checkouts.slice(0, 4).map(withoutNotes)
       const plan = await generateAiRecommendation({
         athleteProfile,
+        athleteContext: buildAthleteContext({
+          athleteProfile,
+          checkIn: preCheckIn,
+          checkout: contextCheckout,
+          event: completedEvent ?? nextScheduledEvent,
+          generatedAt,
+          nutritionContext,
+          recentEvents,
+          recentPainReports: painReports,
+          scheduleContext,
+        }),
         checkout: withoutNotes(contextCheckout),
         completedEvent: completedEvent ? attachTournamentContext(completedEvent, tournaments, schedule) : null,
         currentRecoveryContext,
         dailyWellness,
         equipment,
-        generatedAt: new Date().toISOString(),
+        generatedAt,
         nextScheduledEvent,
         nutritionContext,
         planType,
         preCheckIn: withoutNotes(preCheckIn),
         recentPainReports: painReports.slice(0, 12).map(withoutNotes),
-        recentEvents: checkouts.slice(0, 4).map(withoutNotes),
+        recentEvents,
         recentRoutineExerciseNames,
         recentRoutineSequences,
         recoveryCompletions: recoveryCompletions.slice(0, 5),
         requestType: 'recovery_plan',
-        scheduleContext: getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent),
+        scheduleContext,
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
         targetedAreas,
         timeAvailable,
@@ -2107,7 +2193,19 @@ function App() {
       setRecoveryPlanStatus('ai')
     } catch (error) {
       console.error(error)
-      setRecoveryPlanStatus('error')
+      const fallback = buildFallbackRecommendation('recovery_plan', buildAthleteContext({
+        athleteProfile,
+        checkIn: preCheckIn,
+        checkout: contextCheckout,
+        event: completedEvent ?? nextScheduledEvent,
+        nutritionContext,
+        recentEvents: checkouts,
+        recentPainReports: painReports,
+        scheduleContext: getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent),
+      }))
+      setGeneratedRecoveryPlan(fallback)
+      setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
+      setRecoveryPlanStatus('local')
     }
   }
 
@@ -2857,16 +2955,20 @@ function App() {
     }
   }
 
+  if (!isStartupComplete) {
+    return (
+      <StartupLoader
+        isReady={areViewsReady && isAuthReady && (!isAppUnlocked || !session || isProfileReady)}
+        onComplete={() => setIsStartupComplete(true)}
+      />
+    )
+  }
+
   return (
-    <Suspense fallback={<div className="auth-loading glass-panel">Loading Athlete Reload</div>}>
-      <main className="app-shell">
-      <img className="hero-photo" src={trainingHero} alt="" />
-      <div className="hero-overlay" />
+    <main className="app-shell">
       <SVGFilters>
         <SVGFilters.DefaultFilters />
       </SVGFilters>
-
-      {!isAuthReady && <div className="auth-loading glass-panel">Loading</div>}
 
       {isAuthReady && !isAppUnlocked && (
         <AuthGate
@@ -2876,10 +2978,6 @@ function App() {
           onDemoSession={startDemoSession}
           onUseRememberedSession={unlockRememberedSession}
         />
-      )}
-
-      {isAuthReady && isAppUnlocked && session && !isProfileReady && (
-        <div className="auth-loading glass-panel">Loading your athlete profile...</div>
       )}
 
       {isAuthReady && isAppUnlocked && session && isProfileReady && !athleteProfile?.onboardingCompleted && !onboardingTour && !onboardingCompleteOpen && (
@@ -2984,14 +3082,10 @@ function App() {
 
       <section className="page-content">
         <section className="workspace page-workspace glass-panel">
-            {dataStatus === 'loading' && (
-              <div className="data-status">Loading your Athlete Reload data...</div>
-            )}
-
+          <Suspense fallback={null}>
             {dataStatus === 'error' && (
               <div className="data-status error">
-                Supabase data sync needs attention. Your screen may be showing the
-                last loaded state.
+                Your latest information could not be refreshed. The screen may be showing the last saved version.
               </div>
             )}
 
@@ -3137,6 +3231,7 @@ function App() {
                 onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
               />
             )}
+          </Suspense>
           </section>
       </section>
 
@@ -3150,14 +3245,10 @@ function App() {
       )}
 
       {onboardingCompleteOpen && (
-        <div className="modal-backdrop">
-          <section className="event-modal onboarding-complete-modal glass-panel" role="dialog" aria-modal="true">
-            <p className="eyebrow">Setup complete</p>
-            <h2>You’re ready to reload.</h2>
-            <p>Your profile, first event, check-ins, checkouts, Home dashboard, and History are ready to use.</p>
-            <button className="primary-button" onClick={unlockAfterOnboarding} type="button">Open Athlete Reload</button>
-          </section>
-        </div>
+        <DialogShell className="onboarding-complete-modal" eyebrow="Setup complete" onClose={unlockAfterOnboarding} title="You’re ready to reload.">
+          <p>Your profile, first event, check-ins, checkouts, Home dashboard, and History are ready to use.</p>
+          <button className="primary-button" onClick={unlockAfterOnboarding} type="button">Open Athlete Reload</button>
+        </DialogShell>
       )}
 
       {checkoutEvent && (
@@ -3255,8 +3346,57 @@ function App() {
           onClose={() => setActiveLegalModal(null)}
         />
       )}
-      </main>
-    </Suspense>
+    </main>
+  )
+}
+
+function StartupLoader({ isReady, onComplete }) {
+  const [cycleComplete, setCycleComplete] = useState(false)
+  const [isExiting, setIsExiting] = useState(false)
+  const completeStartup = useEffectEvent(onComplete)
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setCycleComplete(true), 2200)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    if (!isReady || !cycleComplete || isExiting) return undefined
+    setIsExiting(true)
+    }, [cycleComplete, isExiting, isReady])
+
+  useEffect(() => {
+    if (!isExiting) return undefined
+    const timer = window.setTimeout(completeStartup, 650)
+    return () => window.clearTimeout(timer)
+  }, [isExiting])
+
+  return (
+    <div className={`startup-loader${isExiting ? ' is-exiting' : ''}`} role="status" aria-label="Loading Athlete Reload">
+      <div className="startup-loader-glow" aria-hidden="true" />
+      <div className="startup-loader-mark" aria-hidden="true">
+        <span className="startup-loader-orbit orbit-one" />
+        <span className="startup-loader-orbit orbit-two" />
+        <span className="startup-loader-scan" />
+        <img src={appLogo} alt="" />
+      </div>
+      <div className="startup-loader-copy">
+        <p>ATHLETE</p>
+        <h1>RELOAD</h1>
+        <span>Preparing your performance hub</span>
+      </div>
+      <div className="startup-loader-meter" aria-hidden="true">
+        <i /><i /><i /><i /><i /><i /><i />
+      </div>
+    </div>
   )
 }
 
@@ -3508,157 +3648,6 @@ const legalContentV2 = {
         title: '15. Contact',
         body: [
           'Questions about these Terms can be directed to the developer through the GitHub link in the footer.',
-        ],
-      },
-    ],
-  },
-  medical: {
-    title: 'Medical disclaimer.',
-    sections: [
-      {
-        title: '1. Not Medical Advice',
-        body: [
-          'Athlete Reload is a training readiness, recovery, and workload planning tool. The information provided is for informational purposes only and is not a substitute for professional medical advice, diagnosis, treatment, athletic trainer evaluation, or emergency care.',
-        ],
-      },
-      {
-        title: '2. Consult Qualified Adults and Healthcare Providers',
-        body: [
-          'Always seek guidance from a physician, athletic trainer, physical therapist, coach, parent, guardian, or other qualified professional with questions about pain, injury, participation, return-to-play decisions, training modifications, or health concerns.',
-        ],
-      },
-      {
-        title: '3. Emergency Situations',
-        body: [
-          'Never delay seeking medical help, disregard medical advice, or continue training because of information shown in Athlete Reload. If you think you may have a medical emergency, severe injury, concussion symptoms, numbness, instability, chest pain, trouble breathing, or rapidly worsening symptoms, stop activity and contact emergency services or a qualified adult immediately.',
-        ],
-      },
-      {
-        title: '4. Data Accuracy',
-        body: [
-          'Readiness scores and recommendations depend on the accuracy of your schedule, check-ins, pain reports, checkouts, and other information you enter. Always verify important information and do not make health or participation decisions based solely on the app.',
-        ],
-      },
-      {
-        title: '5. Individual Differences',
-        body: [
-          'Every athlete, injury, sport, position, and training environment is different. Patterns, trends, and recommendations should be interpreted with care and discussed with qualified professionals when pain, injury, or return-to-play decisions are involved.',
-        ],
-      },
-      {
-        title: '6. No Provider Relationship',
-        body: [
-          'Using Athlete Reload does not create a physician-patient relationship, athletic trainer-athlete relationship, or any professional medical relationship with Athlete Reload or its creators.',
-        ],
-      },
-      {
-        title: '7. Limitation of Liability',
-        body: [
-          'By using Athlete Reload, you acknowledge that Athlete Reload and its creators are not liable for injury, damage, or loss that may result from use of the app, inability to use the app, or reliance on information shown in the app.',
-        ],
-      },
-      {
-        title: '8. Training Recommendations',
-        body: [
-          'The app may suggest full, controlled, modified, recovery-focused, or no-participation training options. These are general readiness suggestions, not medical clearance. A coach, parent, guardian, athletic trainer, or healthcare provider may decide that a different action is necessary.',
-        ],
-      },
-    ],
-  },
-}
-
-const _legacyLegalContent = {
-  privacy: {
-    title: 'Privacy policy.',
-    sections: [
-      {
-        title: '1. Information Athlete Reload Stores',
-        body: [
-          'Athlete Reload stores the information you choose to enter, including scheduled events, associations, check-ins, checkouts, pain map entries, readiness recommendations, notes, and account information connected to your sign-in.',
-        ],
-      },
-      {
-        title: '2. How Your Information Is Used',
-        body: [
-          'Your information is used to show your schedule, generate event-based readiness recommendations, track training history, display trends, and sync your data across devices when you are signed in.',
-        ],
-      },
-      {
-        title: '3. Health and Training Data',
-        body: [
-          'Some information you enter may relate to soreness, pain, injury symptoms, sleep, fatigue, stress, hydration, and training participation. Do not enter information you do not want stored in the app.',
-        ],
-      },
-      {
-        title: '4. Third-Party Services',
-        body: [
-          'Athlete Reload uses Supabase for authentication and data storage. Recommendation requests may be sent to OpenRouter through a secure server-side function so the app can generate training guidance. API keys are not stored in the browser.',
-        ],
-      },
-      {
-        title: '5. Data Access and Control',
-        body: [
-          'Your signed-in app data is associated with your account. The History screen includes controls to clear saved check-ins, checkouts, and pain reports by time range.',
-          'Future versions may add more account-level privacy controls such as full account deletion, export, and sharing settings.',
-        ],
-      },
-      {
-        title: '6. Data Accuracy and Security',
-        body: [
-          'Athlete Reload is designed to keep each user’s saved data separate through account-based access controls. No online service can guarantee perfect security, and you should avoid entering emergency or highly sensitive information that needs immediate professional attention.',
-        ],
-      },
-      {
-        title: '7. Contact',
-        body: [
-          'Questions about this app can be directed to the developer through the GitHub link in the footer.',
-        ],
-      },
-    ],
-  },
-  terms: {
-    title: 'Terms of service.',
-    sections: [
-      {
-        title: '1. Acceptance of Terms',
-        body: [
-          'By using Athlete Reload, you agree to use the app responsibly and only for personal training readiness, recovery tracking, and schedule planning.',
-        ],
-      },
-      {
-        title: '2. Appropriate Use',
-        body: [
-          'You agree not to misuse the app, interfere with its services, attempt to access another user’s data, or use the app for unlawful, harmful, or abusive purposes.',
-        ],
-      },
-      {
-        title: '3. Your Responsibility',
-        body: [
-          'You are responsible for the accuracy of the information you enter and for deciding when to involve a parent, guardian, coach, athletic trainer, physician, or emergency services.',
-        ],
-      },
-      {
-        title: '4. No Medical Clearance',
-        body: [
-          'Athlete Reload does not provide medical clearance, diagnosis, treatment, return-to-play approval, or emergency care. Recommendations are general readiness guidance based on user-entered data.',
-        ],
-      },
-      {
-        title: '5. Accounts and Data',
-        body: [
-          'If you sign in, your data may be stored so it can sync across devices. You should keep access to your email/account secure and avoid sharing your login with others.',
-        ],
-      },
-      {
-        title: '6. Changes and Availability',
-        body: [
-          'Athlete Reload may change over time. Features may be added, changed, removed, interrupted, or unavailable while the app is being developed.',
-        ],
-      },
-      {
-        title: '7. Limitation of Liability',
-        body: [
-          'Athlete Reload and its creators are not liable for injury, loss, damages, training decisions, or reliance on app output. Use the app as one informational tool, not as your only source of guidance.',
         ],
       },
     ],

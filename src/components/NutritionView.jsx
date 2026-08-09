@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadSavedFoods, removeSavedFood, saveFood, searchFoods, verifyFood } from '../lib/foodApi'
+import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
+import { getCanonicalServing, getSourceServingFactor, getSourceServingOptions } from '../lib/foodServing'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
@@ -49,6 +50,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       <section className="nutrition-dashboard-heading">
         <div>
           <SectionHeading eyebrow="Nutrition" title="Fuel for the day." />
+          <p className="page-header-description">Track the fuel and hydration supporting today&apos;s training.</p>
           <div className="nutrition-date-menu">
             <button className="nutrition-date-button" onClick={() => setIsDateOpen((current) => !current)} type="button">{displayedDate}<span>⌄</span></button>
             {isDateOpen && <div className="nutrition-date-popover"><label>Choose a date<input autoFocus type="date" value={selectedDate} onChange={(event) => { setSelectedDate(event.target.value); setIsDateOpen(false) }} /></label><button onClick={() => { setSelectedDate(today); setIsDateOpen(false) }} type="button">Jump to today</button></div>}
@@ -242,7 +244,13 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     } catch (error) { setMessage(error.message) }
   }
 
-  function selectFood(food) { if (onSelectFood) onSelectFood(food, meal); else onSave({ ...food, meal }) }
+  async function selectFood(food) {
+    void recordFoodUsage(food)
+    setMessage(food.sourceType === 'usda_generic' ? 'Loading source serving details...' : '')
+    const detailedFood = await loadFoodDetails(food)
+    setMessage('')
+    if (onSelectFood) onSelectFood(detailedFood, meal); else onSave({ ...detailedFood, meal })
+  }
 
   async function toggleVoiceSearch() {
     if (voiceRecorder.isRecording) {
@@ -289,6 +297,12 @@ const manualNutrientFields = [
 
 function ManualFoodForm({ meal, onCancel, onSave }) {
   const [draft, setDraft] = useState({ brand: '', calories: '', carbohydrates: '', fats: '', name: '', protein: '', servingWeight: '', servingWeightUnit: 'g', standardServingSize: '1 serving' })
+  const [isCurator, setIsCurator] = useState(false)
+  const [jsonEntry, setJsonEntry] = useState('')
+  const [curatorMessage, setCuratorMessage] = useState('')
+  const [preview, setPreview] = useState(null)
+
+  useEffect(() => { getFoodCuratorStatus().then(setIsCurator).catch(() => setIsCurator(false)) }, [])
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }))
@@ -296,34 +310,65 @@ function ManualFoodForm({ meal, onCancel, onSave }) {
 
   function submit(event) {
     event.preventDefault()
+    onSave(draftToFood(draft, meal))
+  }
+
+  async function previewVerifiedFood() {
+    setCuratorMessage('')
+    try {
+      const food = jsonEntry.trim() ? JSON.parse(jsonEntry) : draftToFood(draft, meal)
+      const result = await validateCuratorFood(food)
+      setPreview(result)
+      setCuratorMessage(result.valid ? 'Validation passed. Review the preview before saving.' : result.duplicate ? `A matching verified food already exists: ${result.duplicate.display_name || result.duplicate.food?.name}.` : result.errors?.join(' '))
+    } catch {
+      setPreview(null)
+      setCuratorMessage('Enter valid food JSON or complete the manual form.')
+    }
+  }
+
+  async function saveVerifiedFood() {
+    if (!preview?.valid) return
+    try {
+      const verified = await verifyFood(preview.food)
+      setCuratorMessage(`${verified.name} is now in the verified Athlete Reload catalog.`)
+      setPreview(null)
+    } catch {
+      setCuratorMessage('The verified food could not be saved right now.')
+    }
+  }
+
+  return (
+    <form className="manual-food-form" onSubmit={submit}>
+      <div className="manual-food-heading"><div><strong>Manual food entry</strong><span>Add the values for one serving.</span></div><button onClick={onCancel} type="button">Cancel</button></div>
+      {isCurator && <details className="manual-nutrients curator-entry"><summary>Curator JSON entry <span>Optional</span></summary><label>Food JSON<textarea value={jsonEntry} onChange={(event) => { setJsonEntry(event.target.value); setPreview(null) }} placeholder='{"name":"Food name","calories":100,"protein":5,"carbohydrates":15,"fats":2,"standardServingSize":"1 serving"}' /></label></details>}
+      <div className="manual-food-grid identity">
+        <label>Food name<input autoFocus required={!jsonEntry.trim()} value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="e.g. Homemade granola" /></label>
+        <label>Brand (optional)<input value={draft.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Brand or restaurant" /></label>
+        <label>Standard serving size<input value={draft.standardServingSize} onChange={(event) => update('standardServingSize', event.target.value)} placeholder="e.g. 1 large egg" /></label>
+        <label>Weight for standard serving<span><input min="0" step="0.1" type="number" value={draft.servingWeight} onChange={(event) => update('servingWeight', event.target.value)} /><select aria-label="Serving weight unit" value={draft.servingWeightUnit} onChange={(event) => update('servingWeightUnit', event.target.value)}><option value="g">g</option><option value="mL">mL</option></select></span></label>
+      </div>
+      <div className="manual-food-grid macros">
+        <NutrientInput field="calories" label="Calories" required={!jsonEntry.trim()} unit="kcal" value={draft.calories} onChange={update} />
+        <NutrientInput field="carbohydrates" label="Carbohydrates" unit="g" value={draft.carbohydrates} onChange={update} />
+        <NutrientInput field="fats" label="Fats" unit="g" value={draft.fats} onChange={update} />
+        <NutrientInput field="protein" label="Protein" unit="g" value={draft.protein} onChange={update} />
+      </div>
+      <details className="manual-nutrients"><summary>More nutrients <span>Optional</span></summary><div className="manual-food-grid nutrients">{manualNutrientFields.map(([field, label, unit]) => <NutrientInput field={field} key={field} label={label} unit={unit} value={draft[field] ?? ''} onChange={update} />)}</div></details>
+      {isCurator && <div className="curator-preview-actions"><button className="secondary-button" onClick={previewVerifiedFood} type="button">Preview verified food</button>{preview?.valid && <button className="primary-button" onClick={saveVerifiedFood} type="button">Save to verified catalog</button>}</div>}
+      {curatorMessage && <p className="form-message" role="status">{curatorMessage}</p>}
+      <button className="primary-button" type="submit">Add to {meal === 'Snack' ? 'Snacks' : meal}</button>
+    </form>
+  )
+}
+
+function draftToFood(draft, meal) {
     const standardServingSize = draft.standardServingSize.trim() || '1 serving'
     const food = { brand: draft.brand.trim(), foodSource: 'Manual entry', meal, name: draft.name.trim(), servingSize: standardServingSize, standardServingSize, servingWeightUnit: draft.servingWeightUnit, servings: 1 }
     if (draft.servingWeight !== '') food.servingWeight = Number(draft.servingWeight)
     ;['calories', 'protein', 'carbohydrates', 'fats', ...manualNutrientFields.map(([key]) => key)].forEach((key) => {
       if (draft[key] !== '') food[key] = Number(draft[key])
     })
-    onSave(food)
-  }
-
-  return (
-    <form className="manual-food-form" onSubmit={submit}>
-      <div className="manual-food-heading"><div><strong>Manual food entry</strong><span>Add the values for one serving.</span></div><button onClick={onCancel} type="button">Cancel</button></div>
-      <div className="manual-food-grid identity">
-        <label>Food name<input autoFocus required value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="e.g. Homemade granola" /></label>
-        <label>Brand (optional)<input value={draft.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Brand or restaurant" /></label>
-        <label>Standard serving size<input value={draft.standardServingSize} onChange={(event) => update('standardServingSize', event.target.value)} placeholder="e.g. 1 large egg" /></label>
-        <label>Weight for standard serving<span><input min="0" step="0.1" type="number" value={draft.servingWeight} onChange={(event) => update('servingWeight', event.target.value)} /><select aria-label="Serving weight unit" value={draft.servingWeightUnit} onChange={(event) => update('servingWeightUnit', event.target.value)}><option value="g">g</option><option value="mL">mL</option></select></span></label>
-      </div>
-      <div className="manual-food-grid macros">
-        <NutrientInput field="calories" label="Calories" required unit="kcal" value={draft.calories} onChange={update} />
-        <NutrientInput field="carbohydrates" label="Carbohydrates" unit="g" value={draft.carbohydrates} onChange={update} />
-        <NutrientInput field="fats" label="Fats" unit="g" value={draft.fats} onChange={update} />
-        <NutrientInput field="protein" label="Protein" unit="g" value={draft.protein} onChange={update} />
-      </div>
-      <details className="manual-nutrients"><summary>More nutrients <span>Optional</span></summary><div className="manual-food-grid nutrients">{manualNutrientFields.map(([field, label, unit]) => <NutrientInput field={field} key={field} label={label} unit={unit} value={draft[field] ?? ''} onChange={update} />)}</div></details>
-      <button className="primary-button" type="submit">Add to {meal === 'Snack' ? 'Snacks' : meal}</button>
-    </form>
-  )
+    return food
 }
 
 function NutrientInput({ field, label, onChange, required = false, unit, value }) {
@@ -367,9 +412,8 @@ function getScannerButtonLabel(status) {
 }
 
 function FoodResult({ food, isCurator, onPromote, onSave, onSelect }) {
-  const suggestions = getServingOptions(food).filter((option) => option !== food.servingSize && option !== '100 g').slice(0, 2)
-  const servingWeight = food.servingWeight ? `${food.servingWeight} ${food.servingWeightUnit ?? 'g'}` : ''
-  return <div className="food-result-row"><button className="food-result-main" onClick={() => onSelect(food)} type="button"><strong>{food.name}{food.isVerified ? ' ✓' : ''}</strong><span>{[food.brand, food.standardServingSize ?? food.servingSize, servingWeight].filter(Boolean).join(' · ')}</span>{suggestions.length > 0 && <small>Serving options: {suggestions.join(' or ')}</small>}<em>{food.calories} kcal · P {food.protein}g · C {food.carbohydrates}g · F {food.fats}g</em></button><div className="food-result-actions"><button onClick={() => onSave(food)} type="button">{food.isSaved ? 'Saved' : 'Save'}</button>{isCurator && !food.isVerified && <button onClick={() => onPromote(food)} type="button">Verify</button>}</div></div>
+  const servingMeta = getCanonicalServing(food).displayLabel
+  return <div className="food-result-row"><button className="food-result-main" onClick={() => onSelect(food)} type="button"><span className="food-result-heading"><strong>{food.name}{food.isVerified ? ' ✓' : ''}</strong>{food.brand && <small>{food.brand}</small>}</span><span className="food-result-serving">{servingMeta}</span><em><b>{food.calories} kcal</b><span>P {food.protein}g</span><span>C {food.carbohydrates}g</span><span>F {food.fats}g</span></em></button><div className="food-result-actions"><button onClick={() => onSave(food)} type="button">{food.isSaved ? 'Saved' : 'Save'}</button>{isCurator && !food.isVerified && <button onClick={() => onPromote(food)} type="button">Verify</button>}</div></div>
 }
 
 function foodResultKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase() }
@@ -444,10 +488,7 @@ function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) 
 }
 
 function getServingFactor(food, selectedServing) {
-  const baseGrams = parseServingGrams(food.servingSize) || estimateServingGrams(food.name, food.servingSize)
-  const selectedGrams = parseServingGrams(selectedServing) || estimateServingGrams(food.name, selectedServing)
-  if (!baseGrams || !selectedGrams) return 1
-  return selectedGrams / baseGrams
+  return getSourceServingFactor(food, selectedServing)
 }
 
 function parseStoredServing(food) {
@@ -456,29 +497,8 @@ function parseStoredServing(food) {
   return match ? { servingSize: match[2], servings: Number(match[1]) } : { servingSize: food.servingSize || '1 serving', servings: 1 }
 }
 
-function parseServingGrams(serving) {
-  const match = String(serving || '').match(/(\d+(?:\.\d+)?)\s*g\b/i)
-  return match ? Number(match[1]) : 0
-}
-
-function estimateServingGrams(foodName, serving) {
-  const text = `${foodName || ''} ${serving || ''}`.toLowerCase()
-  const count = Number(String(serving || '').match(/^(\d+(?:\.\d+)?)/)?.[1] || 1)
-  if (text.includes('oz')) return count * 28.35
-  if (text.includes('tbsp')) return count * 15
-  if (text.includes('tsp')) return count * 5
-  if (text.includes('cup')) return count * 240
-  if (text.includes('egg')) return count * 50
-  if (text.includes('grape')) return count * 5
-  return 0
-}
-
 function getServingOptions(food) {
-  const name = food.name.toLowerCase()
-  if (name.includes('egg')) return ['1 egg', '1 large egg', '2 eggs', '100 g']
-  if (name.includes('grape')) return ['1 grape', '10 grapes', '1 cup', '100 g']
-  if (name.includes('peanut butter') || name.includes('syrup')) return ['1 tbsp', '2 tbsp', '1 tsp', '100 g']
-  return [...new Set([food.servingSize || '1 serving', '1 cup', '1 tbsp', '1 oz', '100 g'])]
+  return getSourceServingOptions(food).map((option) => option.label)
 }
 
 function roundNutrient(value) { return Math.round(value * 10) / 10 }

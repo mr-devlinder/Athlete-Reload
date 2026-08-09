@@ -1,5 +1,6 @@
 const OPEN_FOOD_FACTS_BASE = 'https://world.openfoodfacts.org/api/v2'
 import { supabase } from './supabaseClient'
+import { friendlyFeatureError, recordOperationalEvent } from './operationalEvents'
 
 function normalizeProduct(product = {}) {
   const nutriments = product.nutriments ?? {}
@@ -83,9 +84,11 @@ export async function searchFoods(query) {
   if (supabase) {
     try {
       const { data, error } = await supabase.functions.invoke('search-food', { body: { query: search } })
-      if (!error && data?.foods?.length) return rankFoods(data.foods.map(normalizeFoodRecord), normalizedQuery)
+      if (error) throw error
+      return rankFoods((data?.foods ?? []).map(normalizeFoodRecord), normalizedQuery)
     } catch {
-      // The public fallbacks below keep search usable while the edge function is unavailable.
+      await recordOperationalEvent('nutrition', 'FOOD_SEARCH_FAILED')
+      throw new Error(friendlyFeatureError('nutrition'))
     }
   }
   const params = new URLSearchParams({
@@ -112,6 +115,13 @@ export async function searchFoods(query) {
   }
 
   throw new Error('Food search is unavailable right now. Try a simpler search or add the food manually.')
+}
+
+export async function loadFoodDetails(food) {
+  if (!supabase || food?.sourceType !== 'usda_generic' || !food?.sourceId) return food
+  const { data, error } = await supabase.functions.invoke('search-food', { body: { sourceId: food.sourceId } })
+  if (error || !data?.food) return food
+  return normalizeFoodRecord({ ...food, ...data.food })
 }
 
 export async function loadSavedFoods() {
@@ -155,6 +165,18 @@ export async function verifyFood(food) {
   return data.food
 }
 
+export async function recordFoodUsage(food) {
+  if (!supabase || !food?.sourceId || !['usda_generic', 'usda_branded', 'open_food_facts'].includes(food.sourceType)) return
+  const { error } = await supabase.functions.invoke('manage-food', { body: { action: 'record_usage', food: stripFoodState(food) } })
+  if (error) await recordOperationalEvent('nutrition', 'FOOD_USAGE_RECORD_FAILED', 'warning')
+}
+
+export async function validateCuratorFood(food) {
+  const { data, error } = await supabase.functions.invoke('manage-food', { body: { action: 'validate', food: stripFoodState(food) } })
+  if (error && !data) throw new Error('This food could not be validated right now.')
+  return data
+}
+
 function getFoodSourceKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.standardServingSize ?? food.servingSize}`).toLowerCase().replace(/\s+/g, ' ').trim() }
 function normalizeFoodRecord(food = {}) {
   const standardServingSize = food.standardServingSize ?? food.servingSize ?? '1 serving'
@@ -165,6 +187,7 @@ function normalizeFoodRecord(food = {}) {
     standardServingSize,
     servingWeight: food.servingWeight ?? (explicitWeight ? Number(explicitWeight[1]) : undefined),
     servingWeightUnit: food.servingWeightUnit ?? (explicitWeight?.[2]?.toLowerCase() === 'ml' ? 'mL' : 'g'),
+    servingOptions: Array.isArray(food.servingOptions) ? food.servingOptions.filter((option) => option?.label && Number(option?.gramWeight) > 0) : [],
   }
 }
 function stripFoodState(food) {

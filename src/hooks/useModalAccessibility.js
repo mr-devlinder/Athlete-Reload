@@ -22,11 +22,17 @@ export function useModalAccessibility(isOpen, onClose) {
     document.body.style.overflow = 'hidden'
     const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')]
     const dialog = dialogRef.current ?? dialogs.at(-1)
+    dialog?.classList.add('dialog-shell')
+    if (dialog?.parentElement?.classList.contains('modal-backdrop')) {
+      dialog.parentElement.classList.add('dialog-backdrop')
+    }
     if (dialog && !dialog.hasAttribute('aria-label') && !dialog.hasAttribute('aria-labelledby')) {
       dialog.setAttribute('aria-label', 'Dialog')
     }
-    const focusable = dialog ? [...dialog.querySelectorAll(focusableSelector)] : []
-    ;(focusable[0] ?? dialog)?.focus()
+    const getFocusable = () => dialog
+      ? [...dialog.querySelectorAll(focusableSelector)].filter((item) => !item.closest('[hidden]'))
+      : []
+    ;(getFocusable()[0] ?? dialog)?.focus()
 
     function handleKeyDown(event) {
       if (event.key === 'Escape') {
@@ -34,7 +40,13 @@ export function useModalAccessibility(isOpen, onClose) {
         closeRef.current?.()
         return
       }
-      if (event.key !== 'Tab' || focusable.length === 0) return
+      const focusable = getFocusable()
+      if (event.key !== 'Tab') return
+      if (focusable.length === 0) {
+        event.preventDefault()
+        dialog?.focus()
+        return
+      }
 
       const first = focusable[0]
       const last = focusable[focusable.length - 1]

@@ -11,12 +11,13 @@
 ## Supabase
 
 - [ ] Apply every migration in `supabase/migrations` to production in filename order.
-- [ ] Deploy `generate-recommendation` and `clear-health-history` with JWT verification enabled.
-- [ ] Confirm `OPENROUTER_API_KEY` is set as a Supabase Edge Function secret.
+- [ ] Deploy `generate-recommendation`, `search-food`, `manage-food`, `clear-health-history`, and `delete-account` with JWT verification enabled.
+- [ ] Confirm `GEMINI_API_KEY`, `USDA_FOODDATA_API_KEY`, and the standard Supabase function secrets are configured.
 - [ ] Confirm Auth leaked-password protection is enabled in the Supabase dashboard.
 - [ ] Run Supabase security and performance advisors after the final migration.
 - [ ] Verify RLS remains enabled for all athlete-owned tables.
 - [ ] Complete an authenticated smoke test for recommendation generation and health-data clearing.
+- [ ] Confirm `get_release_compatibility` reports schema version `20260809000830`.
 
 ## Privacy and account lifecycle
 
@@ -33,4 +34,3 @@
 - [ ] Record and transcribe voice input in current Chrome, Safari, Firefox, and Edge.
 - [ ] Generate readiness and recovery guidance and verify a safe fallback appears when AI is unavailable.
 - [ ] Log nutrition and hydration, then export account data.
-

@@ -1,12 +1,19 @@
-name: Stable release checks
+name: Stable release
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -21,6 +28,24 @@ jobs:
       - run: npm ci
       - run: npm run lint -- --deny-warnings
       - run: npm test
-      - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
+      - run: npm run build
+        env:
+          VITE_BASE_PATH: /Athlete-Reload/
+      - run: npm run check:bundle
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: dist
 
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

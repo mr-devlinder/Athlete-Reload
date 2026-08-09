@@ -60,6 +60,11 @@ Deno.serve(async (request) => {
       return respond({ error: 'A recent password or two-factor confirmation is required.', stage: 'authentication' }, 403)
     }
 
+    const { error: signOutError } = await userClient.auth.signOut({ scope: 'global' })
+    if (signOutError) {
+      return respond({ error: 'Account sessions could not be closed. No deletion was performed.', stage: 'session-revocation' }, 500)
+    }
+
     const admin = createClient(projectUrl, serviceRoleKey, { auth: { persistSession: false } })
     const storageError = await deleteOwnedStorageObjects(admin, user.id)
     if (storageError) return respond({ error: storageError, stage: 'storage' }, 500)

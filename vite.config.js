@@ -6,7 +6,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
-    base: mode === 'production' ? '/Athlete-Reload/' : '/',
+    base: mode === 'production' ? (env.VITE_BASE_PATH || '/Athlete-Reload/') : '/',
+    build: {
+      chunkSizeWarningLimit: 850,
+    },
     plugins: [react()],
     server: {
       proxy: {
