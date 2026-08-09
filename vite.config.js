@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     base: mode === 'production' ? (env.VITE_BASE_PATH || '/Athlete-Reload/') : '/',
     build: {
       chunkSizeWarningLimit: 850,
+      cssMinify: 'lightningcss',
     },
     plugins: [react()],
     server: {

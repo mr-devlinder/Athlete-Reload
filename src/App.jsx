@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { format, subDays } from 'date-fns'
-import { LensGlass, SVGFilters } from 'react-glassy'
 import 'react-glassy/styles.css'
 import { AuthGate } from './components/AuthGate'
 import { OnboardingFlow } from './components/OnboardingFlow'
@@ -12,6 +11,7 @@ import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { DialogShell } from './components/DialogShell'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { LiquidNavigation } from './components/LiquidNavigation'
 import {
   checkInDefaults,
   associations as initialAssociations,
@@ -92,6 +92,7 @@ import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
 import { useModalAccessibility } from './hooks/useModalAccessibility'
 import './App.css'
+import './styles/ui-system.css'
 
 const views = [
   {
@@ -713,11 +714,6 @@ function App() {
   const recommendationDialogRef = useModalAccessibility(Boolean(submittedRecommendation), () => setSubmittedRecommendation(null))
   const aiErrorDialogRef = useModalAccessibility(Boolean(checkInAiError), () => setCheckInAiError(''))
   const [isAthleteProfileOpen, setIsAthleteProfileOpen] = useState(false)
-  const [navLens, setNavLens] = useState(null)
-  const lensFrameRef = useRef(null)
-  const lensNodeRef = useRef(null)
-  const lensTargetRef = useRef(null)
-  const navRef = useRef(null)
   const sentReminderKeysRef = useRef(new Set())
   const [checkIn, setCheckIn] = useState(() => normalizeCheckInScales(savedState?.checkIn ?? checkInDefaults))
   const [history, setHistory] = useState(savedState?.history ?? [])
@@ -739,7 +735,6 @@ function App() {
   const [schedule, setSchedule] = useState(
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
-  const visualActiveView = navLens?.activeLabel ?? activeView
   const displayPreferences = normalizeDisplayPreferences(privacyPreferences.display, athleteProfile?.unitSystem)
   const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
   resetAccountStateRef.current = resetAccountState
@@ -1247,14 +1242,6 @@ function App() {
       window.clearInterval(intervalId)
     }
   }, [isSupabaseSession])
-
-  useEffect(() => {
-    return () => {
-      if (lensFrameRef.current) {
-        cancelAnimationFrame(lensFrameRef.current)
-      }
-    }
-  }, [])
 
   function updateField(field, value) {
     if (['energy', 'soreness', 'fatigue', 'legHeaviness', 'sleepQuality'].includes(field)) {
@@ -2779,61 +2766,6 @@ function App() {
     setActiveView('Home')
   }
 
-  function getNearestTab(pointerX) {
-    const nav = navRef.current
-
-    if (!nav) {
-      return activeView
-    }
-
-    const tabs = [...nav.querySelectorAll('button[data-view]')]
-    const nearestTab = tabs.reduce((nearest, tab) => {
-      const rect = tab.getBoundingClientRect()
-      const tabCenter = rect.left + rect.width / 2
-      const distance = Math.abs(pointerX - tabCenter)
-
-      if (!nearest || distance < nearest.distance) {
-        return {
-          distance,
-          height: rect.height,
-          label: tab.dataset.view,
-          width: rect.width,
-        }
-      }
-
-      return nearest
-    }, null)
-
-    return nearestTab ?? { height: 72, label: activeView, width: 106 }
-  }
-
-  function getLensState(event) {
-    const nav = navRef.current
-
-    if (!nav) {
-      return null
-    }
-
-    const navRect = nav.getBoundingClientRect()
-    const nearestTab = getNearestTab(event.clientX)
-    const lensWidth = nearestTab.width
-    const lensHeight = nearestTab.height
-    const horizontalPadding = lensWidth / 2
-    const left = Math.max(
-      horizontalPadding,
-      Math.min(event.clientX - navRect.left, navRect.width - horizontalPadding),
-    )
-
-    return {
-      activeLabel: nearestTab.label,
-      height: lensHeight,
-      left,
-      top: navRect.height / 2,
-      width: lensWidth,
-      navWidth: navRect.width,
-    }
-  }
-
   function getTourNavigationTarget() {
     return {
       'checkin-nav': 'Check-in',
@@ -2868,135 +2800,6 @@ function App() {
     handleTourNavigation(view)
   }
 
-  function applyLensPosition(state) {
-    const node = lensNodeRef.current
-
-    if (!node) {
-      return
-    }
-
-    node.style.setProperty('--lens-left', `${state.left}px`)
-    node.style.setProperty('--lens-top', `${state.top}px`)
-    node.style.setProperty('--lens-height', `${state.height}px`)
-    node.style.setProperty('--lens-width', `${state.width}px`)
-    node.style.setProperty('--nav-width', `${state.navWidth}px`)
-  }
-
-  function animateLens() {
-    const target = lensTargetRef.current
-
-    if (target) {
-      applyLensPosition(target)
-      lensFrameRef.current = requestAnimationFrame(animateLens)
-    }
-  }
-
-  function startLensAnimation() {
-    if (!lensFrameRef.current) {
-      lensFrameRef.current = requestAnimationFrame(animateLens)
-    }
-  }
-
-  function stopLensAnimation() {
-    if (lensFrameRef.current) {
-      cancelAnimationFrame(lensFrameRef.current)
-      lensFrameRef.current = null
-    }
-  }
-
-  function moveNavLens(event) {
-    if (!navLens) {
-      return
-    }
-
-    const lensState = getLensState(event)
-
-    if (!lensState) {
-      return
-    }
-
-    const requiredView = getTourNavigationTarget()
-    if (requiredView && lensState.activeLabel !== requiredView) {
-      return
-    }
-
-    lensTargetRef.current = lensState
-
-    if (lensState.activeLabel !== navLens.activeLabel) {
-      setNavLens((current) =>
-        current
-          ? {
-              ...current,
-              activeLabel: lensState.activeLabel,
-              height: lensState.height,
-              width: lensState.width,
-            }
-          : current,
-      )
-    }
-  }
-
-  function showNavLens(event) {
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId)
-    } catch {
-      // Touch fallback events do not have capturable pointer ids.
-    }
-
-    const lensState = getLensState(event)
-
-    if (!lensState) {
-      return
-    }
-
-    lensTargetRef.current = lensState
-    setNavLens(lensState)
-    requestAnimationFrame(() => applyLensPosition(lensState))
-    startLensAnimation()
-  }
-
-  function hideNavLens() {
-    if (navLens?.activeLabel) {
-      selectNavigationView(navLens.activeLabel)
-    }
-
-    stopLensAnimation()
-    lensTargetRef.current = null
-    setNavLens(null)
-  }
-
-  function getTouchEvent(touchEvent) {
-    const touch = touchEvent.touches[0] ?? touchEvent.changedTouches[0]
-
-    if (!touch) {
-      return null
-    }
-
-    return {
-      clientX: touch.clientX,
-    }
-  }
-
-  function showTouchLens(event) {
-    const touchEvent = getTouchEvent(event)
-
-    if (touchEvent) {
-      showNavLens({
-        ...touchEvent,
-        currentTarget: event.currentTarget,
-        pointerId: event.changedTouches[0]?.identifier ?? 1,
-      })
-    }
-  }
-
-  function moveTouchLens(event) {
-    const touchEvent = getTouchEvent(event)
-
-    if (touchEvent) {
-      moveNavLens(touchEvent)
-    }
-  }
-
   if (!isStartupComplete) {
     return (
       <StartupLoader
@@ -3009,10 +2812,6 @@ function App() {
 
   return (
     <main className={`app-shell density-${displayPreferences.density} motion-${displayPreferences.startupMotion}`}>
-      <SVGFilters>
-        <SVGFilters.DefaultFilters />
-      </SVGFilters>
-
       {isAuthReady && !isAppUnlocked && (
         <AuthGate
           initialMode={authEntryMode}
@@ -3059,69 +2858,14 @@ function App() {
         </div>
       </nav>
 
-      <div
-        className={`nav-tabs${onboardingTour && !onboardingTour.endsWith('-nav') ? ' tour-hidden-mobile' : ''}`}
-        aria-label="Primary views"
-        onPointerCancel={hideNavLens}
-        onPointerDown={showNavLens}
-        onPointerMove={moveNavLens}
-        onPointerUp={hideNavLens}
-        onTouchEnd={hideNavLens}
-        onTouchMove={moveTouchLens}
-        onTouchStart={showTouchLens}
-        ref={navRef}
-      >
-        {navLens && (
-          <div
-            className="liquid-lens-shell"
-            ref={lensNodeRef}
-            style={{
-              '--lens-left': `${navLens.left}px`,
-              '--lens-top': `${navLens.top}px`,
-              '--lens-height': `${navLens.height}px`,
-              '--lens-width': `${navLens.width}px`,
-              '--nav-width': `${navLens.navWidth}px`,
-            }}
-          >
-            <LensGlass
-              blur={3}
-              brightness={1.08}
-              chromaticAberration={2.4}
-              className="liquid-lens"
-              depth={16}
-              height={navLens.height}
-              radius={999}
-              saturate={1.65}
-              strength={126}
-              width={navLens.width}
-            >
-              <div className="lens-refract" aria-hidden="true">
-                {views.map((view) => (
-                  <span
-                    className={visualActiveView === view.label ? 'active' : ''}
-                    key={view.label}
-                  >
-                    <NavIcon type={view.icon} />
-                    <em>{view.label}</em>
-                  </span>
-                ))}
-              </div>
-            </LensGlass>
-          </div>
-        )}
-        {views.map((view) => (
-          <button
-            className={visualActiveView === view.label ? 'active' : ''}
-            data-view={view.label}
-            key={view.label}
-            onClick={() => selectNavigationView(view.label)}
-            type="button"
-          >
-            <NavIcon type={view.icon} />
-            <span>{view.label}</span>
-          </button>
-        ))}
-      </div>
+      <LiquidNavigation
+        activeView={activeView}
+        className={onboardingTour && !onboardingTour.endsWith('-nav') ? 'tour-hidden-mobile' : ''}
+        lockedView={getTourNavigationTarget()}
+        motionPreference={displayPreferences.startupMotion}
+        onSelect={selectNavigationView}
+        views={views}
+      />
 
       <section className="page-content">
         <section className="workspace page-workspace glass-panel">
@@ -3758,76 +3502,6 @@ const legalContentV2 = {
       },
     ],
   },
-}
-
-function NavIcon({ type }) {
-  if (type === 'home') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 11.2 12 4l8 7.2v8.1a1.7 1.7 0 0 1-1.7 1.7H5.7A1.7 1.7 0 0 1 4 19.3v-8.1Z" />
-        <path d="M9.5 21v-6h5v6" />
-      </svg>
-    )
-  }
-
-  if (type === 'calendar') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M7 3v3M17 3v3M4.5 9.2h15M6.5 5.2h11A2.5 2.5 0 0 1 20 7.7v10.1a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.8V7.7a2.5 2.5 0 0 1 2.5-2.5Z" />
-      </svg>
-    )
-  }
-
-  if (type === 'nutrition') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M7 3v8.2a2.5 2.5 0 0 1-5 0V3M4.5 3v18M14.5 3v7M14.5 10h5.5v11" />
-        <path d="M14.5 3h5.5v7h-5.5" />
-      </svg>
-    )
-  }
-
-  if (type === 'recovery') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M20 7.5a8 8 0 1 0 1.2 6.8" />
-        <path d="M20 4v5h-5" />
-        <path d="M12 8v4l2.8 2" />
-      </svg>
-    )
-  }
-
-  if (type === 'trend') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M4 17.5h16M6 15l4-4 3 3 5-7M18 7h-4M18 7v4" />
-      </svg>
-    )
-  }
-
-  if (type === 'stats') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 19V9M12 19V5M19 19v-7" />
-        <path d="M3.5 19.5h17" />
-      </svg>
-    )
-  }
-
-  if (type === 'settings') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 8.2a3.8 3.8 0 1 1 0 7.6 3.8 3.8 0 0 1 0-7.6Z" />
-        <path d="m4.8 14.3-.9-1.5.9-1.5 2-.4.8-1.3-.6-2 1.5-.9 1.5.9 1.3-.5.7-1.9h1.8l.7 1.9 1.3.5 1.5-.9 1.5.9-.6 2 .8 1.3 2 .4.9 1.5-.9 1.5-2 .4-.8 1.3.6 2-1.5.9-1.5-.9-1.3.5-.7 1.9H12l-.7-1.9-1.3-.5-1.5.9-1.5-.9.6-2-.8-1.3-2-.4Z" />
-      </svg>
-    )
-  }
-
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M3 12h4.2l2-5.8 5.2 12.6 2.4-6.8H21" />
-    </svg>
-  )
 }
 
 export default App

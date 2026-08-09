@@ -18,6 +18,7 @@ import {
 } from 'date-fns'
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
+import { AppIcon } from './AppIcon'
 import { getCheckoutForEvent, getEventDisplayName, isAllDayEvent, isOtherActivityEvent, isRestDayEvent } from '../utils/events'
 import { searchLocations } from '../lib/weather'
 import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, getSportSurfaces, getSportWorkloadFields } from '../data/sportProfiles'
@@ -281,11 +282,7 @@ export function ScheduleView({
             ref={actionsMenuButtonRef}
             type="button"
           >
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <circle cx="5" cy="12" r="1.75" />
-              <circle cx="12" cy="12" r="1.75" />
-              <circle cx="19" cy="12" r="1.75" />
-            </svg>
+            <AppIcon name="more" size={22} />
           </button>
           <button
             data-tour="add-event"
@@ -351,7 +348,6 @@ export function ScheduleView({
         <section className="month-calendar">
           <div className="calendar-title">
             <strong>{monthLabel}</strong>
-            <span>{schedule.length} scheduled events</span>
           </div>
 
           <div className="calendar-controls" aria-label="Calendar month controls">

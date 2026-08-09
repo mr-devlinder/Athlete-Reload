@@ -1,0 +1,26 @@
+export function getNearestNavigationItem(items, pointerX) {
+  if (!items.length) return null
+
+  return items.reduce((nearest, item) => {
+    const center = item.left + item.width / 2
+    const distance = Math.abs(pointerX - center)
+    return !nearest || distance < nearest.distance ? { ...item, distance } : nearest
+  }, null)
+}
+
+export function getNavigationLensState(navRect, items, pointerX) {
+  const nearest = getNearestNavigationItem(items, pointerX)
+  if (!nearest) return null
+
+  const halfWidth = nearest.width / 2
+  const relativeX = pointerX - navRect.left
+
+  return {
+    activeLabel: nearest.label,
+    height: nearest.height,
+    left: Math.max(halfWidth, Math.min(relativeX, navRect.width - halfWidth)),
+    top: navRect.height / 2,
+    width: nearest.width,
+    navWidth: navRect.width,
+  }
+}

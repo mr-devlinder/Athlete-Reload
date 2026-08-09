@@ -597,7 +597,7 @@ export function AccountPrivacyView({
                       <span className="connection-status"><i aria-hidden="true" />Connected</span>
                       {identity.raw && provider.id !== 'email' && (
                         <div className="connection-menu-wrap">
-                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button"><AppIcon name="more" size={18} /></button>
+                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more app-icon-button" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button"><AppIcon name="more" size={20} /></button>
                           {openConnectionAction === identity.id && (
                             <div className="connection-menu" role="menu">
                               <button onClick={() => disconnectProvider(identity)} role="menuitem" type="button">Remove connection</button>
@@ -904,7 +904,7 @@ function ShareAuditRow({ entry, onDelete, onToggle, openId }) {
     <div className="share-audit-row">
       <div><strong>{entry.reportType.replaceAll('_', ' ')}</strong>{entry.recipientLabel ? ` · ${entry.recipientLabel}` : ''}<small>{new Date(entry.createdAt).toLocaleDateString()}</small></div>
       <div className="share-audit-actions">
-        <button aria-expanded={isOpen} aria-label="Shared report actions" className="share-audit-more" onClick={() => onToggle(isOpen ? null : entry.id)} type="button">...</button>
+        <button aria-expanded={isOpen} aria-label="Shared report actions" className="share-audit-more app-icon-button" onClick={() => onToggle(isOpen ? null : entry.id)} type="button"><AppIcon name="more" size={20} /></button>
         {isOpen && <div className="share-audit-menu"><button onClick={() => { onToggle(null); onDelete?.(entry.id) }} type="button">Delete</button></div>}
       </div>
     </div>

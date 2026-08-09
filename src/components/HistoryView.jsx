@@ -6,6 +6,8 @@ import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { formatHydration } from '../utils/units'
+import { AppIcon } from './AppIcon'
+import { DialogShell } from './DialogShell'
 
 const clearOptions = [
   { label: 'Today', days: 0 },
@@ -172,12 +174,11 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
         document.body,
       )}
 
-      {selectedWeek && createPortal(
+      {selectedWeek && (
         <WeeklyReportModal
           week={selectedWeek}
           onClose={() => setSelectedWeek(null)}
-        />,
-        document.body,
+        />
       )}
     </div>
   )
@@ -298,11 +299,11 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
         <button
           aria-expanded={isMenuOpen}
           aria-label="History item actions"
-          className="history-more-button"
+          className="history-more-button app-icon-button"
           onClick={() => setIsMenuOpen((current) => !current)}
           type="button"
         >
-          <span>...</span>
+          <AppIcon name="more" size={20} />
         </button>
         {isMenuOpen && (
           <div className="history-quick-menu">
@@ -318,42 +319,51 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
 function WeeklyReportModal({ week, onClose }) {
   const checkIns = week.items.filter((item) => item.kind === 'check-in').map((item) => item.entry)
   const checkouts = week.items.filter((item) => item.kind === 'checkout').map((item) => item.entry)
-  const averageReadiness = average(checkIns.map((entry) => entry.score))
-  const averageSleep = average(checkIns.map((entry) => Number(entry.sleep)), 1)
-  const averageFatigue = average(checkIns.map((entry) => entry.fatigue))
-  const workload = checkouts.reduce((total, checkout) => total + checkout.actualMinutes * checkout.difficulty, 0)
+  const readinessValues = checkIns.filter((entry) => entry.score != null).map((entry) => Number(entry.score)).filter(Number.isFinite)
+  const sleepValues = checkIns.map((entry) => Number(entry.sleep)).filter((value) => Number.isFinite(value) && value > 0)
+  const fatigueValues = checkIns.filter((entry) => entry.fatigue != null).map((entry) => Number(entry.fatigue)).filter(Number.isFinite)
+  const workloadValues = checkouts.filter((checkout) => checkout.actualMinutes != null && checkout.difficulty != null).map((checkout) => Number(checkout.actualMinutes) * Number(checkout.difficulty)).filter(Number.isFinite)
+  const averageReadiness = readinessValues.length ? average(readinessValues) : null
+  const averageSleep = sleepValues.length ? average(sleepValues, 1) : null
+  const averageFatigue = fatigueValues.length ? average(fatigueValues, 1) : null
+  const workload = workloadValues.length ? Math.round(workloadValues.reduce((total, value) => total + value, 0)) : null
   const painAreas = summarizePainAreas(checkIns)
+  const availability = averageReadiness == null ? 'No readiness data' : averageReadiness >= 80 ? 'Mostly available' : averageReadiness >= 60 ? 'Modified training likely' : 'Recovery focus'
+  const tone = averageReadiness == null ? 'neutral' : averageReadiness >= 80 ? 'positive' : averageReadiness >= 60 ? 'caution' : 'attention'
 
   return (
-    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
-      <section
-        className="event-modal history-modal glass-panel"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="schedule-header">
-          <SectionHeading
-            eyebrow={`Week of ${week.label}`}
-            title="Weekly athlete report."
-          />
-          <button className="ghost-close" onClick={onClose} type="button">
-            Close
-          </button>
+    <DialogShell className="weekly-report-dialog" description="A focused view of readiness, workload, and recovery signals from this week." eyebrow={`Week of ${week.label}`} onClose={onClose} title="Weekly athlete report.">
+      <section className={`weekly-report-hero tone-${tone}`}>
+        <span className="weekly-report-hero__icon"><AppIcon name="readiness" size={30} /></span>
+        <div>
+          <small>Average readiness</small>
+          <strong>{averageReadiness == null ? 'No data' : `${averageReadiness}/100`}</strong>
+          <p>{availability}</p>
         </div>
-
-        <div className="history-detail-grid">
-          <span><strong>Readiness</strong>{averageReadiness}/100 average</span>
-          <span><strong>Check-ins</strong>{checkIns.length}</span>
-          <span><strong>Checkouts</strong>{checkouts.length}</span>
-          <span><strong>Sleep</strong>{averageSleep}h average</span>
-          <span><strong>Fatigue</strong>{averageFatigue}/5 average</span>
-          <span><strong>Workload</strong>{workload || 'No checkouts'}</span>
-          <span><strong>Availability</strong>{averageReadiness >= 80 ? 'Mostly available' : averageReadiness >= 60 ? 'Modified training likely' : 'Recovery focus'}</span>
-          <span><strong>Pain pattern</strong>{painAreas || 'No recurring pain areas'}</span>
-        </div>
+        <span className="weekly-report-hero__status">{tone === 'positive' ? 'Ready' : tone === 'caution' ? 'Monitor' : tone === 'attention' ? 'Recover' : 'Awaiting data'}</span>
       </section>
-    </div>
+      <div className="weekly-report-grid">
+        <WeeklyMetric icon="sessions" label="Check-ins" value={checkIns.length || 'No data'} />
+        <WeeklyMetric icon="status" label="Checkouts" value={checkouts.length || 'No data'} />
+        <WeeklyMetric icon="sleep" label="Average sleep" value={averageSleep == null ? 'No data' : `${averageSleep} hours`} />
+        <WeeklyMetric icon="fatigue" label="Average fatigue" tone={averageFatigue >= 4 ? 'attention' : averageFatigue >= 3 ? 'caution' : averageFatigue == null ? 'neutral' : 'positive'} value={averageFatigue == null ? 'No data' : `${averageFatigue}/5`} />
+        <WeeklyMetric icon="workload" label="Session workload" value={workload == null ? 'No data' : workload} />
+        <WeeklyMetric icon="performance" label="Availability" tone={tone} value={availability} />
+        <WeeklyMetric className="weekly-report-metric-wide" icon="pain" label="Pain pattern" tone={painAreas ? 'attention' : 'positive'} value={painAreas || 'No recurring pain areas'} />
+      </div>
+    </DialogShell>
+  )
+}
+
+function WeeklyMetric({ className = '', icon, label, tone = 'neutral', value }) {
+  return (
+    <article className={`weekly-report-metric tone-${tone} ${className}`.trim()}>
+      <span className="weekly-report-metric__icon"><AppIcon name={icon} size={22} /></span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </div>
+    </article>
   )
 }
 
@@ -961,7 +971,7 @@ function summarizePainAreas(checkIns) {
   const counts = new Map()
 
   checkIns.forEach((entry) => {
-    if (entry.pain <= 0) return
+    if (Number(entry.pain) <= 0 || !entry.location) return
 
     counts.set(entry.location, (counts.get(entry.location) ?? 0) + 1)
   })

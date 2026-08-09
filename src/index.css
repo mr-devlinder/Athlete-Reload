@@ -1,6 +1,14 @@
+@font-face {
+  font-family: 'Manrope Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2') format('woff2-variations');
+}
+
 :root {
-  font-family:
-    Aptos, "Segoe UI Variable Text", Calibri, sans-serif;
+  font-family: "Manrope Variable", Manrope, "Segoe UI Variable Text", sans-serif;
+  font-size: 16px;
   color: #171717;
   background: #f8f8f6;
   font-synthesis: none;
@@ -14,7 +22,7 @@ h2,
 h3,
 .eyebrow,
 button {
-  font-family: "Avenir Next", "Century Gothic", Aptos, sans-serif;
+  font-family: "Barlow Semi Condensed", "Arial Narrow", sans-serif;
 }
 
 * {

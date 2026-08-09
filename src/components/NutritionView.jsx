@@ -9,6 +9,7 @@ import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { AppIcon } from './AppIcon'
 
 const imperialWaterAmounts = [8, 16, 20, 32, 64]
 const metricWaterAmounts = [250, 500, 750, 1000]
@@ -53,11 +54,11 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
           <SectionHeading eyebrow="Nutrition" title="Fuel for the day." />
           <p className="page-header-description">Track the fuel and hydration supporting today&apos;s training.</p>
           <div className="nutrition-date-menu">
-            <button className="nutrition-date-button" onClick={() => setIsDateOpen((current) => !current)} type="button">{displayedDate}<span>⌄</span></button>
+            <button className="nutrition-date-button" onClick={() => setIsDateOpen((current) => !current)} type="button">{displayedDate}<AppIcon name="chevron" size={20} /></button>
             {isDateOpen && <div className="nutrition-date-popover"><label>Choose a date<input autoFocus type="date" value={selectedDate} onChange={(event) => { setSelectedDate(event.target.value); setIsDateOpen(false) }} /></label><button onClick={() => { setSelectedDate(today); setIsDateOpen(false) }} type="button">Jump to today</button></div>}
           </div>
         </div>
-        <button className="nutrition-detail-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button" aria-label="View nutrition details">↔</button>
+        <button className="nutrition-detail-button app-icon-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button" aria-label="View nutrition details"><AppIcon name="expand" size={20} /></button>
       </section>
 
       <section className="nutrition-calorie-card">
@@ -74,7 +75,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
 
       <section className="nutrition-water-strip">
         <div><span>Water</span><strong>{formatHydration(wellness.hydrationMl, unitSystem)}{showTargets ? ` / ${formatHydration(hydrationTarget, unitSystem)}` : ''}</strong></div>
-        <div className="nutrition-water-actions"><button onClick={() => changeWater(unitSystem === 'metric' ? -50 : -1)} type="button" aria-label="Subtract water">−</button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ''}</button>)}<button onClick={() => changeWater(unitSystem === 'metric' ? 50 : 1)} type="button" aria-label="Add water">+</button></div>
+        <div className="nutrition-water-actions"><button className="nutrition-water-icon-button app-icon-button" onClick={() => changeWater(unitSystem === 'metric' ? -50 : -1)} type="button" aria-label="Subtract water"><AppIcon name="minus" size={20} /></button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ''}</button>)}<button className="nutrition-water-icon-button app-icon-button" onClick={() => changeWater(unitSystem === 'metric' ? 50 : 1)} type="button" aria-label="Add water"><AppIcon name="plus" size={20} /></button></div>
       </section>
 
       <section className="nutrition-meals-section">
@@ -98,16 +99,7 @@ function NutritionModalPortal({ children }) {
 
 function MealCard({ disabled = false, entries, meal, onLog, onOpen }) {
   const mealEntries = entries.filter((entry) => entry.meal === (meal === 'Snacks' ? 'Snack' : meal))
-  return <article className="nutrition-meal-card nutrition-meal-card-clickable" onClick={disabled ? undefined : onOpen}><div className="nutrition-meal-icon" aria-hidden="true"><MealIcon meal={meal} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <p>{mealEntries.length} food{mealEntries.length === 1 ? '' : 's'} · {Math.round(getNutritionTotals(mealEntries).calories)} cal</p>}</div><button className="nutrition-log-button" disabled={disabled} onClick={(event) => { event.stopPropagation(); if (!disabled) onLog() }} type="button">Log</button></article>
-}
-
-function MealIcon({ meal }) {
-  const common = { fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 1.8, viewBox: '0 0 24 24' }
-  if (meal === 'Breakfast') return <svg {...common}><path d="M4 10h13a3 3 0 0 1 0 6H6a2 2 0 0 1-2-2v-4ZM17 11h2.2a2 2 0 0 1 0 4H17M7 19h9M6 7c0-1.4 1-2.3 2-3M11 7c0-1.4 1-2.3 2-3" /></svg>
-  if (meal === 'Lunch') return <svg {...common}><path d="M3.5 8.5c1.8-2 4.1-3 8.5-3s6.7 1 8.5 3M4.5 11h15M5.5 14h13M7 17h10M5 19h14" /></svg>
-  if (meal === 'Dinner') return <svg {...common}><path d="M4 13h16a6 6 0 0 1-16 0ZM3 13h18M8 19h8M12 4v4M9 6l3 2 3-2" /></svg>
-  if (meal === 'Snacks') return <svg {...common}><path d="M5 8h14l-1 11H6L5 8ZM7 8V6a5 5 0 0 1 10 0v2M9 12h.01M12 15h.01M15 12h.01" /></svg>
-  return <svg {...common}><path d="M4 18h16M6 14h12M8 10h8M10 6h4M12 4v14" /></svg>
+  return <article className="nutrition-meal-card nutrition-meal-card-clickable" onClick={disabled ? undefined : onOpen}><div className="nutrition-meal-icon" aria-hidden="true"><AppIcon name={meal.toLowerCase()} size={24} /></div><div className="nutrition-meal-content"><h3>{meal}</h3>{mealEntries.length === 0 ? <p>Nothing logged yet</p> : <p>{mealEntries.length} food{mealEntries.length === 1 ? '' : 's'} · {Math.round(getNutritionTotals(mealEntries).calories)} cal</p>}</div><button className="nutrition-log-button" disabled={disabled} onClick={(event) => { event.stopPropagation(); if (!disabled) onLog() }} type="button">Log</button></article>
 }
 
 function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
@@ -420,13 +412,7 @@ function FoodResult({ food, isCurator, onPromote, onSave, onSelect }) {
 function foodResultKey(food) { return String(food.barcode || `${food.name}|${food.brand}|${food.servingSize}`).toLowerCase() }
 
 function Icon({ name }) {
-  const common = { 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', strokeWidth: 1.8, viewBox: '0 0 24 24' }
-  if (name === 'search') return <svg {...common}><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
-  if (name === 'barcode') return <svg {...common}><path d="M4 5v14M7 5v14M11 5v14M14 5v14M16.5 5v14M20 5v14" /></svg>
-  if (name === 'mic') return <svg {...common}><rect height="11" rx="3.5" width="7" x="8.5" y="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6" /></svg>
-  if (name === 'bookmark') return <svg {...common}><path d="M6.5 4.5A1.5 1.5 0 0 1 8 3h8a1.5 1.5 0 0 1 1.5 1.5V21L12 17l-5.5 4V4.5Z" /></svg>
-  if (name === 'plus') return <svg {...common}><path d="M12 5v14M5 12h14" /></svg>
-  return <svg {...common}><path d="m7 9 5 5 5-5" /></svg>
+  return <AppIcon name={name} size={20} />
 }
 
 function normalizeBarcode(value) {

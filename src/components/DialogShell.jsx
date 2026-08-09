@@ -1,6 +1,7 @@
 import { createPortal } from 'react-dom'
 import { useId } from 'react'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { IconButton } from './UIPrimitives'
 
 export function DialogShell({ children, className = '', description, eyebrow, onClose, title, titleId, tone = 'default' }) {
   const generatedId = useId()
@@ -25,7 +26,7 @@ export function DialogShell({ children, className = '', description, eyebrow, on
               {title && <h2 id={headingId}>{title}</h2>}
               {description && <p>{description}</p>}
             </div>
-            {onClose && <button aria-label="Close dialog" className="dialog-shell__close" onClick={onClose} type="button">Close</button>}
+            {onClose && <IconButton className="dialog-shell__close" icon="close" label="Close dialog" onClick={onClose} type="button" />}
           </header>
         )}
         <div className="dialog-shell__body">{children}</div>
