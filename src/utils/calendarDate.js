@@ -17,8 +17,12 @@ export function localDateKey(value) {
 }
 
 export function mondayWeekStart(value) {
+  return calendarWeekStart(value, 1)
+}
+
+export function calendarWeekStart(value, weekStartsOn = 1) {
   const date = parseLocalCalendarDate(value)
-  return date ? startOfWeek(date, mondayWeekOptions) : null
+  return date ? startOfWeek(date, { weekStartsOn: weekStartsOn === 0 ? 0 : 1 }) : null
 }
 
 export function parseStoredDate(value) {

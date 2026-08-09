@@ -12,23 +12,30 @@ export async function getEventWeather(city) {
   return { city: formatLocation(result), countryCode: result.country_code, feelsLike: Math.round(current.apparent_temperature), observedAt: current.time, temperature: Math.round(current.temperature_2m), temperatureC: Math.round(current.temperature_2m), wet: Number(current.precipitation) > 0 || [51, 53, 55, 61, 63, 65, 80, 81, 82].includes(Number(current.weather_code)) }
 }
 
-export async function searchLocations(query) {
-  const name = query?.trim()
-  if (!name || name.length < 2) return []
+const locationCache = new Map()
 
-  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=6&name=${encodeURIComponent(name)}`)
-  if (!response.ok) throw new Error('City search is temporarily unavailable.')
+export async function searchLocations(query, { signal } = {}) {
+  const name = query?.trim()
+  if (!name) return []
+  const key = name.toLocaleLowerCase()
+  if (locationCache.has(key)) return locationCache.get(key)
+
+  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?count=8&language=en&format=json&name=${encodeURIComponent(name)}`, { signal })
+  if (!response.ok) throw new Error('Location suggestions are temporarily unavailable.')
 
   const data = await response.json()
 
-  return (data.results ?? []).map((result) => ({
+  const results = (data.results ?? []).map((result) => ({
+    city: result.name,
+    country: result.country ?? result.country_code,
     countryCode: result.country_code,
     id: `${result.id ?? `${result.latitude}-${result.longitude}`}`,
     label: formatLocation(result),
+    region: result.admin1 ?? '',
   }))
+  locationCache.set(key, results)
+  return results
 }
-
-export const searchUsCities = searchLocations
 
 function formatLocation(result) {
   return [result.name, result.admin1, result.country].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(', ')

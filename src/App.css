@@ -8184,6 +8184,63 @@ canvas {
   padding: 24px 20px;
 }
 
+.nutrition-macro > span {
+  font-size: 14px;
+  letter-spacing: .025em;
+}
+
+.nutrition-macro strong {
+  display: grid;
+  gap: 5px;
+  line-height: 1;
+}
+
+.nutrition-macro strong b {
+  color: var(--ar-ink);
+  font-size: clamp(28px, 3vw, 38px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.045em;
+}
+
+.nutrition-macro strong i {
+  margin-left: 3px;
+  color: var(--ar-muted);
+  font-size: .48em;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.nutrition-macro strong small {
+  color: var(--ar-muted);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: .015em;
+  line-height: 1.3;
+}
+
+.nutrition-calorie-card strong {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nutrition-calorie-card strong small {
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 750;
+  letter-spacing: .015em;
+}
+
+.nutrition-water-strip strong {
+  display: block;
+  margin-top: 4px;
+  font-size: clamp(20px, 2.5vw, 28px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
 .nutrition-water-strip {
   display: grid;
   align-content: center;
@@ -8214,6 +8271,181 @@ canvas {
 
 @media (max-width: 620px) {
   .nutrition-macro-card { grid-template-columns: 1fr; }
-  .nutrition-macro { min-height: auto; }
+  .nutrition-macro { min-height: auto; padding: 18px 20px; }
+  .nutrition-macro strong b { font-size: 32px; }
   .nutrition-meal-grid { grid-template-columns: 1fr; }
+}
+/* Prestigious system pass: final overrides intentionally outrank legacy feature CSS. */
+html.startup-active,
+body.startup-active,
+body.startup-active #root {
+  width: 100%;
+  min-width: 100%;
+  height: 100%;
+  min-height: 100dvh;
+  margin: 0;
+  background: #090a0c;
+  overscroll-behavior: none;
+}
+
+.startup-loader {
+  inset: 0;
+  width: 100vw;
+  width: 100dvw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+.startup-loader.motion-full .startup-loader-glow { animation: startup-glow 1.8s ease-in-out infinite alternate !important; }
+.startup-loader.motion-full .startup-loader-mark { animation: startup-mark-in 700ms cubic-bezier(.2,.9,.25,1.2) both !important; }
+.startup-loader.motion-full .startup-loader-mark img { animation: startup-logo-pulse 1.5s ease-in-out 700ms infinite !important; }
+.startup-loader.motion-full .startup-loader-orbit { animation: startup-spin 1.45s linear infinite !important; }
+.startup-loader.motion-full .startup-loader-orbit.orbit-two { animation: startup-spin 2s linear infinite reverse !important; }
+.startup-loader.motion-full .startup-loader-scan { animation: startup-scan 1.8s ease-out infinite !important; }
+.startup-loader.motion-full .startup-loader-copy { animation: startup-copy-in 600ms ease-out 280ms both !important; }
+.startup-loader.motion-full .startup-loader-meter i { animation: startup-meter 1s ease-in-out infinite !important; }
+.startup-loader.motion-full.is-exiting { animation: startup-exit 650ms cubic-bezier(.65,0,.35,1) forwards !important; }
+.startup-loader.motion-full.is-exiting .startup-loader-mark { animation: startup-mark-exit 650ms cubic-bezier(.65,0,.35,1) forwards !important; }
+.startup-loader.motion-full.is-exiting .startup-loader-copy,
+.startup-loader.motion-full.is-exiting .startup-loader-meter { animation: startup-copy-exit 420ms ease-in forwards !important; }
+
+.startup-loader.motion-reduced *,
+.startup-loader.motion-reduced .startup-loader-glow { animation: none !important; }
+.startup-loader.motion-reduced.is-exiting { animation: startup-exit 240ms ease-out forwards !important; }
+
+.app-shell {
+  --control-height: 46px;
+  --control-radius: 13px;
+  --surface-raised: rgba(255, 255, 252, .82);
+  --surface-solid: #fbfbf8;
+  --line-refined: rgba(15, 15, 15, .1);
+  --shadow-refined: 0 18px 50px rgba(10, 10, 10, .075);
+  font-family: "Avenir Next", Avenir, "Century Gothic", sans-serif;
+}
+
+.app-shell.density-compact {
+  --control-height: 40px;
+  --control-radius: 11px;
+}
+
+.app-shell.density-compact .workspace.page-workspace { padding: clamp(16px, 2vw, 28px); }
+.app-shell.density-compact .settings-panel,
+.app-shell.density-compact .form-panel { padding: 16px; }
+
+.primary-button,
+.secondary-button,
+.remove-button,
+.ghost-close,
+.load-saved-routines-button,
+.compact-action,
+.nutrition-log-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: var(--control-height, 46px);
+  padding: 0 18px;
+  border-radius: var(--control-radius, 13px);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.01em;
+}
+
+.primary-button { border: 1px solid #111; background: #111; color: #fff; }
+.secondary-button,
+.ghost-close { border: 1px solid var(--line-refined); background: rgba(255,255,255,.72); color: #171717; }
+.remove-button { border: 1px solid rgba(151,46,46,.2); background: rgba(151,46,46,.07); color: #8d2929; }
+
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.remove-button:focus-visible,
+.ghost-close:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(17,17,17,.2);
+  outline-offset: 3px;
+}
+
+.app-icon { display: block; flex: 0 0 auto; }
+
+.recovery-generator-controls {
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(190px, auto) minmax(190px, auto);
+}
+.recovery-generator-controls .primary-button,
+.recovery-generator-controls .load-saved-routines-button {
+  width: 100%;
+  min-width: 190px;
+  min-height: var(--control-height);
+  border-radius: var(--control-radius);
+}
+.load-saved-routines-button { border: 1px solid var(--line-refined); background: #fff; color: #171717; }
+.load-saved-routines-button:hover,
+.load-saved-routines-button[aria-expanded='true'] { background: #ecece8; color: #111; }
+
+.settings-layout { grid-template-columns: minmax(180px, 220px) minmax(0, 1fr); gap: 24px; }
+.settings-sidebar {
+  position: sticky;
+  top: 18px;
+  align-self: start;
+  padding: 8px;
+  border: 1px solid var(--line-refined);
+  border-radius: 18px;
+  background: rgba(255,255,255,.55);
+  box-shadow: var(--shadow-refined);
+}
+.settings-sidebar button { min-height: 44px; border-radius: 11px; text-align: left; }
+.settings-panel {
+  border: 1px solid var(--line-refined);
+  border-radius: 22px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-refined);
+}
+.settings-preference-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; margin-top: 18px; }
+.legal-link-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+
+.city-autocomplete { position: relative; }
+.city-search-status { display: block; margin-top: 6px; color: #656565; font-size: 11px; font-weight: 700; }
+.city-suggestions {
+  border: 1px solid var(--line-refined);
+  border-radius: 14px;
+  background: rgba(255,255,252,.98);
+  box-shadow: 0 22px 55px rgba(0,0,0,.15);
+}
+.city-suggestions button { min-height: 42px; border-radius: 9px; }
+
+.app-error-state {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: min(680px, 100dvh);
+  padding: 40px 24px;
+  background: linear-gradient(145deg, #f7f7f3, #e9e9e4);
+  color: #171717;
+  text-align: center;
+}
+.app-error-state__mark { display: grid; place-items: center; width: 58px; height: 58px; margin-bottom: 18px; border-radius: 18px; background: #111; color: #fff; font-weight: 900; letter-spacing: .08em; }
+.app-error-state h1 { max-width: 620px; margin: 6px 0 10px; font-size: clamp(34px, 6vw, 64px); letter-spacing: -.055em; line-height: .98; }
+.app-error-state > p:not(.eyebrow) { max-width: 520px; margin: 0 0 24px; color: #646464; }
+
+@media (max-width: 900px) {
+  .recovery-generator-controls { grid-template-columns: 1fr 1fr; }
+  .settings-layout { grid-template-columns: 1fr; }
+  .settings-sidebar { position: static; display: flex; overflow-x: auto; padding: 6px; }
+  .settings-sidebar button { flex: 0 0 auto; }
+}
+
+@media (max-width: 620px) {
+  .recovery-generator-controls,
+  .settings-preference-grid,
+  .legal-link-grid { grid-template-columns: 1fr; }
+  .recovery-generator-controls .primary-button,
+  .recovery-generator-controls .load-saved-routines-button { min-width: 0; }
+  .top-bar { border-radius: 18px; }
+  .nav-tabs button { min-width: 72px; }
+  .app-icon { shape-rendering: geometricPrecision; }
 }

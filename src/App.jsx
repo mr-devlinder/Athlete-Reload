@@ -11,6 +11,7 @@ import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { DialogShell } from './components/DialogShell'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
 import {
   checkInDefaults,
   associations as initialAssociations,
@@ -78,6 +79,7 @@ import {
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { buildAthleteContext, buildFallbackRecommendation } from './lib/recommendationContext'
+import { displayPreferenceDefaults, normalizeDisplayPreferences } from './lib/displayPreferences'
 import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
@@ -120,6 +122,7 @@ const views = [
 
 const privacyDefaults = {
   aiPersonalizationEnabled: true,
+  display: displayPreferenceDefaults,
   remindersEnabled: false,
 }
 
@@ -690,7 +693,7 @@ function App() {
   const [dataStatus, setDataStatus] = useState('ready')
   const [isEditingToday, setIsEditingToday] = useState(false)
   const [selectedCheckInEventId, setSelectedCheckInEventId] = useState(null)
-  const [activeView, setActiveView] = useState('Home')
+  const [activeView, setActiveView] = useState(() => normalizeDisplayPreferences(savedState?.privacyPreferences?.display).defaultView)
   const [checkoutEvent, setCheckoutEvent] = useState(null)
   const [submittedRecommendation, setSubmittedRecommendation] = useState(null)
   const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
@@ -730,13 +733,14 @@ function App() {
   const [dailyWellness, setDailyWellness] = useState(() => normalizeWellnessUnits(savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationMl: 0, nutritionEntries: [] })))
   const [nutritionHistory, setNutritionHistory] = useState(() => (savedState?.nutritionHistory ?? []).map(normalizeWellnessUnits))
   const [privacyPreferences, setPrivacyPreferences] = useState(
-    savedState?.privacyPreferences ?? privacyDefaults,
+    { ...privacyDefaults, ...savedState?.privacyPreferences, display: normalizeDisplayPreferences(savedState?.privacyPreferences?.display, savedState?.athleteProfile?.unitSystem) },
   )
   const [associations, setAssociations] = useState(savedState?.associations ?? initialAssociations)
   const [schedule, setSchedule] = useState(
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
   const visualActiveView = navLens?.activeLabel ?? activeView
+  const displayPreferences = normalizeDisplayPreferences(privacyPreferences.display, athleteProfile?.unitSystem)
   const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
   resetAccountStateRef.current = resetAccountState
   const todayIso = getTodayIso()
@@ -1078,6 +1082,8 @@ function App() {
           console.warn(preferencesError)
         }
 
+        const profile = await loadAthleteProfile()
+
         if (!isMounted) return
 
         setSchedule(data.schedule)
@@ -1092,8 +1098,9 @@ function App() {
         setTournaments(data.tournaments)
         setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
         setNutritionHistory(data.wellnessHistory ?? [])
-        setPrivacyPreferences(preferences)
-        setAthleteProfile(await loadAthleteProfile())
+        setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
+        setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
+        setAthleteProfile(profile)
         setIsProfileReady(true)
         setDataStatus('ready')
       } catch (error) {
@@ -1111,6 +1118,8 @@ function App() {
                 console.warn(preferencesError)
               }
 
+              const profile = await loadAthleteProfile()
+
               if (!isMounted) return
 
               setSchedule(data.schedule)
@@ -1125,8 +1134,9 @@ function App() {
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
               setNutritionHistory(data.wellnessHistory ?? [])
-              setPrivacyPreferences(preferences)
-              setAthleteProfile(await loadAthleteProfile())
+              setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
+              setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
+              setAthleteProfile(profile)
               setIsProfileReady(true)
               setDataStatus('ready')
               return
@@ -1153,6 +1163,8 @@ function App() {
                 console.warn(preferencesError)
               }
 
+              const profile = await loadAthleteProfile()
+
               if (!isMounted) return
 
               setSchedule(data.schedule)
@@ -1167,8 +1179,9 @@ function App() {
               setTournaments(data.tournaments)
               setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
               setNutritionHistory(data.wellnessHistory ?? [])
-              setPrivacyPreferences(preferences)
-              setAthleteProfile(await loadAthleteProfile())
+              setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
+              setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
+              setAthleteProfile(profile)
               setIsProfileReady(true)
               setDataStatus('ready')
               return
@@ -2390,6 +2403,35 @@ function App() {
     }
   }
 
+  async function updateDisplayPreference(key, value) {
+    const display = normalizeDisplayPreferences({ ...privacyPreferences.display, [key]: value }, athleteProfile?.unitSystem)
+    const nextPreferences = { ...privacyPreferences, display }
+    const previousPreferences = privacyPreferences
+    const previousProfile = athleteProfile
+    setPrivacyPreferences(nextPreferences)
+
+    if (key === 'unitSystem') {
+      setAthleteProfile((current) => current ? { ...current, unitSystem: display.unitSystem } : current)
+    }
+
+    if (!isSupabaseSession) return true
+
+    try {
+      const saves = [upsertPrivacyPreferences(nextPreferences)]
+      if (key === 'unitSystem' && athleteProfile) saves.push(upsertAthleteProfile({ ...athleteProfile, unitSystem: display.unitSystem }))
+      const [savedPreferences, savedProfile] = await Promise.all(saves)
+      setPrivacyPreferences(savedPreferences)
+      if (savedProfile) setAthleteProfile(normalizeProfileUnits(savedProfile))
+      return true
+    } catch (error) {
+      console.error('Unable to save display preference', error)
+      setPrivacyPreferences(previousPreferences)
+      setAthleteProfile(previousProfile)
+      setDataStatus('error')
+      return false
+    }
+  }
+
   function replaySavedRoutine(routine) {
     setGeneratedRecoveryPlan(routine.routine)
     setGeneratedRecoveryCheckoutId(null)
@@ -2959,13 +3001,14 @@ function App() {
     return (
       <StartupLoader
         isReady={areViewsReady && isAuthReady && (!isAppUnlocked || !session || isProfileReady)}
+        motion={displayPreferences.startupMotion}
         onComplete={() => setIsStartupComplete(true)}
       />
     )
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell density-${displayPreferences.density} motion-${displayPreferences.startupMotion}`}>
       <SVGFilters>
         <SVGFilters.DefaultFilters />
       </SVGFilters>
@@ -3082,6 +3125,7 @@ function App() {
 
       <section className="page-content">
         <section className="workspace page-workspace glass-panel">
+          <AppErrorBoundary feature={`view-${activeView.toLowerCase()}`} key={activeView}>
           <Suspense fallback={null}>
             {dataStatus === 'error' && (
               <div className="data-status error">
@@ -3148,6 +3192,7 @@ function App() {
                 nutritionHistory={nutritionHistory}
                 onSaveWellness={saveDailyWellness}
                 schedule={schedule}
+                showTargets={displayPreferences.showNutritionTargets}
               />
             )}
 
@@ -3204,6 +3249,7 @@ function App() {
                 onFavoriteRoutine={favoriteRecoveryRoutine}
                 recoveryCompletions={recoveryCompletions}
                 savedRoutines={savedRoutines}
+                weekStartsOn={displayPreferences.weekStartsOn}
               />
             )}
 
@@ -3229,9 +3275,12 @@ function App() {
                 onDeleteShareAuditLog={removeShareAuditLog}
                 onUpdateReminderPreference={updateReminderPreference}
                 onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
+                onUpdateDisplayPreference={updateDisplayPreference}
+                onOpenLegal={setActiveLegalModal}
               />
             )}
           </Suspense>
+          </AppErrorBoundary>
           </section>
       </section>
 
@@ -3350,15 +3399,19 @@ function App() {
   )
 }
 
-function StartupLoader({ isReady, onComplete }) {
+function StartupLoader({ isReady, motion = 'full', onComplete }) {
   const [cycleComplete, setCycleComplete] = useState(false)
   const [isExiting, setIsExiting] = useState(false)
   const completeStartup = useEffectEvent(onComplete)
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
+    document.documentElement.classList.add('startup-active')
+    document.body.classList.add('startup-active')
     document.body.style.overflow = 'hidden'
     return () => {
+      document.documentElement.classList.remove('startup-active')
+      document.body.classList.remove('startup-active')
       document.body.style.overflow = previousOverflow
     }
   }, [])
@@ -3380,7 +3433,7 @@ function StartupLoader({ isReady, onComplete }) {
   }, [isExiting])
 
   return (
-    <div className={`startup-loader${isExiting ? ' is-exiting' : ''}`} role="status" aria-label="Loading Athlete Reload">
+    <div className={`startup-loader motion-${motion}${isExiting ? ' is-exiting' : ''}`} role="status" aria-label="Loading Athlete Reload">
       <div className="startup-loader-glow" aria-hidden="true" />
       <div className="startup-loader-mark" aria-hidden="true">
         <span className="startup-loader-orbit orbit-one" />

@@ -19,7 +19,7 @@ import {
 import { Select } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { getCheckoutForEvent, getEventDisplayName, isAllDayEvent, isOtherActivityEvent, isRestDayEvent } from '../utils/events'
-import { searchUsCities } from '../lib/weather'
+import { searchLocations } from '../lib/weather'
 import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, getSportSurfaces, getSportWorkloadFields } from '../data/sportProfiles'
 import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
 
@@ -625,34 +625,36 @@ function TournamentModal({ associations, athleteProfile, existingGames = [], mod
   const [cityResults, setCityResults] = useState([])
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
   const [citySearchError, setCitySearchError] = useState('')
+  const [isCitySearching, setIsCitySearching] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    let isCurrent = true
+    const controller = new AbortController()
     const query = cityQuery.trim()
 
-    if (query.length < 2 || query === draft.location) {
+    if (!query || query === draft.location) {
       setCityResults([])
-      return () => { isCurrent = false }
+      setIsCitySearching(false)
+      return () => controller.abort()
     }
 
-    const timeoutId = window.setTimeout(async () => {
+    setIsCitySearching(true)
+    async function runSearch() {
       try {
-        const results = await searchUsCities(query)
-        if (!isCurrent) return
+        const results = await searchLocations(query, { signal: controller.signal })
         setCityResults(results)
-        setCitySearchError(results.length ? '' : 'Choose a valid U.S. city from the list.')
+        setCitySearchError(results.length ? '' : 'No matching locations found.')
       } catch (error) {
-        if (!isCurrent) return
+        if (error.name === 'AbortError') return
         setCityResults([])
         setCitySearchError(error.message)
+      } finally {
+        if (!controller.signal.aborted) setIsCitySearching(false)
       }
-    }, 220)
-
-    return () => {
-      isCurrent = false
-      window.clearTimeout(timeoutId)
     }
+    void runSearch()
+
+    return () => controller.abort()
   }, [cityQuery, draft.location])
 
   const cityIsValid = !cityQuery.trim() || cityQuery === draft.location
@@ -707,11 +709,12 @@ function TournamentModal({ associations, athleteProfile, existingGames = [], mod
           <label className="compact-field">Start date<input type="date" value={draft.startDate} onChange={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} /></label>
           <label className="compact-field">End date<input min={draft.startDate} type="date" value={draft.endDate} onChange={(event) => setDraft((current) => ({ ...current, endDate: event.target.value }))} /></label>
           <div className="compact-field city-autocomplete">
-            <span>U.S. city</span>
+            <span>City or location</span>
             <input aria-autocomplete="list" aria-expanded={isCityMenuOpen && cityResults.length > 0} aria-invalid={!cityIsValid} autoComplete="off" value={cityQuery} onChange={(event) => { setCityQuery(event.target.value); setCitySearchError(''); setIsCityMenuOpen(true); setDraft((current) => ({ ...current, location: '' })) }} onFocus={() => setIsCityMenuOpen(true)} />
             {isCityMenuOpen && cityResults.length > 0 && <div className="city-suggestions" role="listbox">{cityResults.map((city) => <button key={city.id} onMouseDown={(event) => event.preventDefault()} onClick={() => { setCityQuery(city.label); setCityResults([]); setCitySearchError(''); setIsCityMenuOpen(false); setDraft((current) => ({ ...current, location: city.label })) }} role="option" type="button">{city.label}</button>)}</div>}
+            {isCitySearching && <small className="city-search-status" role="status">Finding locations...</small>}
             {!cityIsValid && <small className="city-validation">Choose a city from the suggestions.</small>}
-            {citySearchError && cityQuery.trim().length >= 2 && <small className="city-validation">{citySearchError}</small>}
+            {citySearchError && cityQuery.trim() && <small className="city-validation">{citySearchError}</small>}
           </div>
         </div>
         <div className="tournament-games-header"><div><p className="eyebrow">Competition events</p><p>Add each {competitionLabel.toLowerCase()} so the app can track turnaround time, workload, and pain changes.</p></div><button className="secondary-button compact-action" onClick={addGame} type="button">Add {competitionLabel.toLowerCase()}</button></div>
@@ -788,6 +791,7 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
   const [cityResults, setCityResults] = useState([])
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
   const [citySearchError, setCitySearchError] = useState('')
+  const [isCitySearching, setIsCitySearching] = useState(false)
 
   useEffect(() => {
     document.body.classList.add('modal-open')
@@ -796,33 +800,32 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
   }, [])
 
   useEffect(() => {
-    let isCurrent = true
+    const controller = new AbortController()
     const query = cityQuery.trim()
 
-    if (query.length < 2 || query === draftEvent.location) {
+    if (!query || query === draftEvent.location) {
       setCityResults([])
-      return () => {
-        isCurrent = false
-      }
+      setIsCitySearching(false)
+      return () => controller.abort()
     }
 
-    const timeoutId = window.setTimeout(async () => {
+    setIsCitySearching(true)
+    async function runSearch() {
       try {
-        const results = await searchUsCities(query)
-        if (!isCurrent) return
+        const results = await searchLocations(query, { signal: controller.signal })
         setCityResults(results)
-        setCitySearchError(results.length === 0 ? 'Choose a valid U.S. city from the list.' : '')
+        setCitySearchError(results.length === 0 ? 'No matching locations found.' : '')
       } catch (error) {
-        if (!isCurrent) return
+        if (error.name === 'AbortError') return
         setCityResults([])
         setCitySearchError(error.message)
+      } finally {
+        if (!controller.signal.aborted) setIsCitySearching(false)
       }
-    }, 220)
-
-    return () => {
-      isCurrent = false
-      window.clearTimeout(timeoutId)
     }
+    void runSearch()
+
+    return () => controller.abort()
   }, [cityQuery, draftEvent.location])
 
   const cityIsValid = !cityQuery.trim() || cityQuery === draftEvent.location
@@ -958,7 +961,7 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
             />
           ))}
           {!isAllDay && <div className="compact-field city-autocomplete">
-            <span>U.S. city</span>
+            <span>City or location</span>
             <input
               aria-autocomplete="list"
               aria-expanded={isCityMenuOpen && cityResults.length > 0}
@@ -977,8 +980,9 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
                 ))}
               </div>
             )}
+            {isCitySearching && <small className="city-search-status" role="status">Finding locations...</small>}
             {!cityIsValid && <small className="city-validation">Choose a city from the suggestions.</small>}
-            {citySearchError && cityQuery.trim().length >= 2 && <small className="city-validation">{citySearchError}</small>}
+            {citySearchError && cityQuery.trim() && <small className="city-validation">{citySearchError}</small>}
           </div>}
           {mode === 'create' && (
             <>

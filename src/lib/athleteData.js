@@ -3,6 +3,7 @@ import { supabase } from './supabaseClient'
 import { estimatePlannedMinutes, isAllDayEvent, isOtherActivityEvent } from '../utils/events'
 import { normalizePainMapScale } from '../data/bodyPainMap'
 import { fluidOuncesToMilliliters, inchesToCentimeters, milesToMeters, poundsToKilograms, yardsToMeters } from '../utils/units'
+import { normalizeDisplayPreferences } from './displayPreferences'
 
 function normalizeFivePointValue(value, fallback = 1) {
   const number = Number(value)
@@ -306,6 +307,7 @@ function toPainReportRow(report) {
 function fromPrivacyPreferencesRow(row) {
   return {
     aiPersonalizationEnabled: row.ai_personalization_enabled !== false,
+    display: normalizeDisplayPreferences(row.display_preferences),
     remindersEnabled: Boolean(row.reminders_enabled),
   }
 }
@@ -436,6 +438,7 @@ function toDailyWellnessRow(wellness) {
 function toPrivacyPreferencesRow(preferences) {
   return {
     ai_personalization_enabled: preferences.aiPersonalizationEnabled !== false,
+    display_preferences: normalizeDisplayPreferences(preferences.display),
     reminders_enabled: Boolean(preferences.remindersEnabled),
     updated_at: new Date().toISOString(),
   }

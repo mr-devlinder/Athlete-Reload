@@ -14,7 +14,7 @@ const imperialWaterAmounts = [8, 16, 20, 32, 64]
 const metricWaterAmounts = [250, 500, 750, 1000]
 const mealCards = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
 
-export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionHistory = [], onSaveWellness, schedule }) {
+export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionHistory = [], onSaveWellness, schedule, showTargets = true }) {
   const today = format(new Date(), 'yyyy-MM-dd')
   const [selectedDate, setSelectedDate] = useState(today)
   const [isDateOpen, setIsDateOpen] = useState(false)
@@ -26,6 +26,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
   const entries = wellness.nutritionEntries ?? []
   const totals = getNutritionTotals(entries)
   const targets = useMemo(() => getNutritionTargets(athleteProfile, schedule, selectedDate), [athleteProfile, schedule, selectedDate])
+  const visibleTargets = showTargets ? targets : {}
   const hydrationTarget = getHydrationTarget(athleteProfile, schedule, selectedDate)
   const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
   const quickWaterAmounts = unitSystem === 'metric' ? metricWaterAmounts : imperialWaterAmounts
@@ -60,19 +61,19 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       </section>
 
       <section className="nutrition-calorie-card">
-        <div><span>Calories</span><strong>{Math.round(totals.calories)} <small>/ {targets.calories ?? '—'}</small></strong></div>
-        <span className="nutrition-calorie-remaining">{targets.calories ? `${Math.max(0, Math.round(targets.calories - totals.calories))} left` : 'Add profile details'}</span>
-        <Progress value={totals.calories} target={targets.calories} tone="calories" />
+        <div><span>Calories</span><strong>{Math.round(totals.calories)}{showTargets && <small>Target {targets.calories ?? '—'}</small>}</strong></div>
+        {showTargets && <span className="nutrition-calorie-remaining">{targets.calories ? `${Math.max(0, Math.round(targets.calories - totals.calories))} left` : 'Add profile details'}</span>}
+        <Progress value={totals.calories} target={visibleTargets.calories} tone="calories" />
       </section>
 
       <section className="nutrition-macro-card">
-        <Macro label="Carbs" value={totals.carbohydrates} target={targets.carbohydrates} unit="g" tone="carbs" />
-        <Macro label="Fat" value={totals.fats} target={targets.fats} unit="g" tone="fat" />
-        <Macro label="Protein" value={totals.protein} target={targets.protein} unit="g" tone="protein" />
+        <Macro label="Carbs" value={totals.carbohydrates} target={visibleTargets.carbohydrates} unit="g" tone="carbs" />
+        <Macro label="Fat" value={totals.fats} target={visibleTargets.fats} unit="g" tone="fat" />
+        <Macro label="Protein" value={totals.protein} target={visibleTargets.protein} unit="g" tone="protein" />
       </section>
 
       <section className="nutrition-water-strip">
-        <div><span>Water</span><strong>{formatHydration(wellness.hydrationMl, unitSystem)} / {formatHydration(hydrationTarget, unitSystem)}</strong></div>
+        <div><span>Water</span><strong>{formatHydration(wellness.hydrationMl, unitSystem)}{showTargets ? ` / ${formatHydration(hydrationTarget, unitSystem)}` : ''}</strong></div>
         <div className="nutrition-water-actions"><button onClick={() => changeWater(unitSystem === 'metric' ? -50 : -1)} type="button" aria-label="Subtract water">−</button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ''}</button>)}<button onClick={() => changeWater(unitSystem === 'metric' ? 50 : 1)} type="button" aria-label="Add water">+</button></div>
       </section>
 
@@ -81,12 +82,12 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
         <div className="nutrition-meal-grid">{mealCards.map((meal) => <MealCard disabled={isGuidedTour} key={meal} meal={meal} entries={entries} onOpen={() => setOpenMeal(meal === 'Snacks' ? 'Snack' : meal)} onLog={() => setLoggingMeal(meal === 'Snacks' ? 'Snack' : meal)} />)}</div>
       </section>
 
-      <p className="nutrition-target-note">{targets.reason}</p>
+      {showTargets && <p className="nutrition-target-note">{targets.reason}</p>}
 
       {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food, meal) => setSelectedFood({ food, meal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {selectedFood && <NutritionModalPortal><ServingModal canSaveReusable={Boolean(selectedFood.entryId)} food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: selectedFood.entryId ? entries.map((entry) => entry.id === selectedFood.entryId ? { ...food, id: entry.id, loggedAt: entry.loggedAt } : entry) : [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {openMeal && <NutritionModalPortal><MealDetailModal date={selectedDate} entries={entries} meal={openMeal} onClose={() => setOpenMeal(null)} onDateChange={setSelectedDate} onDelete={removeFood} onEdit={(entry) => { setOpenMeal(null); setSelectedFood({ food: entry, meal: openMeal, entryId: entry.id }) }} /></NutritionModalPortal>}
-      {detailsOpen && <NutritionModalPortal><NutritionDetailsModal entries={entries} hydrationMl={wellness.hydrationMl} onClose={() => setDetailsOpen(false)} targets={targets} totals={totals} unitSystem={unitSystem} /></NutritionModalPortal>}
+      {detailsOpen && <NutritionModalPortal><NutritionDetailsModal entries={entries} hydrationMl={wellness.hydrationMl} onClose={() => setDetailsOpen(false)} targets={visibleTargets} totals={totals} unitSystem={unitSystem} /></NutritionModalPortal>}
     </div>
   )
 }
@@ -503,7 +504,7 @@ function getServingOptions(food) {
 
 function roundNutrient(value) { return Math.round(value * 10) / 10 }
 
-function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><strong>{Math.round(value)} <small>/ {target ?? '—'}{unit}</small></strong><Progress value={value} target={target} tone={tone} /></div> }
+function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><strong><b>{Math.round(value)}<i>{unit}</i></b>{target != null && <small>Target {target}{unit}</small>}</strong><Progress value={value} target={target} tone={tone} /></div> }
 function Progress({ target, tone, value }) { return <div className={`nutrition-progress ${tone}`}><span style={{ width: `${target ? Math.min(100, (Number(value) / Number(target)) * 100) : 0}%` }} /></div> }
 
 function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete, onEdit }) {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
+import { AppIcon } from './AppIcon'
 
 const equipmentOptions = [
   'Exercise mat', 'Foam roller', 'Stretching strap', 'Yoga blocks', 'Resistance band', 'Mini band',
@@ -363,9 +364,11 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 )}
               </div>
               <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'last-checkout' && !latestCheckout) || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
+                <AppIcon name="spark" size={18} />
                 {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
               </button>
               <button aria-expanded={savedRoutinesOpen} className="load-saved-routines-button" onClick={() => setSavedRoutinesOpen((current) => !current)} type="button">
+                <AppIcon name="folder" size={18} />
                 Load saved routines
               </button>
             </div>

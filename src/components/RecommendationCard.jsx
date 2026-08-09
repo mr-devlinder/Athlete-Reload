@@ -71,7 +71,7 @@ function ReportSource({ session, status }) {
 function ReportSection({ section, tone = '' }) {
   if (!section || (!section.summary && !section.items?.length)) return null
   return <section className={`report-section ${tone}`}>
-    <div className="report-section-heading"><span aria-hidden="true">{getSectionIcon(section.id)}</span><strong>{section.title}</strong></div>
+    <div className="report-section-heading"><span aria-hidden="true"><AppIcon name={getSectionIcon(section.id)} size={18} /></span><strong>{section.title}</strong></div>
     {section.summary && <p>{section.summary}</p>}
     {section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}
     {section.id === 'warm-up-focus' && section.items?.length > 1 && <details className="warmup-details"><summary>How to use this</summary><p>Use these priorities inside your normal progressive warm-up. Keep every movement comfortable and controlled.</p></details>}
@@ -80,7 +80,7 @@ function ReportSection({ section, tone = '' }) {
 
 function TimelineSection({ section }) {
   return <section className="recommendation-timeline">
-    <div className="report-section-heading"><span aria-hidden="true">T</span><strong>{section.title}</strong></div>
+    <div className="report-section-heading"><span aria-hidden="true"><AppIcon name="performance" size={18} /></span><strong>{section.title}</strong></div>
     {section.summary && <p>{section.summary}</p>}
     <ol>{section.items?.map((item) => <li key={item}>{item}</li>)}</ol>
   </section>
@@ -97,24 +97,24 @@ function indexSections(sections = []) {
 
 function getSectionIcon(id) {
   return ({
-    'readiness-status': 'R',
-    'warm-up-focus': 'W',
-    'hydration-target': 'H',
-    'fueling-target': 'F',
-    'during-event-fueling': 'D',
-    'performance-focus': 'P',
-    'pain-guidance': '!',
-    'fatigue-load': 'L',
-    'environment-guidance': 'E',
-    'event-preparation': 'S',
-    'session-summary': 'S',
-    'recovery-status': 'R',
-    'hydration-recovery': 'H',
-    'nutrition-recovery': 'N',
-    cooldown: 'C',
-    'new-pain-soreness': '!',
-    'next-few-hours': '3',
-  })[id] ?? '-'
+    'readiness-status': 'shield',
+    'warm-up-focus': 'warmup',
+    'hydration-target': 'water',
+    'fueling-target': 'fuel',
+    'during-event-fueling': 'fuel',
+    'performance-focus': 'performance',
+    'pain-guidance': 'alert',
+    'fatigue-load': 'recovery',
+    'environment-guidance': 'water',
+    'event-preparation': 'performance',
+    'session-summary': 'performance',
+    'recovery-status': 'recovery',
+    'hydration-recovery': 'water',
+    'nutrition-recovery': 'fuel',
+    cooldown: 'recovery',
+    'new-pain-soreness': 'alert',
+    'next-few-hours': 'spark',
+  })[id] ?? 'spark'
 }
 
 function getReadinessBand(score) {
@@ -122,3 +122,4 @@ function getReadinessBand(score) {
   if (Number(score) >= 60) return 'readiness-yellow'
   return 'readiness-red'
 }
+import { AppIcon } from './AppIcon'

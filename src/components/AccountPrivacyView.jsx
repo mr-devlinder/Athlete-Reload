@@ -3,6 +3,8 @@ import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 import { SectionHeading } from './SectionHeading'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { canRemoveAuthMethod, getUnlinkMessage, resolveAuthMethods } from '../lib/authMethods'
+import { AppIcon } from './AppIcon'
 
 const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
 
@@ -14,6 +16,8 @@ export function AccountPrivacyView({
   history,
   nutritionHistory = [],
   onUpdateAiPersonalizationPreference,
+  onUpdateDisplayPreference,
+  onOpenLegal,
   onAccountDeleted,
   onClearAllHealthHistory,
   onDeleteShareAuditLog,
@@ -130,18 +134,18 @@ export function AccountPrivacyView({
     setMessage('')
     setOpenConnectionAction(null)
 
-    if (!identity?.raw || identities.length < 2) {
+    if (!identity?.raw || !canRemoveAuthMethod(identity.provider, identities, session?.user)) {
       setMessage('Connect another sign-in method before removing this one.')
       return
     }
 
     const { error } = await supabase.auth.unlinkIdentity(identity.raw)
     if (error) {
-      setMessage('Unable to remove that connected account. Make sure another sign-in method is available.')
+      setMessage(getUnlinkMessage(error))
       return
     }
 
-    setIdentities((current) => current.filter((item) => item.id !== identity.raw.id && item.identity_id !== identity.raw.identity_id))
+    await loadIdentities()
     setMessage(`${providerOptions.find((provider) => provider.id === identity.provider)?.label ?? 'Account'} connection removed.`)
   }
 
@@ -515,7 +519,7 @@ export function AccountPrivacyView({
 
       <div className="settings-layout">
         <aside className="settings-sidebar" aria-label="Settings sections">
-          {[['account', 'Account'], ['preferences', 'Preferences'], ['security', 'Security'], ['data', 'Data']].map(([key, label]) => (
+          {[['account', 'Account'], ['appearance', 'Appearance'], ['preferences', 'Preferences'], ['security', 'Security'], ['data', 'Privacy & Data'], ['legal', 'Legal']].map(([key, label]) => (
             <button className={activeSection === key ? 'active' : ''} key={key} onClick={() => setActiveSection(key)} type="button">
               {label}
             </button>
@@ -537,6 +541,18 @@ export function AccountPrivacyView({
               Resend verification
             </button>
           )}
+        </article>
+
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'appearance'}>
+          <div className="settings-panel-heading"><div><span>Interface</span><h2>Appearance and behavior</h2></div><p>Choose how Athlete Reload looks and opens across your devices.</p></div>
+          <div className="settings-preference-grid">
+            <label className="select-field">Units<select value={preferences.display?.unitSystem ?? athleteProfile?.unitSystem ?? 'imperial'} onChange={(event) => onUpdateDisplayPreference?.('unitSystem', event.target.value)}><option value="imperial">Imperial</option><option value="metric">Metric</option></select></label>
+            <label className="select-field">Startup motion<select value={preferences.display?.startupMotion ?? 'full'} onChange={(event) => onUpdateDisplayPreference?.('startupMotion', event.target.value)}><option value="full">Full animation</option><option value="reduced">Reduced animation</option></select></label>
+            <label className="select-field">Interface density<select value={preferences.display?.density ?? 'comfortable'} onChange={(event) => onUpdateDisplayPreference?.('density', event.target.value)}><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+            <label className="select-field">Default landing tab<select value={preferences.display?.defaultView ?? 'Home'} onChange={(event) => onUpdateDisplayPreference?.('defaultView', event.target.value)}>{['Home', 'Nutrition', 'Recovery', 'Check-in', 'Schedule', 'History'].map((view) => <option key={view}>{view}</option>)}</select></label>
+            <label className="select-field">Week starts on<select value={preferences.display?.weekStartsOn ?? 1} onChange={(event) => onUpdateDisplayPreference?.('weekStartsOn', Number(event.target.value))}><option value={1}>Monday</option><option value={0}>Sunday</option></select></label>
+          </div>
+          <label className="settings-toggle"><input checked={preferences.display?.showNutritionTargets !== false} onChange={(event) => onUpdateDisplayPreference?.('showNutritionTargets', event.target.checked)} type="checkbox" /><span>Show daily nutrition and hydration targets</span></label>
         </article>
 
         <article className="settings-panel" hidden={activeSection !== 'preferences'}>
@@ -573,7 +589,7 @@ export function AccountPrivacyView({
               return (
                 <div className="connection-row" key={provider.id}>
                   <div className="connection-provider">
-                    {provider.icon ? <img src={`${brandIconBase}${provider.icon}.svg`} alt="" aria-hidden="true" /> : <span className="connection-email-icon" aria-hidden="true">@</span>}
+                    {provider.icon ? <img src={`${brandIconBase}${provider.icon}.svg`} alt="" aria-hidden="true" /> : <span className="connection-email-icon" aria-hidden="true"><AppIcon name="email" size={18} /></span>}
                     <span><strong>{provider.label}</strong>{identity?.display && <small>{identity.display}</small>}</span>
                   </div>
                   {connected ? (
@@ -581,7 +597,7 @@ export function AccountPrivacyView({
                       <span className="connection-status"><i aria-hidden="true" />Connected</span>
                       {identity.raw && provider.id !== 'email' && (
                         <div className="connection-menu-wrap">
-                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button">•••</button>
+                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button"><AppIcon name="more" size={18} /></button>
                           {openConnectionAction === identity.id && (
                             <div className="connection-menu" role="menu">
                               <button onClick={() => disconnectProvider(identity)} role="menuitem" type="button">Remove connection</button>
@@ -793,6 +809,15 @@ export function AccountPrivacyView({
           </div>
         </article>
 
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'legal'}>
+          <div className="settings-panel-heading"><div><span>Policies</span><h2>Legal information</h2></div><p>Review the current terms governing Athlete Reload and its wellness guidance.</p></div>
+          <div className="legal-link-grid">
+            <button className="secondary-button" onClick={() => onOpenLegal?.('privacy')} type="button">Privacy policy</button>
+            <button className="secondary-button" onClick={() => onOpenLegal?.('terms')} type="button">Terms of service</button>
+            <button className="secondary-button" onClick={() => onOpenLegal?.('medical')} type="button">Medical disclaimer</button>
+          </div>
+        </article>
+
         </div>
       </div>
 
@@ -896,7 +921,7 @@ function getConnectedProviders(identities, user) {
       raw: identity,
     }))
 
-  if (user?.email && !connected.some((identity) => identity.provider === 'email')) {
+  if (user?.email && resolveAuthMethods(identities, user).includes('email') && !connected.some((identity) => identity.provider === 'email')) {
     connected.unshift({ display: user.email, id: 'email', provider: 'email' })
   }
 

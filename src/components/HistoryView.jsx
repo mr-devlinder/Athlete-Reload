@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO, startOfYear } from 'date-fns'
-import { localDateKey, mondayWeekStart, parseLocalCalendarDate } from '../utils/calendarDate'
+import { calendarWeekStart, localDateKey, parseLocalCalendarDate } from '../utils/calendarDate'
 import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
@@ -20,15 +20,15 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [] }) {
+export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [], weekStartsOn = 1 }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
-  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey()]))
+  const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey(weekStartsOn)]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
-  const archive = getHistoryArchive(history, checkouts, recoveryCompletions)
+  const archive = getHistoryArchive(history, checkouts, recoveryCompletions, weekStartsOn)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -886,7 +886,7 @@ function getCutoffDate(days) {
   ].join('-')
 }
 
-function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
+function getHistoryArchive(history, checkouts, recoveryCompletions = [], weekStartsOn = 1) {
   const years = new Map()
   const items = [
     ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
@@ -898,7 +898,7 @@ function getHistoryArchive(history, checkouts, recoveryCompletions = []) {
     const itemDate = parseLocalCalendarDate(item.date)
     if (!itemDate) return
     const yearStart = startOfYear(itemDate)
-    const weekStart = mondayWeekStart(itemDate)
+    const weekStart = calendarWeekStart(itemDate, weekStartsOn)
     const yearKey = format(yearStart, 'yyyy')
     const weekKey = format(weekStart, 'yyyy-MM-dd')
     const year = years.get(yearKey) ?? {
@@ -939,8 +939,8 @@ function getHistoryItemSortValue(item) {
   return calendarTime + (Number.isFinite(exactTime) ? exactTime % 86_400_000 : 0)
 }
 
-function getCurrentWeekKey() {
-  return format(mondayWeekStart(new Date()), 'yyyy-MM-dd')
+function getCurrentWeekKey(weekStartsOn = 1) {
+  return format(calendarWeekStart(new Date(), weekStartsOn), 'yyyy-MM-dd')
 }
 
 function getCurrentYearKey() {
