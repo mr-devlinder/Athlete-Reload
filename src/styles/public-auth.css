@@ -1,5 +1,6 @@
 /* Public landing and authentication */
 html { scroll-behavior: auto; scroll-padding-top: 92px; }
+.public-entry-loading { position: fixed; inset: 0; z-index: 1000; min-height: 100dvh; background: #f4f4ef; }
 .app-shell:has(.public-site), .app-shell:has(.auth-experience) { padding: 0; background: #f4f4ef; }
 .app-shell:has(.public-site)::before, .app-shell:has(.auth-experience)::before { display: none; }
 .public-site { position: relative; width: 100%; overflow: clip; color: var(--ui-ink); background: linear-gradient(180deg,#f4f4ef 0,#fbfbf8 44%,#ededE7 100%); }
@@ -33,8 +34,18 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
 .public-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 34px; }
 .public-hero-actions .primary-button, .public-hero-actions .secondary-button { display: inline-flex; align-items: center; justify-content: center; gap: 10px; width: auto; min-height: 50px; margin: 0; padding: 0 20px; text-decoration: none; }
 .public-hero-primary { box-shadow: 0 14px 32px rgba(19,20,18,.16); }
-.public-trust-row { display: flex; flex-wrap: wrap; gap: 10px 22px; margin-top: 32px; color: var(--ui-muted); }
-.public-trust-row span { display: inline-flex; align-items: center; gap: 7px; font-size: .8125rem; font-weight: 700; }
+.public-scroll-cue { display: grid; grid-template-columns: auto 72px auto; align-items: center; gap: 11px; width: fit-content; margin-top: 28px; color: var(--ui-muted); font-size: .6875rem; font-weight: 800; letter-spacing: .11em; text-decoration: none; text-transform: uppercase; }
+.public-scroll-cue>i, .public-scroll-guide>i { position: relative; display: block; overflow: hidden; width: 72px; height: 1px; background: var(--ui-line-strong); }
+.public-scroll-cue>i b, .public-scroll-guide>i b { position: absolute; inset: 0 auto 0 0; width: 24px; background: var(--ui-ink); animation: public-scroll-runner 1.65s cubic-bezier(.65,0,.35,1) infinite; }
+.public-scroll-cue .app-icon { animation: public-scroll-chevron 1.65s ease-in-out infinite; transform: rotate(0deg); }
+.public-scroll-guide { position: fixed; right: max(22px,env(safe-area-inset-right)); bottom: max(22px,env(safe-area-inset-bottom)); z-index: 80; display: grid; grid-template-rows: 30px 16px; place-items: center; gap: 3px; width: 44px; height: 66px; padding: 8px 0 6px; border: 1px solid rgba(255,255,255,.72); border-radius: 999px; background: rgba(250,250,246,.84); color: var(--ui-ink-soft); box-shadow: 0 14px 38px rgba(21,22,19,.12); backdrop-filter: blur(18px) saturate(1.1); opacity: 0; pointer-events: none; transform: translateY(12px); transition: opacity 280ms ease,transform 380ms cubic-bezier(.16,1,.3,1); }
+.public-scroll-guide.is-visible { opacity: 1; transform: translateY(0); }
+.public-scroll-guide>i { width: 2px; height: 30px; background: rgba(23,24,22,.18); }
+.public-scroll-guide>i b { width: 2px; height: 10px; animation: public-scroll-drop 1.55s cubic-bezier(.65,0,.35,1) infinite; }
+.public-scroll-guide .app-icon { animation: public-scroll-chevron 1.55s ease-in-out infinite; }
+@keyframes public-scroll-runner { 0% { opacity: 0; transform: translateX(-26px); } 20% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateX(76px); } }
+@keyframes public-scroll-drop { 0% { opacity: 0; transform: translateY(-10px); } 20% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; transform: translateY(30px); } }
+@keyframes public-scroll-chevron { 0%,100% { transform: translateY(-2px); } 50% { transform: translateY(3px); } }
 .public-hero-visual { position: relative; min-height: 660px; isolation: isolate; }
 .public-hero-frame { position: absolute; inset: 0; overflow: hidden; border: 1px solid rgba(255,255,255,.82); border-radius: 38% 38% 18px 18px / 24% 24% 18px 18px; background: var(--ui-surface-soft); box-shadow: 0 35px 90px rgba(22,23,20,.2); clip-path: inset(0 round 32px); }
 .public-hero-frame::after { position: absolute; inset: 0; background: linear-gradient(180deg,transparent 55%,rgba(12,13,11,.18)); content: ''; pointer-events: none; }
@@ -145,7 +156,7 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
 @media (max-width: 900px) {
   .public-header { grid-template-columns: auto 1fr auto; }
   .public-header-actions { display: none; }
-  .public-menu-button { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--ui-line); border-radius: 11px; background: var(--ui-surface-raised); color: var(--ui-ink); cursor: pointer; }
+  .public-menu-button { display: grid; grid-column: 3; place-items: center; justify-self: end; width: 44px; height: 44px; border: 1px solid var(--ui-line); border-radius: 11px; background: var(--ui-surface-raised); color: var(--ui-ink); cursor: pointer; }
   .public-navigation { position: absolute; top: calc(100% + 8px); right: 0; left: 0; display: none; justify-items: stretch; padding: 10px; border: 1px solid var(--ui-line); border-radius: 16px; background: rgba(250,250,247,.98); box-shadow: var(--ui-shadow-raised); }
   .public-navigation.is-open { display: grid; }
   .public-navigation>a { width: 100%; padding: 13px; border-radius: 9px; }
@@ -191,7 +202,8 @@ html { scroll-behavior: auto; scroll-padding-top: 92px; }
   .public-hero-lede { max-width: 100%; margin-top: 22px; font-size: 1rem; }
   .public-hero-actions { display: grid; width: 100%; }
   .public-hero-actions .primary-button, .public-hero-actions .secondary-button { width: 100%; max-width: 100%; }
-  .public-trust-row { display: grid; gap: 9px; margin-top: 24px; }
+  .public-scroll-cue { grid-template-columns: auto 1fr auto; width: 100%; margin-top: 22px; }
+  .public-scroll-guide { right: max(12px,env(safe-area-inset-right)); bottom: max(12px,env(safe-area-inset-bottom)); }
   .public-hero-visual { width: 100%; min-height: 610px; }
   .public-hero-frame { border-radius: 34% 34% 16px 16px / 20% 20% 16px 16px; }
   .public-hero-markers { right: 8px; bottom: 10px; }

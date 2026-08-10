@@ -26,18 +26,20 @@ export function getNavigationLensState(navRect, items, pointerX) {
   }
 }
 
-export function getNavigationDragLensState(navRect, items, pointerX) {
+export function getNavigationDragLensState(navRect, items, pointerX, lensSize = null) {
   const nearest = getNearestNavigationItem(items, pointerX)
   if (!nearest) return null
 
-  const halfWidth = nearest.width / 2
+  const width = lensSize?.width ?? nearest.width
+  const height = lensSize?.height ?? nearest.height
+  const halfWidth = width / 2
   const relativeX = pointerX - navRect.left
   return {
     activeLabel: nearest.label,
-    height: nearest.height,
+    height,
     left: Math.max(halfWidth, Math.min(relativeX, navRect.width - halfWidth)),
     top: navRect.height / 2,
-    width: nearest.width,
+    width,
     navWidth: navRect.width,
   }
 }

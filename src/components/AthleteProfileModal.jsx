@@ -6,8 +6,16 @@ import { dietaryOptions, goalOptions } from '../data/profileOptions'
 import { ProfileMeasurements } from './ProfileMeasurements'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
 
+function ensurePrimaryGoal(goals) {
+  if (goals.length === 0 || goals.some((goal) => goal.priority === 'primary')) return goals
+  return goals.map((goal, index) => ({ ...goal, priority: index === 0 ? 'primary' : 'secondary' }))
+}
+
 export function AthleteProfileModal({ profile, onClose, onSave }) {
-  const [draft, setDraft] = useState(profile ?? {})
+  const [draft, setDraft] = useState(() => ({
+    ...(profile ?? {}),
+    goals: ensurePrimaryGoal((profile?.goals ?? []).map((goal) => typeof goal === 'string' ? { name: goal, priority: 'secondary' } : goal)),
+  }))
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState('')
   const positionOptions = getPositionOptions(draft.sport)
@@ -32,25 +40,26 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
     setDraft((current) => {
       const goals = current.goals ?? []
       const existing = goals.find((goal) => (goal.name ?? goal) === value)
+      const normalizedGoals = goals.map((goal) => typeof goal === 'string' ? { name: goal, priority: 'secondary' } : goal)
       return {
         ...current,
         goals: existing
-          ? goals.filter((goal) => (goal.name ?? goal) !== value)
-          : [...goals, { name: value, priority: goals.length === 0 ? 'primary' : 'secondary' }],
+          ? ensurePrimaryGoal(normalizedGoals.filter((goal) => goal.name !== value))
+          : ensurePrimaryGoal([...normalizedGoals, { name: value, priority: 'secondary' }]),
       }
     })
   }
 
   function setGoalPriority(name, priority) {
-    setDraft((current) => ({
-      ...current,
-      goals: (current.goals ?? []).map((goal) => {
+    setDraft((current) => {
+      const goals = (current.goals ?? []).map((goal) => {
         const goalName = goal.name ?? goal
         if (goalName === name) return { name, priority }
         if (priority === 'primary') return { name: goalName, priority: 'secondary' }
         return typeof goal === 'string' ? { name: goal, priority: 'secondary' } : goal
-      }),
-    }))
+      })
+      return { ...current, goals: ensurePrimaryGoal(goals) }
+    })
   }
 
   useEffect(() => {
@@ -179,7 +188,7 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
             <div className="profile-choice-grid">
               {goalOptions.map((goal) => {
                 const selected = (draft.goals ?? []).find((item) => (item.name ?? item) === goal)
-                return <label key={goal}><input checked={Boolean(selected)} onChange={() => toggleGoal(goal)} type="checkbox" /><span>{goal}</span>{selected && <select value={selected.priority ?? 'secondary'} onChange={(event) => setGoalPriority(goal, event.target.value)}><option value="primary">Primary</option><option value="secondary">Secondary</option></select>}</label>
+                return <label key={goal}><input checked={Boolean(selected)} onChange={() => toggleGoal(goal)} type="checkbox" /><span>{goal}</span>{selected && <select aria-label={`Priority for ${goal}`} className="goal-priority-select" value={selected.priority ?? 'secondary'} onChange={(event) => setGoalPriority(goal, event.target.value)}><option value="primary">Primary</option><option value="secondary">Secondary</option></select>}</label>
               })}
             </div>
           </fieldset>

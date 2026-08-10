@@ -492,7 +492,7 @@ function roundNutrient(value) { return Math.round(value * 10) / 10 }
 function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><NutritionProgressValue showTarget={target !== undefined} target={target} unit={unit} value={value} /><Progress value={value} target={target} tone={tone} /></div> }
 function NutritionProgressValue({ showTarget, target, unit, value }) {
   const progress = getNutritionProgressParts(value, target, showTarget)
-  return <strong className="nutrition-progress-value"><b>{progress.current}</b>{progress.target != null && <small><span aria-hidden="true">/</span><span>{progress.target}</span></small>}<em>{unit}</em></strong>
+  return <strong className="nutrition-progress-value"><b>{progress.current}</b><small className="nutrition-progress-secondary">{progress.target != null && <><span aria-hidden="true">/</span><span>{progress.target}</span></>}<span className="nutrition-progress-unit">{unit}</span></small></strong>
 }
 function Progress({ target, tone, value }) { return <div className={`nutrition-progress ${tone}`}><span style={{ width: `${target ? Math.min(100, (Number(value) / Number(target)) * 100) : 0}%` }} /></div> }
 

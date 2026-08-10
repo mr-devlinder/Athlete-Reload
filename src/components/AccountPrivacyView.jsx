@@ -17,6 +17,7 @@ export function AccountPrivacyView({
   nutritionHistory = [],
   onUpdateAiPersonalizationPreference,
   onUpdateDisplayPreference,
+  onOpenAthleteProfile,
   onOpenLegal,
   onAccountDeleted,
   onClearAllHealthHistory,
@@ -507,6 +508,7 @@ export function AccountPrivacyView({
           <h1>Security controls need Supabase.</h1>
           <p>Demo mode keeps data on this device. Connect Supabase to use password reset, email verification, MFA, and cloud privacy settings.</p>
         </div>
+        <button className="secondary-button compact-action" onClick={onOpenAthleteProfile} type="button">Edit athlete profile</button>
       </section>
     )
   }
@@ -542,6 +544,7 @@ export function AccountPrivacyView({
             <span>Verification</span>
             <strong>{emailVerified ? 'Verified' : 'Not verified yet'}</strong>
           </div>
+          <button className="secondary-button compact-action" onClick={onOpenAthleteProfile} type="button">Edit athlete profile</button>
           {!emailVerified && (
             <button className="secondary-button compact-action" onClick={resendVerification} type="button">
               Resend verification

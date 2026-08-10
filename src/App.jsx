@@ -2825,7 +2825,7 @@ function App() {
   return (
     <main className={`app-shell density-${displayPreferences.density} motion-${displayPreferences.startupMotion}`}>
       {!isAppUnlocked && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<div className="public-entry-loading" aria-hidden="true" />}>
           <AuthGate
             initialMode={authEntryMode}
             rememberedSession={session}
@@ -2834,6 +2834,7 @@ function App() {
             onOpenLegal={setActiveLegalModal}
             onUseRememberedSession={unlockRememberedSession}
           />
+          <AppFooter onOpenLegal={setActiveLegalModal} />
         </Suspense>
       )}
 
@@ -3035,6 +3036,7 @@ function App() {
                 onUpdateReminderPreference={updateReminderPreference}
                 onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
                 onUpdateDisplayPreference={updateDisplayPreference}
+                onOpenAthleteProfile={() => setIsAthleteProfileOpen(true)}
                 onOpenLegal={setActiveLegalModal}
               />
             )}
@@ -3147,7 +3149,7 @@ function App() {
         </>
       )}
 
-      <AppFooter onOpenLegal={setActiveLegalModal} />
+      {isAppUnlocked && <AppFooter onOpenLegal={setActiveLegalModal} />}
 
       {activeLegalModal && (
         <LegalModal

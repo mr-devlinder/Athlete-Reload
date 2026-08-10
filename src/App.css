@@ -504,12 +504,23 @@
   place-content: center;
   justify-items: center;
   overflow: hidden;
-  min-height: 100svh;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100%;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   background:
     radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.1), transparent 34%),
     linear-gradient(145deg, #0b0d10 0%, #1a1e23 48%, #090b0e 100%);
   color: #fff;
   isolation: isolate;
+}
+
+html.startup-active,
+body.startup-active {
+  min-height: 100%;
+  background: #090b0e;
+  overscroll-behavior: none;
 }
 
 .startup-loader::before,
@@ -712,12 +723,10 @@
   to { opacity: 0; transform: translateY(8px); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .startup-loader *,
-  .startup-loader-glow {
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-  }
+.startup-loader.motion-reduced *,
+.startup-loader.motion-reduced .startup-loader-glow {
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
 }
 
 .settings-page {
@@ -5109,7 +5118,7 @@ button.event-status:hover {
 .nutrition-target-note { margin: -10px 0 0; color: #707883; font-size: 12px; }
 .nutrition-calorie-card { display: grid; grid-template-columns: 1fr auto; gap: 9px 16px; padding: 19px; border: 1px solid rgba(23,23,23,.08); border-radius: 17px; background: rgba(255,255,255,.55); }
 .nutrition-calorie-card div { display: grid; gap: 5px; }
-.nutrition-calorie-card span, .nutrition-calorie-remaining { color: #656e79; font-size: 13px; font-weight: 800; }
+.nutrition-calorie-card > div > span:first-child, .nutrition-calorie-remaining { color: #656e79; font-size: 13px; font-weight: 800; }
 .nutrition-calorie-card strong { color: #20242a; font-size: 28px; }
 .nutrition-calorie-card small { color: #808791; font-size: 15px; }
 .nutrition-calorie-remaining { align-self: end; }
@@ -5121,7 +5130,7 @@ button.event-status:hover {
 .nutrition-progress.protein span { background: #6aa76d; }
 .nutrition-macro-card { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; padding: 18px; border: 1px solid rgba(23,23,23,.08); border-radius: 17px; background: rgba(255,255,255,.55); }
 .nutrition-macro { display: grid; gap: 7px; }
-.nutrition-macro span { color: #4f5864; font-size: 13px; font-weight: 850; }
+.nutrition-macro > span:first-child { color: #4f5864; font-size: 13px; font-weight: 850; }
 .nutrition-macro strong { color: #262b32; font-size: 20px; }
 .nutrition-macro small { color: #7b838d; font-size: 12px; font-weight: 700; }
 .nutrition-water-strip { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px; border: 1px solid rgba(47,140,255,.16); border-radius: 14px; background: rgba(47,140,255,.07); }
@@ -7184,6 +7193,29 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .profile-choice-grid .goal-priority-select {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 32px;
+    min-width: 32px;
+    padding: 0;
+    border: 0;
+    background-color: transparent;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23515a65' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 9 5 5 5-5'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 16px;
+    color: transparent;
+    font-size: 0;
+    text-indent: 100%;
+    cursor: pointer;
+  }
+
+  .profile-choice-grid .goal-priority-select option {
+    color: #3c434d;
+    font-size: 16px;
+  }
+
   .top-bar {
     display: block;
     max-width: 100%;

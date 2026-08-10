@@ -83,6 +83,7 @@ export function LandingPage({ onCreateAccount, onOpenLegal, onSignIn }) {
   const [activeStage, setActiveStage] = useState(0)
   const [isHeaderScrolled, setIsHeaderScrolled] = useState(false)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [showScrollGuide, setShowScrollGuide] = useState(false)
   const rootRef = useRef(null)
   const scrollTweenRef = useRef(null)
   const storyTriggerRef = useRef(null)
@@ -94,6 +95,25 @@ export function LandingPage({ onCreateAccount, onOpenLegal, onSignIn }) {
     updateHeader()
     window.addEventListener('scroll', updateHeader, { passive: true })
     return () => window.removeEventListener('scroll', updateHeader)
+  }, [])
+
+  useEffect(() => {
+    const cue = rootRef.current?.querySelector('.public-scroll-cue')
+    const ending = rootRef.current?.querySelector('.public-final-cta')
+    if (!cue || !ending) return undefined
+    let cuePassed = false
+    let endingVisible = false
+    const update = () => setShowScrollGuide(cuePassed && !endingVisible)
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.target === cue) cuePassed = !entry.isIntersecting && entry.boundingClientRect.bottom < 0
+        if (entry.target === ending) endingVisible = entry.isIntersecting
+      })
+      update()
+    }, { threshold: [0, 0.1] })
+    observer.observe(cue)
+    observer.observe(ending)
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
@@ -168,10 +188,12 @@ export function LandingPage({ onCreateAccount, onOpenLegal, onSignIn }) {
             },
           })
           flowTimeline.to(flowTrack, { x: () => -(flowTrack.scrollWidth - flowViewport.clientWidth), ease: 'none', duration: workflow.length - 1 }, 0)
-          flowWords.forEach((word, index) => {
-            flowTimeline.fromTo(word, { autoAlpha: index === 0 ? 1 : 0, yPercent: 22 }, { autoAlpha: 1, yPercent: 0, duration: 0.28 }, index - 0.05)
-            if (index < flowWords.length - 1) flowTimeline.to(word, { autoAlpha: 0, yPercent: -18, duration: 0.28 }, index + 0.68)
-          })
+          if (!isMobile) {
+            flowWords.forEach((word, index) => {
+              flowTimeline.fromTo(word, { autoAlpha: index === 0 ? 1 : 0, yPercent: 22 }, { autoAlpha: 1, yPercent: 0, duration: 0.28 }, index - 0.05)
+              if (index < flowWords.length - 1) flowTimeline.to(word, { autoAlpha: 0, yPercent: -18, duration: 0.28 }, index + 0.68)
+            })
+          }
         }
 
         const stagePanels = gsap.utils.toArray('.product-stage-panel')
@@ -321,7 +343,11 @@ export function LandingPage({ onCreateAccount, onOpenLegal, onSignIn }) {
               <button className="primary-button public-hero-primary" onClick={onCreateAccount} type="button">Create your account <AppIcon name="arrow" size={20} /></button>
               <a className="secondary-button" href="#features" onClick={(event) => scrollToSection(event, 'features')}>Explore features</a>
             </div>
-            <div className="public-trust-row" aria-label="Product principles"><span><AppIcon name="shield" size={16} /> Your data, your control</span><span><AppIcon name="status" size={16} /> Built for athletes 16+</span></div>
+            <a className="public-scroll-cue" href="#how-it-works" onClick={(event) => scrollToSection(event, 'how-it-works')}>
+              <span>Scroll to enter the training loop</span>
+              <i aria-hidden="true"><b /></i>
+              <AppIcon name="chevron" size={18} />
+            </a>
           </div>
           <div className="public-hero-visual">
             <div className="public-hero-orbit" aria-hidden="true" />
@@ -378,6 +404,7 @@ export function LandingPage({ onCreateAccount, onOpenLegal, onSignIn }) {
 
         <section className="public-final-cta public-reveal"><p className="eyebrow">Your next session starts before the first rep</p><h2>Prepare with context. Recover with purpose.</h2><button className="primary-button" onClick={onCreateAccount} type="button">Create your free account <AppIcon name="arrow" size={20} /></button></section>
       </main>
+      <div aria-hidden="true" className={`public-scroll-guide${showScrollGuide ? ' is-visible' : ''}`}><i><b /></i><AppIcon name="chevron" size={16} /></div>
     </div>
   )
 }

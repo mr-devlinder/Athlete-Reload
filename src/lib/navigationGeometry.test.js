@@ -39,6 +39,15 @@ describe('navigation geometry', () => {
     expect(getNavigationDragLensState(navRect, items, 300).left).toBe(151)
   })
 
+  it('keeps a fixed drag lens size across differently sized tabs', () => {
+    const navRect = { left: 10, width: 178, height: 64 }
+    const lensSize = { width: 70, height: 56 }
+    expect(getNavigationDragLensState(navRect, items, 30, lensSize).width).toBe(70)
+    expect(getNavigationDragLensState(navRect, items, 170, lensSize).width).toBe(70)
+    expect(getNavigationDragLensState(navRect, items, -20, lensSize).left).toBe(35)
+    expect(getNavigationDragLensState(navRect, items, 300, lensSize).left).toBe(143)
+  })
+
   it('uses cached item dimensions without changing slot widths', () => {
     const navRect = { left: 10, width: 178, height: 64 }
     expect(getNavigationLensState(navRect, items, 70).width).toBe(70)

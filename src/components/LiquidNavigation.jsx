@@ -1,25 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { GlassButton, GlassCard } from 'react-glass-ui'
+import { GlassCard } from 'react-glass-ui'
 import { getNavigationDragLensState, getNavigationLensState, hasNavigationDragStarted } from '../lib/navigationGeometry'
 import { AppIcon } from './AppIcon'
 
 const DRAG_THRESHOLD = 6
 const HOLD_DELAY = 140
+const CLICK_FEEDBACK_DELAY = 420
+const CLICK_LAYOUT_TRACK_DURATION = 240
 
 export function LiquidNavigation({ activeView, className = '', lockedView = null, motionPreference = 'full', onSelect, views }) {
   const [lens, setLens] = useState(null)
   const [isInteracting, setIsInteracting] = useState(false)
+  const [isDraggingVisual, setIsDraggingVisual] = useState(false)
   const [isCoarsePointer, setIsCoarsePointer] = useState(false)
   const [supportsGlassFilter, setSupportsGlassFilter] = useState(true)
   const candidateRef = useRef(activeView)
+  const clickFeedbackFrameRef = useRef(null)
+  const clickFeedbackTimerRef = useRef(null)
   const dragRef = useRef(false)
   const frameRef = useRef(null)
   const geometryRef = useRef(null)
   const holdTimerRef = useRef(null)
   const interactionRef = useRef(false)
-  const lensShellRef = useRef(null)
   const navRef = useRef(null)
   const pendingLensRef = useRef(null)
+  const pendingClickViewRef = useRef(null)
   const pointerStartRef = useRef(null)
   const pointerOwnerRef = useRef(null)
   const suppressResetRef = useRef(null)
@@ -29,14 +34,20 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     const coarseQuery = window.matchMedia('(pointer: coarse)')
     const updatePointerMode = () => setIsCoarsePointer(coarseQuery.matches)
     updatePointerMode()
-    setSupportsGlassFilter(Boolean(window.CSS?.supports?.('filter', 'url("#athlete-navigation-lens-filter")')))
+    const supportsBackdrop = window.CSS?.supports?.('backdrop-filter', 'blur(1px)') || window.CSS?.supports?.('-webkit-backdrop-filter', 'blur(1px)')
+    setSupportsGlassFilter(Boolean(supportsBackdrop))
     coarseQuery.addEventListener?.('change', updatePointerMode)
 
     return () => {
       coarseQuery.removeEventListener?.('change', updatePointerMode)
+      if (clickFeedbackFrameRef.current) window.cancelAnimationFrame(clickFeedbackFrameRef.current)
+      window.clearTimeout(clickFeedbackTimerRef.current)
       window.clearTimeout(holdTimerRef.current)
       window.clearTimeout(suppressResetRef.current)
       if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
+      const owner = pointerOwnerRef.current
+      const pointerId = pointerStartRef.current?.pointerId
+      if (pointerId !== undefined && owner?.hasPointerCapture?.(pointerId)) owner.releasePointerCapture(pointerId)
     }
   }, [])
 
@@ -49,80 +60,70 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       const rect = button.getBoundingClientRect()
       return { height: rect.height, label: button.dataset.view, left: rect.left, width: rect.width }
     })
-    return { items, navRect }
+    const navStyle = window.getComputedStyle(nav)
+    const horizontalPadding = (Number.parseFloat(navStyle.paddingLeft) || 0) + (Number.parseFloat(navStyle.paddingRight) || 0)
+    const itemGap = Number.parseFloat(navStyle.columnGap) || 0
+    const collapsedWidth = (navRect.width - horizontalPadding - itemGap * Math.max(0, items.length - 1)) / Math.max(1, items.length)
+    const lensSize = {
+      height: Math.max(...items.map((item) => item.height)),
+      width: Math.max(...items.map((item) => item.width)),
+    }
+    const collapsedLensSize = { height: lensSize.height, width: collapsedWidth }
+    return { collapsedLensSize, items, lensSize, navRect }
   }
 
-  function positionLens(next) {
+  function writeLensPosition(current) {
+    const nav = navRef.current
+    if (!current || !nav) return
+    nav.style.setProperty('--liquid-lens-x', `${current.left - current.width / 2}px`)
+    nav.style.setProperty('--liquid-lens-y', `${current.top - current.height / 2}px`)
+    nav.style.setProperty('--liquid-lens-width', `${current.width}px`)
+    nav.style.setProperty('--liquid-lens-height', `${current.height}px`)
+  }
+
+  function positionLens(next, immediate = false) {
     pendingLensRef.current = next
+    if (immediate) {
+      writeLensPosition(next)
+      return
+    }
     if (frameRef.current) return
 
     frameRef.current = window.requestAnimationFrame(() => {
       frameRef.current = null
-      const current = pendingLensRef.current
-      const shell = lensShellRef.current
-      if (!current || !shell) return
-      shell.style.width = `${current.width}px`
-      shell.style.height = `${current.height}px`
-      const shellLeft = current.left - current.width / 2
-      shell.style.setProperty('--liquid-lens-offset', `${-shellLeft}px`)
-      shell.style.transform = `translate3d(${shellLeft}px, ${current.top - current.height / 2}px, 0)`
+      writeLensPosition(pendingLensRef.current)
     })
   }
 
   function updateLens(pointerX, force = false) {
     const geometry = geometryRef.current
     if (!geometry) return
-    const next = getNavigationDragLensState(geometry.navRect, geometry.items, pointerX)
+    const dragLensSize = isCoarsePointer ? geometry.collapsedLensSize : geometry.lensSize
+    const next = getNavigationDragLensState(geometry.navRect, geometry.items, pointerX, dragLensSize)
     if (!next || (lockedView && next.activeLabel !== lockedView)) return
 
     const crossedIntoNewItem = candidateRef.current !== next.activeLabel
     candidateRef.current = next.activeLabel
-    positionLens(next)
+    positionLens(next, force)
     if (force || crossedIntoNewItem) setLens(next)
   }
-
-  useEffect(() => {
-    const nav = navRef.current
-    if (!nav || interactionRef.current) return undefined
-
-    let resizeFrame = null
-    function alignWithActiveView() {
-      const geometry = measureNavigation()
-      const activeItem = geometry?.items.find((item) => item.label === (lockedView ?? activeView))
-      if (!geometry || !activeItem) return
-      const next = getNavigationLensState(geometry.navRect, geometry.items, activeItem.left + activeItem.width / 2)
-      candidateRef.current = next.activeLabel
-      setLens(next)
-      positionLens(next)
-    }
-
-    function scheduleAlignment() {
-      if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
-      resizeFrame = window.requestAnimationFrame(alignWithActiveView)
-    }
-
-    scheduleAlignment()
-    const observer = new ResizeObserver(scheduleAlignment)
-    observer.observe(nav)
-    document.fonts?.ready?.then(scheduleAlignment)
-    return () => {
-      observer.disconnect()
-      if (resizeFrame) window.cancelAnimationFrame(resizeFrame)
-    }
-  }, [activeView, lockedView, views])
 
   function handlePointerDown(event) {
     if (event.button !== 0 && event.pointerType === 'mouse') return
     const owner = event.target.closest?.('button[data-view]')
     if (!owner) return
+    if (clickFeedbackFrameRef.current) window.cancelAnimationFrame(clickFeedbackFrameRef.current)
+    clickFeedbackFrameRef.current = null
+    pendingClickViewRef.current = null
+    window.clearTimeout(clickFeedbackTimerRef.current)
+    clickFeedbackTimerRef.current = null
     geometryRef.current = measureNavigation()
     if (!geometryRef.current) return
     interactionRef.current = true
     dragRef.current = false
     pointerOwnerRef.current = owner
     pointerStartRef.current = { pointerId: event.pointerId, x: event.clientX }
-    const initial = getNavigationLensState(geometryRef.current.navRect, geometryRef.current.items, event.clientX)
-    if (initial && (!lockedView || initial.activeLabel === lockedView)) candidateRef.current = initial.activeLabel
+    candidateRef.current = owner.dataset.view
     owner.setPointerCapture?.(event.pointerId)
     window.clearTimeout(holdTimerRef.current)
     holdTimerRef.current = window.setTimeout(() => {
@@ -130,6 +131,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       dragRef.current = true
       suppressClickRef.current = true
       setIsInteracting(true)
+      setIsDraggingVisual(true)
       updateLens(pointerStartRef.current?.x ?? event.clientX, true)
     }, HOLD_DELAY)
   }
@@ -145,6 +147,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       dragRef.current = true
       suppressClickRef.current = true
       setIsInteracting(true)
+      setIsDraggingVisual(true)
       updateLens(event.clientX, true)
       return
     }
@@ -154,6 +157,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
 
   function finishInteraction(event, commit) {
     if (!interactionRef.current) return
+    if (pointerStartRef.current?.pointerId !== event.pointerId) return
     const owner = pointerOwnerRef.current
     window.clearTimeout(holdTimerRef.current)
     holdTimerRef.current = null
@@ -163,7 +167,10 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     interactionRef.current = false
     dragRef.current = false
     setIsInteracting(false)
+    setIsDraggingVisual(false)
     setLens(null)
+    if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
+    frameRef.current = null
     geometryRef.current = null
     pendingLensRef.current = null
     pointerStartRef.current = null
@@ -179,10 +186,70 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     }
   }
 
+  function measureClickLens(view, useItemSize = false) {
+    const geometry = measureNavigation()
+    const item = geometry?.items.find((entry) => entry.label === view)
+    if (!geometry || !item) return null
+    const centered = getNavigationLensState(geometry.navRect, geometry.items, item.left + item.width / 2)
+    if (!centered) return null
+    const clickLensSize = useItemSize ? { height: item.height, width: item.width } : geometry.lensSize
+    return { ...centered, ...clickLensSize }
+  }
+
+  function startClickFeedback(view, next) {
+    if (!next) return
+    candidateRef.current = view
+    writeLensPosition(next)
+    setLens(next)
+    setIsInteracting(true)
+    setIsDraggingVisual(false)
+    window.clearTimeout(clickFeedbackTimerRef.current)
+    clickFeedbackTimerRef.current = window.setTimeout(() => {
+      setIsInteracting(false)
+      setLens(null)
+      clickFeedbackTimerRef.current = null
+    }, CLICK_FEEDBACK_DELAY)
+  }
+
+  function showClickFeedback(view, useItemSize = false) {
+    startClickFeedback(view, measureClickLens(view, useItemSize))
+  }
+
   function handleClick(view) {
     if (suppressClickRef.current) return
     onSelect(view)
+    if (!isCoarsePointer) {
+      showClickFeedback(view)
+      return
+    }
+    if (view !== activeView) {
+      pendingClickViewRef.current = view
+      showClickFeedback(view, true)
+      return
+    }
+    showClickFeedback(view, true)
   }
+
+  useEffect(() => {
+    if (!isCoarsePointer || pendingClickViewRef.current !== activeView) return undefined
+    const view = pendingClickViewRef.current
+    pendingClickViewRef.current = null
+    if (clickFeedbackFrameRef.current) window.cancelAnimationFrame(clickFeedbackFrameRef.current)
+    const startedAt = window.performance.now()
+    const trackExpandedTab = (timestamp) => {
+      writeLensPosition(measureClickLens(view, true))
+      if (timestamp - startedAt < CLICK_LAYOUT_TRACK_DURATION) {
+        clickFeedbackFrameRef.current = window.requestAnimationFrame(trackExpandedTab)
+      } else {
+        clickFeedbackFrameRef.current = null
+      }
+    }
+    clickFeedbackFrameRef.current = window.requestAnimationFrame(trackExpandedTab)
+    return () => {
+      if (clickFeedbackFrameRef.current) window.cancelAnimationFrame(clickFeedbackFrameRef.current)
+      clickFeedbackFrameRef.current = null
+    }
+  }, [activeView, isCoarsePointer])
 
   const visualView = isInteracting && lens ? lens.activeLabel : activeView
   const reduced = motionPreference === 'reduced'
@@ -191,13 +258,13 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     ? { blur: 2, brightness: 104, chromaticAberration: 1.8, distortion: 24, saturation: 114 }
     : { blur: 2.5, brightness: 106, chromaticAberration: 2.8, distortion: 36, saturation: 120 }
   const glassSettings = isCoarsePointer
-    ? { blur: 1.75, brightness: 109, chromaticAberration: 6, distortion: 48, saturation: 132 }
-    : { blur: 2, brightness: 112, chromaticAberration: 8, distortion: 68, saturation: 142 }
+    ? { blur: 2.5, brightness: 105, chromaticAberration: 4.5, distortion: 55, saturation: 118 }
+    : { blur: 2, brightness: 103, chromaticAberration: 1.5, distortion: 40, saturation: 108 }
 
   return (
     <nav
       aria-label="Primary views"
-      className={`nav-tabs liquid-navigation ${isInteracting ? 'is-interacting' : 'is-settled'} ${reduced ? 'motion-reduced' : 'motion-full'} ${className}`.trim()}
+      className={`nav-tabs liquid-navigation ${isInteracting ? 'is-interacting' : ''} ${isDraggingVisual ? 'is-dragging' : 'is-settled'} ${reduced ? 'motion-reduced' : 'motion-full'} ${className}`.trim()}
       onContextMenu={(event) => event.preventDefault()}
       onDragStart={(event) => event.preventDefault()}
       onPointerCancel={(event) => finishInteraction(event, false)}
@@ -233,57 +300,37 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
         saturation={useGlass ? surfaceSettings.saturation : 100}
       />
       {isInteracting && lens && (
-        <div
-          className={`liquid-lens-shell ${useGlass ? '' : 'liquid-lens-fallback'}`.trim()}
-          ref={lensShellRef}
-          style={{ '--liquid-lens-offset': `${-(lens.left - lens.width / 2)}px`, height: `${lens.height}px`, transform: `translate3d(${lens.left - lens.width / 2}px, ${lens.top - lens.height / 2}px, 0)`, width: `${lens.width}px` }}
-        >
-          {useGlass ? (
-            <GlassButton
-              backgroundColor="#ffffff"
-              backgroundOpacity={0.045}
-              blur={glassSettings.blur}
-              borderColor="#ffffff"
-              borderOpacity={0.84}
-              borderRadius={999}
-              borderSize={1}
-              brightness={glassSettings.brightness}
-              chromaticAberration={glassSettings.chromaticAberration}
-              className="liquid-lens"
-              contentClassName="liquid-lens-content"
-              distortion={glassSettings.distortion}
-              flexibility={10}
-              height={lens.height}
-              id="athlete-navigation-lens"
-              innerLightBlur={10}
-              innerLightColor="#ffffff"
-              innerLightOpacity={0.62}
-              innerLightSpread={0}
-              onHoverScale={1.015}
-              outerLightBlur={18}
-              outerLightColor="#171b22"
-              outerLightOpacity={0.2}
-              outerLightSpread={0}
-              padding="0"
-              saturation={glassSettings.saturation}
-              width={lens.width}
-              zIndex={1}
-            >
-              <div className="liquid-lens-refraction" style={{ width: `${geometryRef.current?.navRect.width ?? lens.navWidth}px` }}>
-                {geometryRef.current?.items.map((item) => {
-                  const view = views.find((entry) => entry.label === item.label)
-                  if (!view) return null
-                  return (
-                    <div className="liquid-lens-refraction-item" key={item.label} style={{ height: `${item.height}px`, left: `${item.left - geometryRef.current.navRect.left}px`, top: `${(geometryRef.current.navRect.height - item.height) / 2}px`, width: `${item.width}px` }}>
-                      <AppIcon name={view.icon} size={24} />
-                      <span>{view.label}</span>
-                    </div>
-                  )
-                })}
-              </div>
-            </GlassButton>
-          ) : <div className="liquid-lens-static" />}
-        </div>
+        useGlass ? (
+          <GlassCard
+            backgroundColor="#ffffff"
+            backgroundOpacity={0.04}
+            blur={glassSettings.blur}
+            borderColor="#ffffff"
+            borderOpacity={0.4}
+            borderRadius={999}
+            borderSize={1}
+            brightness={glassSettings.brightness}
+            chromaticAberration={glassSettings.chromaticAberration}
+            className="liquid-drag-lens"
+            distortion={glassSettings.distortion}
+            flexibility={0}
+            height={lens.height}
+            id="athlete-navigation-lens"
+            innerLightBlur={10}
+            innerLightColor="#ffffff"
+            innerLightOpacity={0.16}
+            innerLightSpread={1}
+            onHoverScale={1}
+            outerLightBlur={12}
+            outerLightColor="#ffffff"
+            outerLightOpacity={0.1}
+            outerLightSpread={0}
+            padding="0"
+            saturation={glassSettings.saturation}
+            width={lens.width}
+            zIndex={3}
+          />
+        ) : <div className="liquid-drag-lens liquid-lens-static" />
       )}
       {views.map((view) => (
         <button aria-current={activeView === view.label ? 'page' : undefined} aria-label={view.label} className={visualView === view.label ? 'active' : ''} data-view={view.label} key={view.label} onClick={() => handleClick(view.label)} type="button">

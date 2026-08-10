@@ -128,6 +128,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .primary-button:hover, .ui-button--primary:hover { background: #30312e; }
 .secondary-button, .ghost-close, .load-saved-routines-button, .ui-button--secondary { border-color: var(--ui-line); background: var(--ui-surface-raised); color: var(--ui-ink); }
 .secondary-button:hover, .ghost-close:hover, .load-saved-routines-button:hover { border-color: var(--ui-line-strong); background: #fff; }
+.account-actions .ghost-close.account-button-active,
+.account-actions .ghost-close.account-button-active:hover,
+.account-actions .ghost-close.account-button-active:focus-visible,
+.account-actions .ghost-close.account-button-active:active { border-color: transparent; background: var(--ui-ink); color: #fff; }
 .remove-button, .ui-button--danger { border-color: rgba(163,63,55,.2); background: var(--ui-danger-soft); color: var(--ui-danger); }
 .ui-button--sm { min-height: 40px; padding-inline: 14px; }
 .ui-button--lg { min-height: 50px; padding-inline: 22px; }
@@ -307,8 +311,11 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
   user-select: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
+  transition: scale 180ms cubic-bezier(.2,.8,.2,1);
 }
+.liquid-navigation.is-interacting { scale: 1.03; }
 .liquid-navigation-surface { position: absolute !important; inset: 0; z-index: 0; width: 100% !important; height: 100% !important; overflow: hidden; border-radius: inherit; clip-path: inset(0 round 999px); pointer-events: none; }
+.liquid-navigation-surface .glass-ui-distortion-layer, .liquid-drag-lens .glass-ui-distortion-layer { clip-path: inset(0 round 999px) !important; -webkit-clip-path: inset(0 round 999px) !important; }
 .liquid-navigation-surface .glass-ui-card-content { overflow: hidden; }
 .liquid-navigation button {
   position: relative;
@@ -330,19 +337,15 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
 }
 .liquid-navigation button.active { background: transparent; color: var(--ui-ink); }
 .liquid-navigation .app-icon { width: 24px; height: 24px; stroke-width: 1.9; }
-.liquid-lens-shell { position: absolute; top: 0; left: 0; z-index: 3; overflow: hidden; border-radius: 999px; clip-path: inset(0 round 999px); contain: layout style; pointer-events: none; transition: width 110ms ease,transform 140ms cubic-bezier(.2,.8,.2,1); will-change: transform; }
-.liquid-navigation.is-interacting .liquid-lens-shell { transition: width 90ms ease,transform 55ms cubic-bezier(.2,.8,.2,1); }
-.liquid-lens { width: 100% !important; height: 100% !important; overflow: hidden; border-radius: 999px; pointer-events: none; }
-.liquid-lens .glass-ui-distortion-layer { z-index: 0; }
-.liquid-lens .glass-ui-background-layer { z-index: 0; }
-.liquid-lens .glass-ui-inner-light, .liquid-lens .glass-ui-border-layer, .liquid-lens .glass-ui-button-content { z-index: 1; }
-.liquid-lens-content { position: relative; width: 100%; height: 100%; overflow: hidden; }
-.liquid-lens-refraction { position: absolute; top: 0; left: 0; height: 100%; transform: translate3d(var(--liquid-lens-offset),0,0); filter: url("#athlete-navigation-lens-filter"); will-change: transform; }
-.liquid-lens-refraction-item { position: absolute; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--ui-ink); font-size: .8125rem; font-weight: 700; }
-.liquid-lens-refraction-item .app-icon { flex: 0 0 auto; }
-.liquid-lens-static { position: relative; width: 100%; height: 100%; overflow: hidden; border: 1px solid rgba(255,255,255,.86); border-radius: inherit; background: rgba(255,255,255,.32); box-shadow: inset 0 1px rgba(255,255,255,.82),0 10px 24px rgba(17,18,16,.14); }
-.liquid-navigation.motion-reduced *, .liquid-navigation.motion-reduced .liquid-lens-shell { transition-duration: 0ms !important; animation: none !important; }
+.liquid-drag-lens { position: absolute !important; top: 0; left: 0; z-index: 3; width: var(--liquid-lens-width) !important; height: var(--liquid-lens-height) !important; border-radius: 999px; translate: var(--liquid-lens-x) var(--liquid-lens-y); pointer-events: none; animation: liquid-lens-appear 180ms cubic-bezier(.2,.8,.2,1) both; transform-origin: center; will-change: translate,width,height,scale; }
+.liquid-drag-lens .glass-ui-distortion-layer { mask-image: radial-gradient(ellipse 72% 72% at center,transparent 0 28%,rgba(0,0,0,.4) 46%,#000 68%); -webkit-mask-image: radial-gradient(ellipse 72% 72% at center,transparent 0 28%,rgba(0,0,0,.4) 46%,#000 68%); }
+.liquid-drag-lens .glass-ui-card-content { overflow: hidden; }
+.liquid-lens-static { overflow: hidden; border: 1px solid rgba(255,255,255,.72); background: rgba(255,255,255,.3); box-shadow: inset 0 1px rgba(255,255,255,.72),0 8px 20px rgba(17,18,16,.12); }
+.liquid-navigation.motion-reduced * { transition-duration: 0ms !important; animation: none !important; }
 @supports not ((backdrop-filter: blur(1px))) { .liquid-navigation { background: rgba(250,250,247,.96); }.liquid-lens-static { background: rgba(255,255,255,.92); } }
+
+@keyframes liquid-lens-appear { from { scale: 1.02; } to { scale: 1.08 1.12; } }
+@keyframes liquid-lens-appear-mobile { from { scale: 1.03; } to { scale: 1.1 1.13; } }
 
 /* Nutrition date and progress refinements. */
 .nutrition-dashboard-heading { align-items: start; }
@@ -352,9 +355,9 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
 .nutrition-calorie-card strong, .nutrition-macro strong { letter-spacing: -.025em; }
 .nutrition-progress-value { display: inline-flex; align-items: baseline; min-width: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .nutrition-progress-value b { color: inherit; font: inherit; font-weight: 600; }
-.nutrition-progress-value small { display: inline-flex; gap: .2em; margin-left: .22em; }
-.nutrition-progress-value small, .nutrition-progress-value em { color: var(--ui-muted); font-family: var(--ui-font-body); font-size: .6em; font-style: normal; font-weight: 650; letter-spacing: .01em; line-height: 1; }
-.nutrition-progress-value em { margin-left: .48em; font-size: .54em; }
+.nutrition-progress-value .nutrition-progress-secondary { display: inline-flex; align-items: baseline; gap: .22em; margin-left: .28em; color: var(--ui-muted); font-family: var(--ui-font-body); font-size: .72em; font-style: normal; font-weight: 650; letter-spacing: .01em; line-height: 1; }
+.nutrition-progress-secondary .nutrition-progress-unit { margin-left: .22em; }
+.nutrition-calorie-card .nutrition-progress-value .nutrition-progress-secondary { font-size: .45em; }
 .nutrition-date-popover { position: absolute; z-index: 40; top: calc(100% + 10px); left: 0; display: grid; gap: 12px; width: 340px; min-width: 0; padding: 14px; border: 1px solid var(--ui-line); border-radius: 18px; background: rgba(252,252,248,.98); box-shadow: var(--ui-shadow-raised); backdrop-filter: blur(22px) saturate(1.12); }
 .nutrition-calendar-header { display: grid; grid-template-columns: 36px 1fr 36px; align-items: center; gap: 8px; }
 .nutrition-calendar-header strong { color: var(--ui-ink); font-size: .9375rem; text-align: center; }
@@ -457,20 +460,20 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
     padding: 5px;
   }
   .liquid-navigation button { flex: 1 1 0; min-width: 0; min-height: 56px; padding: 0 4px; gap: 6px; }
-  .liquid-navigation.is-settled button.active { flex: 1 1 0; }
+  .liquid-navigation.is-settled button.active { flex: 1.9 1 0; }
   .liquid-navigation button span { display: none; font-size: .75rem; white-space: nowrap; }
   .liquid-navigation.is-settled button.active span { display: inline; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-  .liquid-navigation.is-interacting button { flex: 1 1 0; }
-  .liquid-navigation.is-interacting button span { display: none; }
-  .liquid-lens-refraction-item span { display: none; }
-  .liquid-navigation .liquid-lens-shell { display: block; }
+  .liquid-navigation.is-dragging button { flex: 1 1 0; }
+  .liquid-navigation.is-dragging button span { display: none; }
+  .liquid-navigation .liquid-drag-lens { display: block; animation-name: liquid-lens-appear-mobile; }
+  .liquid-drag-lens .glass-ui-distortion-layer { mask-image: none; -webkit-mask-image: none; }
 }
 
 @media (max-width: 390px) {
   .workspace.page-workspace { padding-inline: 14px; }
   .top-bar .eyebrow { display: none; }
   .account-actions .ghost-close { padding-inline: 8px; }
-  .liquid-navigation button { padding-inline: 2px; }.liquid-navigation.is-settled button.active { flex-grow: 1; }.liquid-navigation button span { font-size: .6875rem; }
+  .liquid-navigation button { padding-inline: 2px; }.liquid-navigation.is-settled button.active { flex-grow: 2; }.liquid-navigation button span { font-size: .6875rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
