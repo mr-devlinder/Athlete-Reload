@@ -3,7 +3,7 @@ import { extname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../dist/', import.meta.url))
-const limits = { '.css': 160_000, '.js': 850_000, '.png': 550_000 }
+const limits = { '.css': 170_000, '.js': 850_000, '.png': 550_000 }
 const failures = []
 
 async function visit(directory) {

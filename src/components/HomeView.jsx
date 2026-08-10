@@ -2,17 +2,10 @@ import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from
 import { useEffect, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
+import { getPerformanceQuote } from '../data/performanceQuotes'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
 import { PainShareModal } from './PainShareModal'
-
-const athleteQuotes = [
-  { quote: 'Set your goals high, and do not stop until you get there.', athlete: 'Bo Jackson' },
-  { quote: 'Champions keep playing until they get it right.', athlete: 'Billie Jean King' },
-  { quote: 'You have to expect things of yourself before you can do them.', athlete: 'Michael Jordan' },
-  { quote: 'The only way to prove that you are a good sport is to lose.', athlete: 'Ernie Banks' },
-  { quote: 'Never let your head hang down. Never give up and sit down and grieve.', athlete: 'Satchel Paige' },
-]
 
 export function HomeView({
   checkouts,
@@ -39,7 +32,7 @@ export function HomeView({
   const recovery = getRecoverySummary(recentHistory, previousHistory)
   const workload = getWorkloadSummary(schedule, checkouts)
   const painTimelines = getPainTimelines(history, painReports)
-  const athleteQuote = athleteQuotes[Math.abs(differenceInCalendarDays(now, new Date(2020, 0, 1))) % athleteQuotes.length]
+  const athleteQuote = getPerformanceQuote('home', now)
   const weeklySignals = getWeeklySignals(history)
   const dashboardGridRef = useRef(null)
 
@@ -63,7 +56,7 @@ export function HomeView({
     })
 
     return () => observer.disconnect()
-  }, [athleteQuote.quote, painIssues, painReports, todayPlan.length, weeklySignals.length])
+  }, [athleteQuote, painIssues, painReports, todayPlan.length, weeklySignals.length])
 
   return (
     <div className="home-view" data-tour="home-page">
@@ -255,8 +248,7 @@ export function HomeView({
           <div className="panel-heading">
             <span>Daily encouragement</span>
           </div>
-          <h3>&ldquo;{athleteQuote.quote}&rdquo;</h3>
-          <p className="pattern-disclaimer">{athleteQuote.athlete}</p>
+          <h3>&ldquo;{athleteQuote}&rdquo;</h3>
         </article>
       </section>
     </div>

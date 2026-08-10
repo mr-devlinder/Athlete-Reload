@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { format, parseISO } from 'date-fns'
+import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, parseISO, startOfMonth, startOfWeek, subMonths } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
-import { getHydrationTarget, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
+import { getHydrationTarget, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { getCanonicalServing, getSourceServingFactor, getSourceServingOptions } from '../lib/foodServing'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
@@ -54,16 +54,15 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
           <SectionHeading eyebrow="Nutrition" title="Fuel for the day." />
           <p className="page-header-description">Track the fuel and hydration supporting today&apos;s training.</p>
           <div className="nutrition-date-menu">
-            <button className="nutrition-date-button" onClick={() => setIsDateOpen((current) => !current)} type="button">{displayedDate}<AppIcon name="chevron" size={20} /></button>
-            {isDateOpen && <div className="nutrition-date-popover"><label>Choose a date<input autoFocus type="date" value={selectedDate} onChange={(event) => { setSelectedDate(event.target.value); setIsDateOpen(false) }} /></label><button onClick={() => { setSelectedDate(today); setIsDateOpen(false) }} type="button">Jump to today</button></div>}
+            <button aria-expanded={isDateOpen} aria-haspopup="dialog" className="nutrition-date-button" onClick={() => setIsDateOpen((current) => !current)} type="button">{displayedDate}<AppIcon name="chevron" size={20} /></button>
+            {isDateOpen && <NutritionCalendar onClose={() => setIsDateOpen(false)} onSelect={setSelectedDate} selectedDate={selectedDate} today={today} />}
           </div>
         </div>
-        <button className="nutrition-detail-button app-icon-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button" aria-label="View nutrition details"><AppIcon name="expand" size={20} /></button>
+        <button className="nutrition-detail-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button"><AppIcon name="expand" size={18} />More nutrients</button>
       </section>
 
       <section className="nutrition-calorie-card">
-        <div><span>Calories</span><strong>{Math.round(totals.calories)}{showTargets && <small>Target {targets.calories ?? '—'}</small>}</strong></div>
-        {showTargets && <span className="nutrition-calorie-remaining">{targets.calories ? `${Math.max(0, Math.round(targets.calories - totals.calories))} left` : 'Add profile details'}</span>}
+        <div><span>Calories</span><NutritionProgressValue showTarget={showTargets} target={targets.calories} unit="kCal" value={totals.calories} /></div>
         <Progress value={totals.calories} target={visibleTargets.calories} tone="calories" />
       </section>
 
@@ -490,8 +489,66 @@ function getServingOptions(food) {
 
 function roundNutrient(value) { return Math.round(value * 10) / 10 }
 
-function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><strong><b>{Math.round(value)}<i>{unit}</i></b>{target != null && <small>Target {target}{unit}</small>}</strong><Progress value={value} target={target} tone={tone} /></div> }
+function Macro({ label, tone, target, unit, value }) { return <div className={`nutrition-macro ${tone}`}><span>{label}</span><NutritionProgressValue showTarget={target !== undefined} target={target} unit={unit} value={value} /><Progress value={value} target={target} tone={tone} /></div> }
+function NutritionProgressValue({ showTarget, target, unit, value }) {
+  const progress = getNutritionProgressParts(value, target, showTarget)
+  return <strong className="nutrition-progress-value"><b>{progress.current}</b>{progress.target != null && <small><span aria-hidden="true">/</span><span>{progress.target}</span></small>}<em>{unit}</em></strong>
+}
 function Progress({ target, tone, value }) { return <div className={`nutrition-progress ${tone}`}><span style={{ width: `${target ? Math.min(100, (Number(value) / Number(target)) * 100) : 0}%` }} /></div> }
+
+function NutritionCalendar({ onClose, onSelect, selectedDate, today }) {
+  const dialogRef = useRef(null)
+  const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(parseISO(selectedDate)))
+  const days = useMemo(() => {
+    const monthStart = startOfMonth(visibleMonth)
+    return eachDayOfInterval({
+      start: startOfWeek(monthStart),
+      end: endOfWeek(endOfMonth(monthStart)),
+    })
+  }, [visibleMonth])
+
+  useEffect(() => {
+    function handlePointerDown(event) {
+      if (!dialogRef.current?.contains(event.target) && !event.target.closest?.('.nutrition-date-menu')) onClose()
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') onClose()
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    const frame = window.requestAnimationFrame(() => dialogRef.current?.querySelector('[aria-pressed="true"]')?.focus())
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      window.cancelAnimationFrame(frame)
+    }
+  }, [onClose])
+
+  function selectDate(date) {
+    onSelect(format(date, 'yyyy-MM-dd'))
+    onClose()
+  }
+
+  return (
+    <div aria-label="Choose nutrition date" className="nutrition-date-popover" ref={dialogRef} role="dialog">
+      <div className="nutrition-calendar-header">
+        <button aria-label="Previous month" className="nutrition-calendar-arrow previous" onClick={() => setVisibleMonth((month) => subMonths(month, 1))} type="button"><AppIcon name="chevron" size={18} /></button>
+        <strong>{format(visibleMonth, 'MMMM yyyy')}</strong>
+        <button aria-label="Next month" className="nutrition-calendar-arrow next" onClick={() => setVisibleMonth((month) => addMonths(month, 1))} type="button"><AppIcon name="chevron" size={18} /></button>
+      </div>
+      <div aria-hidden="true" className="nutrition-calendar-weekdays">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => <span key={day}>{day}</span>)}</div>
+      <div className="nutrition-calendar-grid">
+        {days.map((day) => {
+          const isoDate = format(day, 'yyyy-MM-dd')
+          return <button aria-current={isoDate === today ? 'date' : undefined} aria-label={format(day, 'EEEE, MMMM d, yyyy')} aria-pressed={isoDate === selectedDate} className={isSameMonth(day, visibleMonth) ? '' : 'outside-month'} key={isoDate} onClick={() => selectDate(day)} type="button">{format(day, 'd')}</button>
+        })}
+      </div>
+      <button className="nutrition-calendar-today" onClick={() => selectDate(parseISO(today))} type="button">Today</button>
+    </div>
+  )
+}
 
 function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete, onEdit }) {
   useModalAccessibility(true, onClose)

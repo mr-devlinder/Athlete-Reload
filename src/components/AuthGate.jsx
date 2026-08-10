@@ -4,6 +4,9 @@ import appLogo from '../assets/athlete-reload-logo-transparent.png'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { LandingPage } from './LandingPage'
+import { AppIcon } from './AppIcon'
+import '../styles/public-auth.css'
 
 const authDefaults = {
   email: '',
@@ -18,6 +21,7 @@ export function AuthGate({
   initialMode = 'landing',
   onAuthenticated,
   onDemoSession,
+  onOpenLegal,
   onUseRememberedSession,
   rememberedSession,
 }) {
@@ -360,54 +364,17 @@ export function AuthGate({
 
   if (mode === 'landing') {
     return (
-      <section className="landing-content">
-        <div className="landing-copy">
-          <div className="landing-logo">
-            <img src={appLogo} alt="Athlete Reload logo" />
-            <span>Athlete Reload</span>
-          </div>
-          <p className="eyebrow">Readiness Planner</p>
-          <h1>Prepare. Perform. Recover. Reload.</h1>
-          <p>
-            A clean daily check-in for soreness, pain, fatigue, sleep, and team
-            sessions before you choose the next training move.
-          </p>
-          <div className="landing-actions">
-            <button
-              className="primary-button compact-action"
-              onClick={() => {
-                if (rememberedSession) {
-                  onUseRememberedSession()
-                  return
-                }
-
-                setMode('signin')
-              }}
-              type="button"
-            >
-              Sign in
-            </button>
-            <button
-              className="ghost-close"
-              onClick={() => setMode('signup')}
-              type="button"
-            >
-              Create account
-            </button>
-          </div>
-        </div>
-
-        <div className="landing-card glass-panel">
-          <span>Today</span>
-          <strong>84</strong>
-          <p>Modified training</p>
-          <div className="landing-bars" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
-        </div>
-      </section>
+      <LandingPage
+        onCreateAccount={() => setMode('signup')}
+        onOpenLegal={onOpenLegal}
+        onSignIn={() => {
+          if (rememberedSession) {
+            onUseRememberedSession()
+            return
+          }
+          setMode('signin')
+        }}
+      />
     )
   }
 
@@ -463,7 +430,21 @@ export function AuthGate({
   }
 
   return (
-    <section className="auth-content">
+    <section className="auth-experience">
+      <a className="auth-experience-brand" href="#" onClick={(event) => { event.preventDefault(); setMode('landing') }}>
+        <img src={appLogo} alt="" />
+        <span>Athlete Reload</span>
+      </a>
+      <aside className="auth-experience-copy">
+        <p className="eyebrow">{isSigningUp ? 'Build your performance context' : 'Return to your workspace'}</p>
+        <h1>{isSigningUp ? 'Start each session with a clearer plan.' : 'Pick up where your training left off.'}</h1>
+        <p>{isSigningUp ? 'Bring readiness, schedule, nutrition, workload, and recovery into one private athlete workspace.' : 'Your schedule, check-ins, recovery routines, and history are ready when you are.'}</p>
+        <div className="auth-context-list">
+          <span><AppIcon name="shield" size={20} /> Athlete-owned records</span>
+          <span><AppIcon name="spark" size={20} /> Context-aware guidance</span>
+          <span><AppIcon name="trend" size={20} /> A continuous training history</span>
+        </div>
+      </aside>
       <form className="auth-panel glass-panel" onSubmit={submitAuth}>
         <button
           className="ghost-close auth-back"
@@ -474,7 +455,11 @@ export function AuthGate({
         </button>
         <div className="landing-logo">
           <img src={appLogo} alt="Athlete Reload logo" />
-          <span>{isSigningUp ? 'Create account' : 'Welcome back'}</span>
+          <span>{isSigningUp ? 'Create your account' : 'Welcome back'}</span>
+        </div>
+        <div className="auth-panel-heading">
+          <h2>{isSigningUp ? 'Create account' : 'Sign in'}</h2>
+          <p>{isSigningUp ? 'Free to use. For athletes age 16 and older.' : 'Use your email or a connected provider.'}</p>
         </div>
 
         <label className="select-field">
@@ -507,11 +492,11 @@ export function AuthGate({
         {isSigningUp && (
           <label className="settings-toggle">
             <input checked={authForm.legalConsent} onChange={(event) => updateAuthField('legalConsent', event.target.checked)} required type="checkbox" />
-            <span>I am at least 16 and agree to the Privacy Policy, Terms of Service, Medical Disclaimer, and processing of the health and wellness information I choose to enter.</span>
+            <span>I am at least 16 and agree to the <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('privacy') }} type="button">Privacy Policy</button>, <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('terms') }} type="button">Terms of Service</button>, <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('medical') }} type="button">Medical Disclaimer</button>, and processing of the health and wellness information I choose to enter.</span>
           </label>
         )}
 
-        {authMessage && <p className="auth-message">{authMessage}</p>}
+        {authMessage && <p className="auth-message" role="alert">{authMessage}</p>}
 
         {!hasSupabaseConfig && (
           <p className="auth-message">

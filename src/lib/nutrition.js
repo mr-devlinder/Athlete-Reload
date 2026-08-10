@@ -16,6 +16,18 @@ const goalAdjustments = {
 
 export const mealOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Custom']
 
+export function getNutritionProgressParts(value, target, showTarget = true) {
+  const current = String(Math.round(Number(value) || 0))
+  if (!showTarget) return { current, target: null }
+  const normalizedTarget = target == null || !Number.isFinite(Number(target)) ? '\u2014' : String(Math.round(Number(target)))
+  return { current, target: normalizedTarget }
+}
+
+export function formatNutritionProgress(value, target, showTarget = true) {
+  const progress = getNutritionProgressParts(value, target, showTarget)
+  return progress.target == null ? progress.current : `${progress.current} / ${progress.target}`
+}
+
 export function getNutritionTargets(profile = {}, schedule = [], date = getLocalDate()) {
   profile = profile ?? {}
   const weightKg = Number(profile.weightKg)

@@ -1,3 +1,7 @@
+export function hasNavigationDragStarted(startX, currentX, threshold = 6) {
+  return Math.abs(currentX - startX) >= threshold
+}
+
 export function getNearestNavigationItem(items, pointerX) {
   if (!items.length) return null
 
@@ -12,9 +16,22 @@ export function getNavigationLensState(navRect, items, pointerX) {
   const nearest = getNearestNavigationItem(items, pointerX)
   if (!nearest) return null
 
+  return {
+    activeLabel: nearest.label,
+    height: nearest.height,
+    left: nearest.left - navRect.left + nearest.width / 2,
+    top: navRect.height / 2,
+    width: nearest.width,
+    navWidth: navRect.width,
+  }
+}
+
+export function getNavigationDragLensState(navRect, items, pointerX) {
+  const nearest = getNearestNavigationItem(items, pointerX)
+  if (!nearest) return null
+
   const halfWidth = nearest.width / 2
   const relativeX = pointerX - navRect.left
-
   return {
     activeLabel: nearest.label,
     height: nearest.height,

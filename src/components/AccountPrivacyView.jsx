@@ -3,7 +3,7 @@ import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
 import { SectionHeading } from './SectionHeading'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
-import { canRemoveAuthMethod, getUnlinkMessage, resolveAuthMethods } from '../lib/authMethods'
+import { canRemoveAuthMethod, getUnlinkMessage, resolveAuthMethods, unlinkAuthIdentity } from '../lib/authMethods'
 import { AppIcon } from './AppIcon'
 
 const brandIconBase = `${import.meta.env.BASE_URL}brand-icons/`
@@ -34,6 +34,7 @@ export function AccountPrivacyView({
 }) {
   const [message, setMessage] = useState('')
   const [openConnectionAction, setOpenConnectionAction] = useState(null)
+  const [pendingConnectionId, setPendingConnectionId] = useState(null)
   const [openShareAuditAction, setOpenShareAuditAction] = useState(null)
   const [activeSection, setActiveSection] = useState('account')
   const [identities, setIdentities] = useState([])
@@ -134,19 +135,24 @@ export function AccountPrivacyView({
     setMessage('')
     setOpenConnectionAction(null)
 
-    if (!identity?.raw || !canRemoveAuthMethod(identity.provider, identities, session?.user)) {
+    if (!identity?.raw || !canRemoveAuthMethod(identity.provider, identities)) {
       setMessage('Connect another sign-in method before removing this one.')
       return
     }
 
-    const { error } = await supabase.auth.unlinkIdentity(identity.raw)
-    if (error) {
+    setPendingConnectionId(identity.id)
+    try {
+      const { identities: refreshedIdentities, syncError } = await unlinkAuthIdentity(supabase.auth, identity.raw)
+      setIdentities(refreshedIdentities ?? identities.filter((item) => (item.identity_id ?? item.id) !== identity.id))
+      const providerLabel = providerOptions.find((provider) => provider.id === identity.provider)?.label ?? 'Account'
+      setMessage(syncError
+        ? `${providerLabel} connection removed. Account details will finish syncing on the next refresh.`
+        : `${providerLabel} connection removed.`)
+    } catch (error) {
       setMessage(getUnlinkMessage(error))
-      return
+    } finally {
+      setPendingConnectionId(null)
     }
-
-    await loadIdentities()
-    setMessage(`${providerOptions.find((provider) => provider.id === identity.provider)?.label ?? 'Account'} connection removed.`)
   }
 
   async function loadMfaFactors() {
@@ -555,7 +561,7 @@ export function AccountPrivacyView({
           <label className="settings-toggle"><input checked={preferences.display?.showNutritionTargets !== false} onChange={(event) => onUpdateDisplayPreference?.('showNutritionTargets', event.target.checked)} type="checkbox" /><span>Show daily nutrition and hydration targets</span></label>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'preferences'}>
           <h2>Event reminders</h2>
           <p className="settings-copy">When Athlete Reload is open, you can receive browser reminders to check in before an event and complete checkout after it starts. Your browser may still need its own notification permission.</p>
           <label className="settings-toggle">
@@ -564,7 +570,7 @@ export function AccountPrivacyView({
           </label>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'preferences'}>
           <h2>AI personalization</h2>
           <p className="settings-copy">When enabled, recommendations may use your profile, prior training, pain, recovery, and nutrition context. When disabled, AI receives only the current request and event details needed to generate the feature you asked for.</p>
           <label className="settings-toggle">
@@ -573,7 +579,7 @@ export function AccountPrivacyView({
           </label>
         </article>
 
-        <article className="settings-panel" hidden={activeSection !== 'preferences'}>
+        <article className="settings-panel settings-panel-wide" hidden={activeSection !== 'preferences'}>
           <h2>Device permissions</h2>
           <p className="settings-copy">Camera access is requested only when you start barcode scanning. Microphone access is requested only when you start voice entry or voice search, and the resulting transcript can be reviewed before use. Notification access is requested only when you enable event reminders. Athlete Reload does not request photo-library, precise device-location, or health-platform permissions.</p>
         </article>
@@ -597,10 +603,10 @@ export function AccountPrivacyView({
                       <span className="connection-status"><i aria-hidden="true" />Connected</span>
                       {identity.raw && provider.id !== 'email' && (
                         <div className="connection-menu-wrap">
-                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more app-icon-button" onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button"><AppIcon name="more" size={20} /></button>
+                          <button aria-expanded={openConnectionAction === identity.id} aria-haspopup="menu" aria-label={`Manage ${provider.label} connection`} className="connection-more app-icon-button" disabled={pendingConnectionId === identity.id} onClick={() => setOpenConnectionAction((current) => current === identity.id ? null : identity.id)} type="button"><AppIcon name="more" size={20} /></button>
                           {openConnectionAction === identity.id && (
                             <div className="connection-menu" role="menu">
-                              <button onClick={() => disconnectProvider(identity)} role="menuitem" type="button">Remove connection</button>
+                              <button disabled={pendingConnectionId === identity.id} onClick={() => disconnectProvider(identity)} role="menuitem" type="button">{pendingConnectionId === identity.id ? 'Removing...' : 'Remove connection'}</button>
                             </div>
                           )}
                         </div>

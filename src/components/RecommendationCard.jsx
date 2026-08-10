@@ -63,6 +63,12 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
   )
 }
 
+export function PerformanceQuote({ date, surface }) {
+  const quote = getPerformanceQuote(surface, date)
+  if (!quote) return null
+  return <aside className={`performance-quote performance-quote-${surface}`}><span>Keep in mind</span><p>&ldquo;{quote}&rdquo;</p></aside>
+}
+
 function ReportSource({ session, status }) {
   const statusLabel = { ai: 'AI personalized', loading: 'Generating', local: 'Saved' }[status] ?? 'AI personalized'
   return <div className="recommendation-source"><p className="eyebrow">{session}</p><span>{statusLabel}</span></div>
@@ -123,3 +129,4 @@ function getReadinessBand(score) {
   return 'readiness-red'
 }
 import { AppIcon } from './AppIcon'
+import { getPerformanceQuote } from '../data/performanceQuotes'

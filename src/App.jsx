@@ -1,14 +1,12 @@
 import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react'
 import { format, subDays } from 'date-fns'
-import 'react-glassy/styles.css'
-import { AuthGate } from './components/AuthGate'
 import { OnboardingFlow } from './components/OnboardingFlow'
 import { GuidedTour } from './components/GuidedTour'
 import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
-import { RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
+import { PerformanceQuote, RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { DialogShell } from './components/DialogShell'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { LiquidNavigation } from './components/LiquidNavigation'
@@ -27,6 +25,11 @@ const viewLoaders = {
   Recovery: () => import('./components/RecoveryView'),
   Schedule: () => import('./components/ScheduleView'),
 }
+let authGatePromise
+function loadAuthGate() {
+  authGatePromise ??= import('./components/AuthGate')
+  return authGatePromise
+}
 const viewModules = Object.fromEntries(Object.entries(viewLoaders).map(([key, load]) => [key, { load, promise: null }]))
 function loadView(name) {
   const entry = viewModules[name]
@@ -38,6 +41,7 @@ const HistoryView = lazy(() => loadView('History').then((module) => ({ default: 
 const NutritionView = lazy(() => loadView('Nutrition').then((module) => ({ default: module.NutritionView })))
 const RecoveryView = lazy(() => loadView('Recovery').then((module) => ({ default: module.RecoveryView })))
 const ScheduleView = lazy(() => loadView('Schedule').then((module) => ({ default: module.ScheduleView })))
+const AuthGate = lazy(() => loadAuthGate().then((module) => ({ default: module.AuthGate })))
 import {
   clearCheckIns,
   clearPainReports,
@@ -91,6 +95,7 @@ import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActiona
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
 import { useModalAccessibility } from './hooks/useModalAccessibility'
+import { shouldShowStartupLoader } from './lib/startupFlow'
 import './App.css'
 import './styles/ui-system.css'
 
@@ -898,7 +903,7 @@ function App() {
 
   useEffect(() => {
     let active = true
-    Promise.all(Object.keys(viewModules).map(loadView)).then(() => {
+    Promise.all([...Object.keys(viewModules).map(loadView), loadAuthGate()]).then(() => {
       if (active) setAreViewsReady(true)
     }).catch(() => {
       // A failed view import will surface through the app error boundary on reload.
@@ -980,6 +985,7 @@ function App() {
       if (isMounted) {
         void savePendingOauthConsent(data.session)
         setSession(data.session)
+        if (data.session) setIsStartupComplete(false)
         setIsAppUnlocked(Boolean(data.session))
         setIsAuthReady(true)
       }
@@ -1001,7 +1007,10 @@ function App() {
       if (!nextSession) {
         setIsAppUnlocked(false)
         setAuthEntryMode('landing')
-      } else if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+      } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
+        setIsStartupComplete(false)
+        setIsAppUnlocked(true)
+      } else if (event === 'TOKEN_REFRESHED') {
         setIsAppUnlocked(true)
       }
       setIsAuthReady(true)
@@ -2538,6 +2547,7 @@ function App() {
   }
 
   function startDemoSession(email) {
+    setIsStartupComplete(false)
     setSession({
       user: {
         email,
@@ -2547,6 +2557,7 @@ function App() {
   }
 
   function unlockRememberedSession() {
+    setIsStartupComplete(false)
     setIsAppUnlocked(true)
   }
 
@@ -2660,6 +2671,7 @@ function App() {
   }
 
   function finishAuthentication(nextSession) {
+    setIsStartupComplete(false)
     setSession(nextSession)
     setIsAppUnlocked(true)
     setAuthEntryMode('landing')
@@ -2800,10 +2812,10 @@ function App() {
     handleTourNavigation(view)
   }
 
-  if (!isStartupComplete) {
+  if (shouldShowStartupLoader({ isAppUnlocked, isStartupComplete })) {
     return (
       <StartupLoader
-        isReady={areViewsReady && isAuthReady && (!isAppUnlocked || !session || isProfileReady)}
+        isReady={areViewsReady && isAuthReady && Boolean(session) && isProfileReady}
         motion={displayPreferences.startupMotion}
         onComplete={() => setIsStartupComplete(true)}
       />
@@ -2812,14 +2824,17 @@ function App() {
 
   return (
     <main className={`app-shell density-${displayPreferences.density} motion-${displayPreferences.startupMotion}`}>
-      {isAuthReady && !isAppUnlocked && (
-        <AuthGate
-          initialMode={authEntryMode}
-          rememberedSession={session}
-          onAuthenticated={finishAuthentication}
-          onDemoSession={startDemoSession}
-          onUseRememberedSession={unlockRememberedSession}
-        />
+      {!isAppUnlocked && (
+        <Suspense fallback={null}>
+          <AuthGate
+            initialMode={authEntryMode}
+            rememberedSession={session}
+            onAuthenticated={finishAuthentication}
+            onDemoSession={startDemoSession}
+            onOpenLegal={setActiveLegalModal}
+            onUseRememberedSession={unlockRememberedSession}
+          />
+        </Suspense>
       )}
 
       {isAuthReady && isAppUnlocked && session && isProfileReady && !athleteProfile?.onboardingCompleted && !onboardingTour && !onboardingCompleteOpen && (
@@ -3095,6 +3110,7 @@ function App() {
                 session={submittedRecommendationContext.session}
               />
             )}
+            <PerformanceQuote surface={submittedRecommendationContext.scoreLabel === 'recovery' ? 'checkout' : 'checkIn'} />
           </section>
         </div>
       )}

@@ -1,7 +1,7 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
 import { Slider } from './FormControls'
-import { RecoveryPlanCard } from './RecommendationCard'
+import { PerformanceQuote, RecoveryPlanCard } from './RecommendationCard'
 import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 import { estimatePlannedMinutes } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
@@ -234,7 +234,7 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
   )
 }
 
-function CheckoutComparison({ checkout, onEdit }) {
+function CheckoutComparison({ checkout, event, onEdit }) {
   return (
     <div className="checkout-comparison">
       {checkout.recommendation?._source === 'gemini' && (
@@ -244,6 +244,8 @@ function CheckoutComparison({ checkout, onEdit }) {
           session={checkout.title}
         />
       )}
+
+      <PerformanceQuote date={event.date} surface="checkout" />
 
       <button className="secondary-button compact-action" onClick={onEdit} type="button">
         Edit checkout
