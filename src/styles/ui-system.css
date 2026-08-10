@@ -311,9 +311,7 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
   user-select: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
-  transition: scale 180ms cubic-bezier(.2,.8,.2,1);
 }
-.liquid-navigation.is-interacting { scale: 1.03; }
 .liquid-navigation-surface { position: absolute !important; inset: 0; z-index: 0; width: 100% !important; height: 100% !important; overflow: hidden; border-radius: inherit; clip-path: inset(0 round 999px); pointer-events: none; }
 .liquid-navigation-surface .glass-ui-distortion-layer, .liquid-drag-lens .glass-ui-distortion-layer { clip-path: inset(0 round 999px) !important; -webkit-clip-path: inset(0 round 999px) !important; }
 .liquid-navigation-surface .glass-ui-card-content { overflow: hidden; }
@@ -337,15 +335,13 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
 }
 .liquid-navigation button.active { background: transparent; color: var(--ui-ink); }
 .liquid-navigation .app-icon { width: 24px; height: 24px; stroke-width: 1.9; }
-.liquid-drag-lens { position: absolute !important; top: 0; left: 0; z-index: 3; width: var(--liquid-lens-width) !important; height: var(--liquid-lens-height) !important; border-radius: 999px; translate: var(--liquid-lens-x) var(--liquid-lens-y); pointer-events: none; animation: liquid-lens-appear 180ms cubic-bezier(.2,.8,.2,1) both; transform-origin: center; will-change: translate,width,height,scale; }
+.liquid-lens-motion { position: absolute; top: 0; left: 0; z-index: 3; overflow: visible; border-radius: 999px; pointer-events: none; transform-origin: center; will-change: transform,width,height; }
+.liquid-drag-lens { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; border-radius: 999px; pointer-events: none; }
 .liquid-drag-lens .glass-ui-distortion-layer { mask-image: radial-gradient(ellipse 72% 72% at center,transparent 0 28%,rgba(0,0,0,.4) 46%,#000 68%); -webkit-mask-image: radial-gradient(ellipse 72% 72% at center,transparent 0 28%,rgba(0,0,0,.4) 46%,#000 68%); }
 .liquid-drag-lens .glass-ui-card-content { overflow: hidden; }
 .liquid-lens-static { overflow: hidden; border: 1px solid rgba(255,255,255,.72); background: rgba(255,255,255,.3); box-shadow: inset 0 1px rgba(255,255,255,.72),0 8px 20px rgba(17,18,16,.12); }
 .liquid-navigation.motion-reduced * { transition-duration: 0ms !important; animation: none !important; }
 @supports not ((backdrop-filter: blur(1px))) { .liquid-navigation { background: rgba(250,250,247,.96); }.liquid-lens-static { background: rgba(255,255,255,.92); } }
-
-@keyframes liquid-lens-appear { from { scale: 1.02; } to { scale: 1.08 1.12; } }
-@keyframes liquid-lens-appear-mobile { from { scale: 1.03; } to { scale: 1.1 1.13; } }
 
 /* Nutrition date and progress refinements. */
 .nutrition-dashboard-heading { align-items: start; }
@@ -465,7 +461,7 @@ input:hover, select:hover, textarea:hover { border-color: var(--ui-line-strong);
   .liquid-navigation.is-settled button.active span { display: inline; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
   .liquid-navigation.is-dragging button { flex: 1 1 0; }
   .liquid-navigation.is-dragging button span { display: none; }
-  .liquid-navigation .liquid-drag-lens { display: block; animation-name: liquid-lens-appear-mobile; }
+  .liquid-navigation .liquid-lens-motion, .liquid-navigation .liquid-drag-lens { display: block; }
   .liquid-drag-lens .glass-ui-distortion-layer { mask-image: none; -webkit-mask-image: none; }
 }
 

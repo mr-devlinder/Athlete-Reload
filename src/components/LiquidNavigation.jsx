@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnimatePresence, m, useSpring } from 'motion/react'
 import { GlassCard } from 'react-glass-ui'
-import { getNavigationDragLensState, getNavigationLensState, hasNavigationDragStarted } from '../lib/navigationGeometry'
+import { getNavigationLensState, hasNavigationDragStarted } from '../lib/navigationGeometry'
 import { AppIcon } from './AppIcon'
 
 const DRAG_THRESHOLD = 6
@@ -9,6 +10,7 @@ const CLICK_FEEDBACK_DELAY = 420
 const CLICK_LAYOUT_TRACK_DURATION = 240
 
 export function LiquidNavigation({ activeView, className = '', lockedView = null, motionPreference = 'full', onSelect, views }) {
+  const reduced = motionPreference === 'reduced'
   const [lens, setLens] = useState(null)
   const [isInteracting, setIsInteracting] = useState(false)
   const [isDraggingVisual, setIsDraggingVisual] = useState(false)
@@ -18,17 +20,20 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
   const clickFeedbackFrameRef = useRef(null)
   const clickFeedbackTimerRef = useRef(null)
   const dragRef = useRef(false)
-  const frameRef = useRef(null)
   const geometryRef = useRef(null)
   const holdTimerRef = useRef(null)
   const interactionRef = useRef(false)
   const navRef = useRef(null)
-  const pendingLensRef = useRef(null)
   const pendingClickViewRef = useRef(null)
   const pointerStartRef = useRef(null)
   const pointerOwnerRef = useRef(null)
   const suppressResetRef = useRef(null)
   const suppressClickRef = useRef(false)
+  const springConfig = { stiffness: 520, damping: 42, mass: 0.55 }
+  const lensX = useSpring(0, springConfig)
+  const lensY = useSpring(0, springConfig)
+  const lensWidth = useSpring(0, springConfig)
+  const lensHeight = useSpring(0, springConfig)
 
   useEffect(() => {
     const coarseQuery = window.matchMedia('(pointer: coarse)')
@@ -44,7 +49,6 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       window.clearTimeout(clickFeedbackTimerRef.current)
       window.clearTimeout(holdTimerRef.current)
       window.clearTimeout(suppressResetRef.current)
-      if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
       const owner = pointerOwnerRef.current
       const pointerId = pointerStartRef.current?.pointerId
       if (pointerId !== undefined && owner?.hasPointerCapture?.(pointerId)) owner.releasePointerCapture(pointerId)
@@ -72,40 +76,29 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     return { collapsedLensSize, items, lensSize, navRect }
   }
 
-  function writeLensPosition(current) {
-    const nav = navRef.current
-    if (!current || !nav) return
-    nav.style.setProperty('--liquid-lens-x', `${current.left - current.width / 2}px`)
-    nav.style.setProperty('--liquid-lens-y', `${current.top - current.height / 2}px`)
-    nav.style.setProperty('--liquid-lens-width', `${current.width}px`)
-    nav.style.setProperty('--liquid-lens-height', `${current.height}px`)
-  }
-
-  function positionLens(next, immediate = false) {
-    pendingLensRef.current = next
-    if (immediate) {
-      writeLensPosition(next)
-      return
-    }
-    if (frameRef.current) return
-
-    frameRef.current = window.requestAnimationFrame(() => {
-      frameRef.current = null
-      writeLensPosition(pendingLensRef.current)
-    })
-  }
+  const writeLensPosition = useCallback((current, immediate = false) => {
+    if (!current) return
+    const method = immediate || reduced ? 'jump' : 'set'
+    lensX[method](current.left - current.width / 2)
+    lensY[method](current.top - current.height / 2)
+    lensWidth[method](current.width)
+    lensHeight[method](current.height)
+  }, [lensHeight, lensWidth, lensX, lensY, reduced])
 
   function updateLens(pointerX, force = false) {
     const geometry = geometryRef.current
     if (!geometry) return
     const dragLensSize = isCoarsePointer ? geometry.collapsedLensSize : geometry.lensSize
-    const next = getNavigationDragLensState(geometry.navRect, geometry.items, pointerX, dragLensSize)
-    if (!next || (lockedView && next.activeLabel !== lockedView)) return
+    const centered = getNavigationLensState(geometry.navRect, geometry.items, pointerX)
+    if (!centered || (lockedView && centered.activeLabel !== lockedView)) return
+    const next = { ...centered, ...dragLensSize }
 
     const crossedIntoNewItem = candidateRef.current !== next.activeLabel
     candidateRef.current = next.activeLabel
-    positionLens(next, force)
-    if (force || crossedIntoNewItem) setLens(next)
+    if (force || crossedIntoNewItem) {
+      writeLensPosition(next, force)
+      setLens(next)
+    }
   }
 
   function handlePointerDown(event) {
@@ -169,10 +162,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     setIsInteracting(false)
     setIsDraggingVisual(false)
     setLens(null)
-    if (frameRef.current) window.cancelAnimationFrame(frameRef.current)
-    frameRef.current = null
     geometryRef.current = null
-    pendingLensRef.current = null
     pointerStartRef.current = null
     pointerOwnerRef.current = null
 
@@ -199,7 +189,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
   function startClickFeedback(view, next) {
     if (!next) return
     candidateRef.current = view
-    writeLensPosition(next)
+    writeLensPosition(next, true)
     setLens(next)
     setIsInteracting(true)
     setIsDraggingVisual(false)
@@ -249,10 +239,9 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       if (clickFeedbackFrameRef.current) window.cancelAnimationFrame(clickFeedbackFrameRef.current)
       clickFeedbackFrameRef.current = null
     }
-  }, [activeView, isCoarsePointer])
+  }, [activeView, isCoarsePointer, writeLensPosition])
 
   const visualView = isInteracting && lens ? lens.activeLabel : activeView
-  const reduced = motionPreference === 'reduced'
   const useGlass = supportsGlassFilter
   const surfaceSettings = isCoarsePointer
     ? { blur: 2, brightness: 104, chromaticAberration: 1.8, distortion: 24, saturation: 114 }
@@ -262,8 +251,9 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
     : { blur: 2, brightness: 103, chromaticAberration: 1.5, distortion: 40, saturation: 108 }
 
   return (
-    <nav
+    <m.nav
       aria-label="Primary views"
+      animate={{ scale: isInteracting ? 1.03 : 1 }}
       className={`nav-tabs liquid-navigation ${isInteracting ? 'is-interacting' : ''} ${isDraggingVisual ? 'is-dragging' : 'is-settled'} ${reduced ? 'motion-reduced' : 'motion-full'} ${className}`.trim()}
       onContextMenu={(event) => event.preventDefault()}
       onDragStart={(event) => event.preventDefault()}
@@ -272,6 +262,7 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
       onPointerMove={handlePointerMove}
       onPointerUp={(event) => finishInteraction(event, true)}
       ref={navRef}
+      transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 460, damping: 34, mass: 0.55 }}
     >
       <GlassCard
         avoidSvgCreation={!useGlass}
@@ -299,9 +290,18 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
         padding="0"
         saturation={useGlass ? surfaceSettings.saturation : 100}
       />
-      {isInteracting && lens && (
-        useGlass ? (
-          <GlassCard
+      <AnimatePresence initial={false}>
+        {isInteracting && lens && (
+          <m.div
+            animate={{ opacity: 1, scale: isDraggingVisual ? 1.08 : 1.06 }}
+            className="liquid-lens-motion"
+            exit={{ opacity: 0, scale: 1.02 }}
+            initial={{ opacity: 0, scale: 0.98 }}
+            key="liquid-navigation-lens"
+            style={{ x: lensX, y: lensY, width: lensWidth, height: lensHeight }}
+            transition={reduced ? { duration: 0 } : { type: 'spring', stiffness: 500, damping: 36, mass: 0.5 }}
+          >
+            {useGlass ? <GlassCard
             backgroundColor="#ffffff"
             backgroundOpacity={0.04}
             blur={glassSettings.blur}
@@ -329,15 +329,16 @@ export function LiquidNavigation({ activeView, className = '', lockedView = null
             saturation={glassSettings.saturation}
             width={lens.width}
             zIndex={3}
-          />
-        ) : <div className="liquid-drag-lens liquid-lens-static" />
-      )}
+            /> : <div className="liquid-drag-lens liquid-lens-static" />}
+          </m.div>
+        )}
+      </AnimatePresence>
       {views.map((view) => (
         <button aria-current={activeView === view.label ? 'page' : undefined} aria-label={view.label} className={visualView === view.label ? 'active' : ''} data-view={view.label} key={view.label} onClick={() => handleClick(view.label)} type="button">
           <AppIcon name={view.icon} size={24} />
           <span>{view.label}</span>
         </button>
       ))}
-    </nav>
+    </m.nav>
   )
 }

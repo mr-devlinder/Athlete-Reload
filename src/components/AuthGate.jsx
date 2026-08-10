@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { AnimatePresence, m } from 'motion/react'
 import appLogo from '../assets/athlete-reload-logo-transparent.png'
 import { getAuthRedirectUrl } from '../lib/authRedirect'
 import { hasSupabaseConfig, supabase } from '../lib/supabaseClient'
@@ -32,6 +33,11 @@ export function AuthGate({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mfaChallenge, setMfaChallenge] = useState(null)
   const [mfaCode, setMfaCode] = useState('')
+  const [landingVisit, setLandingVisit] = useState(0)
+  const [isLeavingLanding, setIsLeavingLanding] = useState(false)
+  const [isReturningToLanding, setIsReturningToLanding] = useState(false)
+  const authTransitionTimerRef = useRef(null)
+  const returnTimerRef = useRef(null)
   const [resetForm, setResetForm] = useState({
     password: '',
     confirmPassword: '',
@@ -44,6 +50,47 @@ export function AuthGate({
     () => getPasswordStrength(isResettingPassword ? resetForm.password : authForm.password),
     [authForm.password, isResettingPassword, resetForm.password],
   )
+
+  useEffect(() => () => {
+    window.clearTimeout(authTransitionTimerRef.current)
+    window.clearTimeout(returnTimerRef.current)
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'signin' && mode !== 'signup') return undefined
+    const timer = window.setTimeout(() => {
+      const heading = document.querySelector('.auth-panel-heading h2')
+      heading?.setAttribute('tabindex', '-1')
+      heading?.focus({ preventScroll: true })
+    }, 520)
+    return () => window.clearTimeout(timer)
+  }, [mode])
+
+  function openAuth(nextMode) {
+    if (isLeavingLanding) return
+    setIsLeavingLanding(true)
+    window.clearTimeout(authTransitionTimerRef.current)
+    authTransitionTimerRef.current = window.setTimeout(() => {
+      window.scrollTo({ top: 0, behavior: 'auto' })
+      setMode(nextMode)
+      setIsLeavingLanding(false)
+      authTransitionTimerRef.current = null
+    }, 340)
+  }
+
+  function returnToLanding() {
+    if (isReturningToLanding) return
+    setIsReturningToLanding(true)
+    window.clearTimeout(returnTimerRef.current)
+    returnTimerRef.current = window.setTimeout(() => {
+      window.scrollTo({ top: 0 })
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
+      setLandingVisit((current) => current + 1)
+      setMode('landing')
+      setIsReturningToLanding(false)
+      returnTimerRef.current = null
+    }, 280)
+  }
 
   function updateAuthField(field, value) {
     setAuthForm((current) => ({
@@ -364,17 +411,32 @@ export function AuthGate({
 
   if (mode === 'landing') {
     return (
-      <LandingPage
-        onCreateAccount={() => setMode('signup')}
-        onOpenLegal={onOpenLegal}
-        onSignIn={() => {
-          if (rememberedSession) {
-            onUseRememberedSession()
-            return
-          }
-          setMode('signin')
-        }}
-      />
+      <AnimatePresence initial={false}>
+        <m.div
+          animate={{ opacity: 1, y: 0 }}
+          className="public-route-transition"
+          initial={landingVisit > 0 ? { opacity: 0, y: 16 } : false}
+          key="landing-route"
+          transition={{ duration: 0.44, ease: [0.16, 1, 0.3, 1] }}
+        >
+          <LandingPage
+            playOpening={landingVisit === 0}
+            returningFromAuth={landingVisit > 0}
+            onCreateAccount={() => openAuth('signup')}
+            onOpenLegal={onOpenLegal}
+            onSignIn={() => {
+              if (rememberedSession) {
+                onUseRememberedSession()
+                return
+              }
+              openAuth('signin')
+            }}
+          />
+          <AnimatePresence>
+            {isLeavingLanding && <m.div animate={{ opacity: 1, scaleY: 1 }} className="public-auth-route-curtain" exit={{ opacity: 0 }} initial={{ opacity: 0.2, scaleY: 0 }} key="auth-route-curtain" transition={{ duration: 0.34, ease: [0.65, 0, 0.35, 1] }} />}
+          </AnimatePresence>
+        </m.div>
+      </AnimatePresence>
     )
   }
 
@@ -430,25 +492,34 @@ export function AuthGate({
   }
 
   return (
-    <section className="auth-experience">
-      <a className="auth-experience-brand" href="#" onClick={(event) => { event.preventDefault(); setMode('landing') }}>
+    <m.section
+      animate={isReturningToLanding ? { opacity: 0, y: -10 } : { opacity: 1, y: 0 }}
+      className={`auth-experience${isReturningToLanding ? ' is-returning' : ''}`}
+      initial={{ opacity: 0, y: 20 }}
+      transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+    >
+      <m.a animate={{ opacity: 1, y: 0 }} className="auth-experience-brand" href="#" initial={{ opacity: 0, y: -12 }} onClick={(event) => { event.preventDefault(); returnToLanding() }} transition={{ delay: 0.08, duration: 0.42 }}>
         <img src={appLogo} alt="" />
         <span>Athlete Reload</span>
-      </a>
+      </m.a>
       <aside className="auth-experience-copy">
-        <p className="eyebrow">{isSigningUp ? 'Build your performance context' : 'Return to your workspace'}</p>
-        <h1>{isSigningUp ? 'Start each session with a clearer plan.' : 'Pick up where your training left off.'}</h1>
-        <p>{isSigningUp ? 'Bring readiness, schedule, nutrition, workload, and recovery into one private athlete workspace.' : 'Your schedule, check-ins, recovery routines, and history are ready when you are.'}</p>
-        <div className="auth-context-list">
-          <span><AppIcon name="shield" size={20} /> Athlete-owned records</span>
-          <span><AppIcon name="spark" size={20} /> Context-aware guidance</span>
-          <span><AppIcon name="trend" size={20} /> A continuous training history</span>
-        </div>
+        <AnimatePresence mode="wait">
+          <m.div animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }} initial={{ opacity: 0, x: 16 }} key={isSigningUp ? 'signup-copy' : 'signin-copy'} transition={{ duration: 0.34, ease: [0.16, 1, 0.3, 1] }}>
+            <p className="eyebrow">{isSigningUp ? 'Build your performance context' : 'Return to your workspace'}</p>
+            <h1>{isSigningUp ? 'Start each session with a clearer plan.' : 'Pick up where your training left off.'}</h1>
+            <p>{isSigningUp ? 'Bring readiness, schedule, nutrition, workload, and recovery into one private athlete workspace.' : 'Your schedule, check-ins, recovery routines, and history are ready when you are.'}</p>
+            <div className="auth-context-list">
+              <span><AppIcon name="shield" size={20} /> Athlete-owned records</span>
+              <span><AppIcon name="spark" size={20} /> Context-aware guidance</span>
+              <span><AppIcon name="trend" size={20} /> A continuous training history</span>
+            </div>
+          </m.div>
+        </AnimatePresence>
       </aside>
-      <form className="auth-panel glass-panel" onSubmit={submitAuth}>
+      <m.form animate={{ opacity: 1, y: 0 }} className="auth-panel glass-panel" initial={{ opacity: 0, y: 18 }} layout onSubmit={submitAuth} transition={{ opacity: { delay: 0.08, duration: 0.34 }, y: { delay: 0.08, duration: 0.42, ease: [0.22, 1, 0.36, 1] }, layout: { type: 'spring', stiffness: 360, damping: 34 } }}>
         <button
           className="ghost-close auth-back"
-          onClick={() => setMode('landing')}
+          onClick={returnToLanding}
           type="button"
         >
           Back
@@ -487,14 +558,18 @@ export function AuthGate({
           />
         </label>
 
-        {isSigningUp && <PasswordStrength strength={passwordStrength} />}
+        <AnimatePresence initial={false}>
+          {isSigningUp && <m.div animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} initial={{ height: 0, opacity: 0 }} key="password-strength"><PasswordStrength strength={passwordStrength} /></m.div>}
+        </AnimatePresence>
 
-        {isSigningUp && (
-          <label className="settings-toggle">
+        <AnimatePresence initial={false}>
+          {isSigningUp && (
+          <m.label animate={{ height: 'auto', opacity: 1 }} className="settings-toggle" exit={{ height: 0, opacity: 0 }} initial={{ height: 0, opacity: 0 }} key="legal-consent">
             <input checked={authForm.legalConsent} onChange={(event) => updateAuthField('legalConsent', event.target.checked)} required type="checkbox" />
             <span>I am at least 16 and agree to the <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('privacy') }} type="button">Privacy Policy</button>, <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('terms') }} type="button">Terms of Service</button>, <button className="auth-legal-link" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onOpenLegal('medical') }} type="button">Medical Disclaimer</button>, and processing of the health and wellness information I choose to enter.</span>
-          </label>
-        )}
+          </m.label>
+          )}
+        </AnimatePresence>
 
         {authMessage && <p className="auth-message" role="alert">{authMessage}</p>}
 
@@ -554,12 +629,12 @@ export function AuthGate({
             Resend verification email
           </button>
         )}
-      </form>
+      </m.form>
       {emailNotice && createPortal(
         <EmailSentDialog notice={emailNotice} onClose={() => setEmailNotice(null)} />,
         document.body,
       )}
-    </section>
+    </m.section>
   )
 }
 
