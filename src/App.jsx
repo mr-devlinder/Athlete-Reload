@@ -98,6 +98,7 @@ import { useModalAccessibility } from './hooks/useModalAccessibility'
 import { shouldShowStartupLoader } from './lib/startupFlow'
 import './App.css'
 import './styles/ui-system.css'
+import './styles/ui-production.css'
 
 const views = [
   {
@@ -716,8 +717,10 @@ function App() {
   })
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
+  const [isMobileAccountMenuOpen, setIsMobileAccountMenuOpen] = useState(false)
   const recommendationDialogRef = useModalAccessibility(Boolean(submittedRecommendation), () => setSubmittedRecommendation(null))
   const aiErrorDialogRef = useModalAccessibility(Boolean(checkInAiError), () => setCheckInAiError(''))
+  const mobileAccountMenuRef = useModalAccessibility(isMobileAccountMenuOpen, () => setIsMobileAccountMenuOpen(false))
   const [isAthleteProfileOpen, setIsAthleteProfileOpen] = useState(false)
   const sentReminderKeysRef = useRef(new Set())
   const [checkIn, setCheckIn] = useState(() => normalizeCheckInScales(savedState?.checkIn ?? checkInDefaults))
@@ -741,6 +744,7 @@ function App() {
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
   const displayPreferences = normalizeDisplayPreferences(privacyPreferences.display, athleteProfile?.unitSystem)
+  const athleteDisplayName = athleteProfile?.displayName || session?.user?.email || 'Athlete'
   const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
   resetAccountStateRef.current = resetAccountState
   const todayIso = getTodayIso()
@@ -900,6 +904,20 @@ function App() {
   )
 
   const resetDeletedSessionEvent = useEffectEvent(resetDeletedSession)
+
+  useEffect(() => {
+    setIsMobileAccountMenuOpen(false)
+  }, [activeView])
+
+  useEffect(() => {
+    if (!isMobileAccountMenuOpen) return undefined
+    const desktopQuery = window.matchMedia('(min-width: 761px)')
+    const closeOnDesktop = (event) => {
+      if (event.matches) setIsMobileAccountMenuOpen(false)
+    }
+    desktopQuery.addEventListener('change', closeOnDesktop)
+    return () => desktopQuery.removeEventListener('change', closeOnDesktop)
+  }, [isMobileAccountMenuOpen])
 
   useEffect(() => {
     let active = true
@@ -2834,7 +2852,6 @@ function App() {
             onOpenLegal={setActiveLegalModal}
             onUseRememberedSession={unlockRememberedSession}
           />
-          <AppFooter onOpenLegal={setActiveLegalModal} />
         </Suspense>
       )}
 
@@ -2849,42 +2866,59 @@ function App() {
 
       {isAuthReady && isAppUnlocked && session && isProfileReady && (athleteProfile?.onboardingCompleted || onboardingTour || onboardingCompleteOpen) && (
         <>
-          <nav className="top-bar glass-panel">
-        <div className="brand-lockup">
-          <img src={appLogo} alt="Athlete Reload logo" />
-          <div>
-            <p className="eyebrow">Athlete Reload</p>
-            <strong>Readiness Planner</strong>
-          </div>
-        </div>
-        <div className="account-actions">
-          <button className="account-name-button" onClick={() => setIsAthleteProfileOpen(true)} type="button">
-            {athleteProfile?.displayName || session.user?.email || 'Athlete'}
-          </button>
-          <button
-            className={`ghost-close ${activeView === 'Settings' ? 'account-button-active' : ''}`}
-            onClick={() => setActiveView('Settings')}
-            type="button"
-          >
-            Settings
-          </button>
-          <button className="ghost-close" onClick={signOut} type="button">
-            Sign out
-          </button>
-        </div>
-      </nav>
+          <div className="dashboard-shell">
+            <LiquidNavigation
+              activeView={activeView}
+              athleteName={athleteDisplayName}
+              className={onboardingTour && !onboardingTour.endsWith('-nav') ? 'tour-hidden-mobile' : ''}
+              lockedView={getTourNavigationTarget()}
+              onOpenLegal={setActiveLegalModal}
+              onSelect={selectNavigationView}
+              onSignOut={signOut}
+              views={views}
+            />
+            <div className="dashboard-main">
+              <header className="top-bar">
+                <button
+                  aria-controls="mobile-account-menu"
+                  aria-expanded={isMobileAccountMenuOpen}
+                  aria-label="Open account menu"
+                  className="mobile-menu-button"
+                  onClick={() => setIsMobileAccountMenuOpen(true)}
+                  type="button"
+                >
+                  <span /><span /><span />
+                </button>
+                <div className="app-page-heading">
+                  <strong>{activeView}</strong>
+                  <span>{format(new Date(), 'EEEE, MMMM d')}</span>
+                </div>
+              </header>
 
-      <LiquidNavigation
-        activeView={activeView}
-        className={onboardingTour && !onboardingTour.endsWith('-nav') ? 'tour-hidden-mobile' : ''}
-        lockedView={getTourNavigationTarget()}
-        motionPreference={displayPreferences.startupMotion}
-        onSelect={selectNavigationView}
-        views={views}
-      />
+              {isMobileAccountMenuOpen && (
+                <div className="mobile-account-backdrop" onClick={() => setIsMobileAccountMenuOpen(false)}>
+                  <aside
+                    aria-label="Account menu"
+                    className="mobile-account-menu"
+                    id="mobile-account-menu"
+                    onClick={(event) => event.stopPropagation()}
+                    ref={mobileAccountMenuRef}
+                    role="dialog"
+                    tabIndex={-1}
+                  >
+                    <header><span>Account</span><button onClick={() => setIsMobileAccountMenuOpen(false)} type="button">Close</button></header>
+                    <strong className="mobile-account-name">{athleteDisplayName}</strong>
+                    <nav aria-label="Account actions">
+                      <button onClick={() => { setIsMobileAccountMenuOpen(false); selectNavigationView('Settings') }} type="button">Settings</button>
+                      <button onClick={() => { setIsMobileAccountMenuOpen(false); setActiveLegalModal('privacy') }} type="button">Privacy</button>
+                      <button onClick={() => { setIsMobileAccountMenuOpen(false); signOut() }} type="button">Sign out</button>
+                    </nav>
+                  </aside>
+                </div>
+              )}
 
-      <section className="page-content">
-        <section className="workspace page-workspace glass-panel">
+              <section className="page-content">
+                <section className="workspace page-workspace">
           <AppErrorBoundary feature={`view-${activeView.toLowerCase()}`} key={activeView}>
           <Suspense fallback={null}>
             {dataStatus === 'error' && (
@@ -3042,8 +3076,10 @@ function App() {
             )}
           </Suspense>
           </AppErrorBoundary>
-          </section>
-      </section>
+                </section>
+              </section>
+            </div>
+          </div>
 
       {onboardingTour && (
         <GuidedTour
@@ -3149,8 +3185,6 @@ function App() {
         </>
       )}
 
-      {isAppUnlocked && <AppFooter onOpenLegal={setActiveLegalModal} />}
-
       {activeLegalModal && (
         <LegalModal
           type={activeLegalModal}
@@ -3212,33 +3246,6 @@ function StartupLoader({ isReady, motion = 'full', onComplete }) {
         <i /><i /><i /><i /><i /><i /><i />
       </div>
     </div>
-  )
-}
-
-function AppFooter({ onOpenLegal }) {
-  return (
-    <footer className="app-footer">
-      <div className="footer-break">
-        <span>© 2026 Athlete Reload</span>
-      </div>
-      <nav className="footer-links" aria-label="Legal links">
-        <button className="footer-link" onClick={() => onOpenLegal('privacy')} type="button">
-          Privacy Policy
-        </button>
-        <button className="footer-link" onClick={() => onOpenLegal('terms')} type="button">
-          Terms of Service
-        </button>
-        <button className="footer-link" onClick={() => onOpenLegal('medical')} type="button">
-          Medical Disclaimer
-        </button>
-      </nav>
-      <div className="footer-credit">
-        <span>Developed by Lucas Linder</span>
-        <a href="https://github.com/mr-devlinder" rel="noreferrer" target="_blank">
-          GitHub
-        </a>
-      </div>
-    </footer>
   )
 }
 

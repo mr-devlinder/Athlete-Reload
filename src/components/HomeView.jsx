@@ -1,5 +1,5 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getPerformanceQuote } from '../data/performanceQuotes'
@@ -34,30 +34,6 @@ export function HomeView({
   const painTimelines = getPainTimelines(history, painReports)
   const athleteQuote = getPerformanceQuote('home', now)
   const weeklySignals = getWeeklySignals(history)
-  const dashboardGridRef = useRef(null)
-
-  useEffect(() => {
-    const grid = dashboardGridRef.current
-    if (!grid || typeof ResizeObserver === 'undefined') return undefined
-
-    const updateCardSpan = (card) => {
-      const styles = window.getComputedStyle(grid)
-      const rowHeight = Number.parseFloat(styles.gridAutoRows) || 8
-      const rowGap = Number.parseFloat(styles.rowGap) || 12
-      const span = Math.max(1, Math.ceil((card.getBoundingClientRect().height + rowGap) / (rowHeight + rowGap)))
-      card.style.setProperty('--home-card-row-span', span)
-    }
-    const cards = [...grid.children]
-    const observer = new ResizeObserver((entries) => entries.forEach((entry) => updateCardSpan(entry.target)))
-
-    cards.forEach((card) => {
-      updateCardSpan(card)
-      observer.observe(card)
-    })
-
-    return () => observer.disconnect()
-  }, [athleteQuote, painIssues, painReports, todayPlan.length, weeklySignals.length])
-
   return (
     <div className="home-view" data-tour="home-page">
       <section className="home-hero" data-tour="home-intro">
@@ -115,7 +91,7 @@ export function HomeView({
         />
       </section>
 
-      <section className="home-dashboard-grid" ref={dashboardGridRef}>
+      <section className="home-dashboard-grid">
         <article className="home-panel today-flow-panel">
           <div className="panel-heading">
             <span>Today</span>

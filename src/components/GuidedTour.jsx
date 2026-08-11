@@ -302,7 +302,7 @@ function scrollTourTargetIntoView(target, phase) {
   }
 
   const navigationStep = tourSteps[phase]?.navigationStep
-  const scrollTarget = navigationStep ? target.closest('.nav-tabs') ?? target : target
+  const scrollTarget = navigationStep ? target.closest('.liquid-navigation') ?? target : target
   scrollTarget.scrollIntoView({ behavior: 'auto', block: navigationStep ? 'end' : 'center', inline: 'nearest' })
 
   const rect = scrollTarget.getBoundingClientRect()
