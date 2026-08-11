@@ -20,7 +20,7 @@ const checkoutSections = [
   'next-few-hours',
 ]
 
-export function RecommendationCard({ recommendation, recommendationStatus = 'local', scoreLabel = 'readiness', session }) {
+export function RecommendationCard({ onFeedback, recommendation, recommendationStatus = 'local', scoreLabel = 'readiness', session }) {
   const readinessBand = getReadinessBand(recommendation.score)
   const sections = indexSections(recommendation.reportSections)
 
@@ -33,12 +33,16 @@ export function RecommendationCard({ recommendation, recommendationStatus = 'loc
         </div>
         <div><p className="report-kicker">Your event preparation</p><h2>{recommendation.label}</h2><p>{recommendation.summary}</p></div>
       </header>
-
-      {sections['readiness-status'] && <ReportSection section={sections['readiness-status']} tone="priority" />}
-      <div className="report-section-grid">
-        {readinessSections.map((id) => sections[id] ? <ReportSection key={id} section={sections[id]} tone={id === 'pain-guidance' ? 'pain' : ''} /> : null)}
-      </div>
-      {sections['pre-event-timeline'] && <TimelineSection section={sections['pre-event-timeline']} />}
+      <RecommendationOverview recommendation={recommendation} />
+      <details className="recommendation-details">
+        <summary>Details</summary>
+        {sections['readiness-status'] && <ReportSection section={sections['readiness-status']} tone="priority" />}
+        <div className="report-section-grid">
+          {readinessSections.map((id) => sections[id] ? <ReportSection key={id} section={sections[id]} tone={id === 'pain-guidance' ? 'pain' : ''} /> : null)}
+        </div>
+        {sections['pre-event-timeline'] && <TimelineSection section={sections['pre-event-timeline']} />}
+      </details>
+      {onFeedback && <div className="recommendation-feedback" aria-label="Recommendation feedback"><span>{recommendation.feedback ? 'Feedback saved' : 'Was this useful?'}</span>{['helpful', 'neutral', 'not_helpful'].map((value) => <button aria-pressed={recommendation.feedback === value} key={value} onClick={() => onFeedback(value)} type="button">{{ helpful: 'Helpful', neutral: 'Neutral', not_helpful: 'Not helpful' }[value]}</button>)}</div>}
       <ContextDisclosure recommendation={recommendation} />
     </aside>
   )
@@ -55,12 +59,33 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
         <h2>{recommendation.label}</h2>
         <p>{recommendation.summary}</p>
       </header>
-      <div className="report-section-grid checkout-section-grid">
-        {checkoutSections.map((id) => sections[id] ? <ReportSection key={id} section={sections[id]} tone={['recovery-status', 'next-few-hours'].includes(id) ? 'priority' : ''} /> : null)}
-      </div>
+      <RecommendationOverview recommendation={recommendation} />
+      <details className="recommendation-details">
+        <summary>Details</summary>
+        <div className="report-section-grid checkout-section-grid">
+          {checkoutSections.map((id) => sections[id] ? <ReportSection key={id} section={sections[id]} tone={['recovery-status', 'next-few-hours'].includes(id) ? 'priority' : ''} /> : null)}
+        </div>
+      </details>
       <ContextDisclosure recommendation={recommendation} />
     </aside>
   )
+}
+
+function RecommendationOverview({ recommendation }) {
+  const reasons = normalizeOverviewItems(recommendation.reasons, 'label')
+  const actions = normalizeOverviewItems(recommendation.actions, 'instruction')
+  const warnings = normalizeOverviewItems(recommendation.warnings, 'message')
+  const primaryAction = recommendation.primaryAction?.instruction ?? recommendation.action
+  return <section className="recommendation-overview">
+    <div><span>What</span><strong>{recommendation.label}</strong></div>
+    {reasons.length > 0 && <div><span>Why</span><ul>{reasons.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
+    <div><span>Do</span><strong>{primaryAction}</strong>{actions.length > 1 && <ul>{actions.slice(1, 3).map((item) => <li key={item}>{item}</li>)}</ul>}</div>
+    {warnings.length > 0 && <div className="watch"><span>Watch</span><ul>{warnings.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
+  </section>
+}
+
+function normalizeOverviewItems(items = [], objectKey) {
+  return items.map((item) => typeof item === 'string' ? item : item?.[objectKey]).filter(Boolean)
 }
 
 export function PerformanceQuote({ date, surface }) {

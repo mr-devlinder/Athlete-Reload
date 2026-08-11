@@ -12,7 +12,7 @@ async function callRecommendationFunction(payload, { signal } = {}) {
     throw new Error('Please sign in again before generating your guidance.')
   }
 
-  const requestBody = payload
+  const requestBody = sanitizeRecommendationPayload(payload)
   const functionUrl = import.meta.env.DEV
     ? '/local-functions/generate-recommendation'
     : `${supabaseUrl}/functions/v1/generate-recommendation`
@@ -34,6 +34,22 @@ async function callRecommendationFunction(payload, { signal } = {}) {
   }
 
   return data
+}
+
+export function sanitizeRecommendationPayload(payload = {}) {
+  const safeProfile = payload.athleteProfile ? {
+    age: payload.athleteProfile.age,
+    dietaryPreferences: payload.athleteProfile.dietaryPreferences,
+    goals: payload.athleteProfile.goals,
+    position: payload.athleteProfile.position,
+    sport: payload.athleteProfile.sport,
+    trainingStyle: payload.athleteProfile.trainingStyle,
+    weightKg: payload.athleteProfile.weightKg,
+  } : undefined
+  return {
+    ...payload,
+    ...(safeProfile ? { athleteProfile: safeProfile } : {}),
+  }
 }
 
 const personalizationFields = [

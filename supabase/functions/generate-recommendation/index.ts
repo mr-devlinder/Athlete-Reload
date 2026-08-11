@@ -1,7 +1,23 @@
-const corsHeaders = {
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+const configuredOrigins = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
+const allowedOrigins = new Set([
+  'http://localhost:4173',
+  'http://localhost:5173',
+  'https://mr-devlinder.github.io',
+  ...configuredOrigins,
+])
+
+function getCorsHeaders(request: Request) {
+  const origin = request.headers.get('Origin')
+  if (origin && !allowedOrigins.has(origin)) return null
+  return {
+    'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+    'Access-Control-Allow-Origin': origin ?? 'https://mr-devlinder.github.io',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Vary': 'Origin',
+  }
 }
 
 type Recommendation = {
@@ -34,48 +50,57 @@ const recommendationModels = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
 
 Deno.serve(async (request) => {
   let stage = 'request_validation'
+  const corsHeaders = getCorsHeaders(request)
+  if (!corsHeaders) return new Response('Origin not allowed', { status: 403 })
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed' }, 405)
+    return jsonResponse({ error: 'Method not allowed' }, 405, corsHeaders)
   }
 
   const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
 
   if (!geminiApiKey) {
-    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 503)
+    return jsonResponse({ error: 'Missing GEMINI_API_KEY secret' }, 503, corsHeaders)
   }
 
   try {
+    stage = 'authenticate_request'
+    if (!(await hasValidSession(request))) {
+      return jsonResponse({ error: 'Authentication required' }, 401, corsHeaders)
+    }
     stage = 'parse_request'
     const body = await request.json()
     if (!(await consumeRateLimit(request))) {
-      return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429)
+      return jsonResponse({ error: 'Too many AI requests. Please wait a minute and try again.' }, 429, corsHeaders)
     }
     if (body?.requestType === 'voice_transcribe') {
       const transcript = await transcribeAudio(geminiApiKey, body)
-      return jsonResponse({ transcript })
+      return jsonResponse({ transcript }, 200, corsHeaders)
     }
     if (body?.requestType === 'voice_extract') {
       const extractionResponse = await generateGeminiJson(geminiApiKey, buildVoiceExtractionPrompt(body))
-      return jsonResponse({ extraction: extractionResponse })
+      return jsonResponse({ extraction: extractionResponse }, 200, corsHeaders)
     }
     stage = 'gemini_request'
     const { response, model } = await requestGemini(geminiApiKey, [{ text: buildPrompt(body) }], true)
     if (!response.ok) {
       const detail = await response.text()
-      return jsonResponse({ error: 'Gemini request failed', detail }, 502)
+      return jsonResponse({ error: 'Gemini request failed', detail }, 502, corsHeaders)
     }
 
     stage = 'parse_gemini_response'
     const data = await response.json()
     const text = extractGeminiText(data)
     stage = 'normalize_recommendation'
-    const recommendation = normalizeRecommendation(parseJsonResponse(text), body)
+    const recommendation = applyDeterministicGuard(
+      normalizeRecommendation(parseJsonResponse(text), body),
+      body?.deterministicRecommendation,
+    )
 
-    return jsonResponse({ recommendation, provider: 'gemini', source: 'gemini', model })
+    return jsonResponse({ recommendation, provider: 'gemini', source: 'gemini', model }, 200, corsHeaders)
   } catch (error) {
     const correlationId = crypto.randomUUID()
     console.error(JSON.stringify({
@@ -85,6 +110,7 @@ Deno.serve(async (request) => {
     }))
     const stageStatus = {
       parse_request: 520,
+      authenticate_request: 401,
       build_prompt: 524,
       gemini_request: 521,
       parse_gemini_response: 522,
@@ -93,9 +119,39 @@ Deno.serve(async (request) => {
     return jsonResponse({
       error: 'Unable to generate recommendation',
       correlationId,
-    }, stageStatus)
+    }, stageStatus, corsHeaders)
   }
 })
+
+async function hasValidSession(request: Request) {
+  const projectUrl = Deno.env.get('SUPABASE_URL')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const authorization = request.headers.get('Authorization') ?? ''
+  if (!projectUrl || !anonKey || !authorization.startsWith('Bearer ')) return false
+  const response = await fetch(`${projectUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: authorization },
+  })
+  return response.ok
+}
+
+function applyDeterministicGuard(aiRecommendation: Recommendation, deterministic: any) {
+  if (!deterministic || typeof deterministic !== 'object') return aiRecommendation
+  return {
+    ...aiRecommendation,
+    schemaVersion: Number(deterministic.schemaVersion) || aiRecommendation.schemaVersion,
+    action: String(deterministic.primaryAction?.instruction ?? deterministic.action ?? aiRecommendation.action),
+    avoid: Array.isArray(deterministic.avoid) ? deterministic.avoid : aiRecommendation.avoid,
+    breakdown: Array.isArray(deterministic.breakdown) ? deterministic.breakdown : aiRecommendation.breakdown,
+    focus: Array.isArray(deterministic.focus) ? deterministic.focus : aiRecommendation.focus,
+    intensity: String(deterministic.intensity ?? aiRecommendation.intensity),
+    label: String(deterministic.label ?? aiRecommendation.label),
+    reasons: Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.reasons,
+    score: Number.isFinite(Number(deterministic.score)) ? Number(deterministic.score) : aiRecommendation.score,
+    tone: deterministic.tone ?? aiRecommendation.tone,
+    reportSections: Array.isArray(deterministic.reportSections) ? deterministic.reportSections : aiRecommendation.reportSections,
+    contextFactors: Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.contextFactors,
+  }
+}
 
 async function generateGeminiJson(apiKey: string, input: string) {
   const { response } = await requestGemini(apiKey, [{ text: input }], true)
@@ -199,7 +255,7 @@ JSON shape:
 }
 
 const readinessCalibrationGuidance = `
-Readiness score calibration (the model must choose the score):
+Readiness explanation calibration (the deterministic engine has already chosen the score):
 - Higher is better. Energy and sleep quality use 0 worst to 5 best. Soreness, fatigue, leg heaviness, illness symptoms, and stress use 0 none/low to 5 severe/high. Never treat 5/5 soreness or fatigue as favorable.
 - Treat 0-100 as a continuous scale, not a set of buckets. First form a holistic readiness judgment, then place it precisely within the appropriate region according to the number, severity, duration, event relevance, and confidence of favorable and adverse signals. Do not calculate from a fixed deduction table.
 - Use the full range and do not default to 85, 88, 92, or another familiar number. Adjacent scores should represent small real differences; larger evidence changes should move the score farther.
@@ -221,7 +277,7 @@ Readiness score calibration (the model must choose the score):
 `
 
 const checkoutCalibrationGuidance = `
-Post-event recovery score calibration (the model must choose the score):
+Post-event recovery explanation calibration (the deterministic engine has already chosen the score):
 - Higher is better and means the athlete handled the completed event well with a more favorable immediate recovery outlook. It is not a workload score and not a medical clearance score.
 - Post-event fatigue and soreness use 1 low to 5 high. Difficulty uses 0 easy to 10 maximal. Never treat high fatigue, high soreness, worsening/new pain, changed movement, cramping, concerning symptoms, or stopping early as favorable.
 - Treat 0-100 as continuous. Place the score precisely according to participation, workload response, fatigue/soreness severity, pain and movement changes, symptoms, performance response, and recovery window; do not use a fixed deduction table or default number.
@@ -250,6 +306,10 @@ function buildPrompt(payload: unknown) {
   return `
 You are Athlete Reload's training readiness assistant for student athletes.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+
+The supplied deterministicRecommendation is authoritative. Copy its score, status, label, tone, intensity, reasons, actions, warnings, and safety limits exactly. Your role is limited to concise explanation and contextual presentation. Never weaken, strengthen, or replace its decision.
+Authoritative deterministic recommendation:
+${JSON.stringify((payload as any)?.deterministicRecommendation ?? null)}
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
@@ -317,6 +377,9 @@ function buildCompactPostCheckoutPrompt(payload: unknown) {
   return `
 You are Athlete Reload's post-event recovery assistant for a student athlete.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+The supplied deterministicRecommendation is authoritative. Copy its score, status, label, tone, reasons, actions, warnings, and safety limits exactly. Your role is limited to concise explanation and organization.
+Authoritative deterministic recommendation:
+${JSON.stringify((payload as any)?.deterministicRecommendation ?? null)}
 The event has already ended. Create a practical recovery plan from only the supplied checkout data.
 Do not give participation clearance for the completed event. Do not diagnose injuries.
 Escalate new or worsening pain, changed movement, breathing trouble, dizziness, confusion, or severe symptoms to an adult, coach, athletic trainer, or medical professional.
@@ -470,7 +533,7 @@ JSON shape:
   "contextFactors": ["2-8 supplied factors that materially shaped this plan"],
   "reportSections": [{"id":"recovery-status","title":"Recovery Status","summary":"estimated demand and primary drivers","items":[]},{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"active-recovery-rest","title":"Active Recovery or Rest","summary":"which is more useful now and why","items":[]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on supplied targets and logs","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"use supplied target ranges without claiming measured fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]},{"id":"recovery-timeline","title":"Recovery Timeline","summary":"remainder of today through the next relevant checkpoint","items":[]},{"id":"next-event-impact","title":"Tomorrow or Next Event","summary":"include only when future schedule is supplied","items":[]}],
   "planType": "${planType}",
-  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","durationSeconds":30,"setup":"exact starting body position and equipment placement","movement":"step-by-step movement direction plus what must remain still","completionCue":"how to know one repetition or hold is complete","sideCue":"how and when to switch sides, or state that both sides move together","why":"short reason this movement fits the selected routine type and athlete context","feel":"specific muscle or area that should work or stretch","avoid":"specific form faults and symptoms that mean stop"}]},
+  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","sets":1,"restSeconds":0,"durationSeconds":30,"setup":"exact starting body position and equipment placement","movement":"step-by-step movement direction plus what must remain still","completionCue":"how to know one repetition or hold is complete","sideCue":"how and when to switch sides, or state that both sides move together","why":"short reason this movement fits the selected routine type and athlete context","feel":"specific muscle or area that should work or stretch","avoid":"specific form faults and symptoms that mean stop"}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -792,6 +855,8 @@ function normalizeRecoveryExercise(exercise: any) {
     equipment: stringOrFallback(exercise?.equipment, 'None'),
     name,
     reps: isHold ? 0 : clampNumber(Number(exercise?.reps) || 8, 4, 15),
+    restSeconds: clampNumber(Number(exercise?.restSeconds) || 0, 0, 90),
+    sets: clampNumber(Number(exercise?.sets) || 1, 1, 4),
     side,
     type,
     why: stringOrFallback(exercise?.why, 'This movement supports the selected routine goal.'),
@@ -972,7 +1037,7 @@ function clampNumber(value: any, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(number)))
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     headers: {
       ...corsHeaders,

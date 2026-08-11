@@ -3,16 +3,18 @@ import { createPortal } from 'react-dom'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, parseISO, startOfMonth, startOfWeek, subMonths } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
-import { getHydrationTarget, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
+import { getHydrationGuidance, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
+import { calculatePerformanceTargets } from '../lib/recommendationContext'
 import { getCanonicalServing, getSourceServingFactor, getSourceServingOptions } from '../lib/foodServing'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
 import { AppIcon } from './AppIcon'
+import '../styles/nutrition-rework.css'
 
-const imperialWaterAmounts = [8, 16, 20, 32, 64]
-const metricWaterAmounts = [250, 500, 750, 1000]
+const imperialWaterAmounts = [8, 16, 24]
+const metricWaterAmounts = [250, 500, 750]
 const mealCards = ['Breakfast', 'Lunch', 'Dinner', 'Snacks']
 
 export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionHistory = [], onSaveWellness, schedule, showTargets = true }) {
@@ -28,9 +30,20 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
   const totals = getNutritionTotals(entries)
   const targets = useMemo(() => getNutritionTargets(athleteProfile, schedule, selectedDate), [athleteProfile, schedule, selectedDate])
   const visibleTargets = showTargets ? targets : {}
-  const hydrationTarget = getHydrationTarget(athleteProfile, schedule, selectedDate)
+  const hydrationGuidance = getHydrationGuidance(athleteProfile, schedule, selectedDate)
+  const performanceEvent = schedule
+    .filter((event) => event.date === selectedDate && !/rest|recovery/i.test(event.type ?? ''))
+    .sort((first, second) => String(first.time ?? '').localeCompare(String(second.time ?? '')))[0]
+  const performanceTargets = performanceEvent ? calculatePerformanceTargets({
+    durationMinutes: Number(performanceEvent.plannedMinutes ?? performanceEvent.expectedDuration ?? 0),
+    intensity: { Low: 3, Medium: 6, High: 8 }[performanceEvent.load] ?? 5,
+    weightKg: athleteProfile?.weightKg,
+  }) : null
   const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
   const quickWaterAmounts = unitSystem === 'metric' ? metricWaterAmounts : imperialWaterAmounts
+  const hydrationGoalMl = hydrationGuidance.midpointMl
+  const hydrationProgress = Math.min(100, Math.round((Number(wellness.hydrationMl ?? 0) / hydrationGoalMl) * 100))
+  const waterNudge = unitSystem === 'metric' ? 50 : 1
 
   function save(next) {
     onSaveWellness?.({ ...wellness, ...next, date: selectedDate })
@@ -73,8 +86,25 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       </section>
 
       <section className="nutrition-water-strip">
-        <div><span>Water</span><strong>{formatHydration(wellness.hydrationMl, unitSystem)}{showTargets ? ` / ${formatHydration(hydrationTarget, unitSystem)}` : ''}</strong></div>
-        <div className="nutrition-water-actions"><button className="nutrition-water-icon-button app-icon-button" onClick={() => changeWater(unitSystem === 'metric' ? -50 : -1)} type="button" aria-label="Subtract water"><AppIcon name="minus" size={20} /></button>{quickWaterAmounts.map((amount) => <button key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ''}</button>)}<button className="nutrition-water-icon-button app-icon-button" onClick={() => changeWater(unitSystem === 'metric' ? 50 : 1)} type="button" aria-label="Add water"><AppIcon name="plus" size={20} /></button></div>
+        <div className="nutrition-water-summary">
+          <span>Water</span>
+          <strong>{formatHydration(wellness.hydrationMl, unitSystem)} <small>/ {formatHydration(hydrationGoalMl, unitSystem)} goal</small></strong>
+          <div aria-label={`${hydrationProgress}% of water goal`} aria-valuemax="100" aria-valuemin="0" aria-valuenow={hydrationProgress} className="nutrition-water-progress" role="progressbar"><i style={{ width: `${hydrationProgress}%` }} /></div>
+        </div>
+        <div className="nutrition-water-actions">
+          <button aria-label={`Remove ${waterNudge}${unitSystem === 'metric' ? ' milliliters' : ' fluid ounce'}`} className="nutrition-water-nudge" onClick={() => changeWater(-waterNudge)} type="button"><AppIcon name="minus" size={18} /></button>
+          {quickWaterAmounts.map((amount) => <button aria-label={`Add ${amount}${unitSystem === 'metric' ? ' milliliters' : ' fluid ounces'}`} key={amount} onClick={() => changeWater(amount)} type="button">+{amount}{unitSystem === 'metric' ? ' mL' : ' oz'}</button>)}
+          <button aria-label={`Add ${waterNudge}${unitSystem === 'metric' ? ' milliliters' : ' fluid ounce'}`} className="nutrition-water-nudge" onClick={() => changeWater(waterNudge)} type="button"><AppIcon name="plus" size={18} /></button>
+        </div>
+      </section>
+
+      <section className="performance-fueling-strip">
+        <div><span>Performance fueling</span><strong>{performanceEvent ? performanceEvent.title || performanceEvent.type : 'No demanding event scheduled'}</strong></div>
+        {performanceTargets ? <div className="performance-fueling-values">
+          <span><b>Before</b>{performanceTargets.fueling.preEventCarbsG ? `${performanceTargets.fueling.preEventCarbsG.low}–${performanceTargets.fueling.preEventCarbsG.high}g carbohydrate` : 'A familiar meal or snack'}</span>
+          <span><b>During</b>{performanceTargets.fueling.duringCarbsGPerHour ? `${performanceTargets.fueling.duringCarbsGPerHour.low}–${performanceTargets.fueling.duringCarbsGPerHour.high}g carbohydrate/hour if tolerated` : 'Usually not needed for this duration'}</span>
+          <span><b>After</b>{performanceTargets.recovery.proteinG ? `${performanceTargets.recovery.proteinG.low}–${performanceTargets.recovery.proteinG.high}g protein with carbohydrate` : 'A familiar balanced meal or snack'}</span>
+        </div> : <p>Add an event to connect fueling guidance with its duration and expected intensity.</p>}
       </section>
 
       <section className="nutrition-meals-section">

@@ -7,7 +7,7 @@ export const displayPreferenceDefaults = {
   weekStartsOn: 1,
 }
 
-const allowedViews = new Set(['Home', 'Nutrition', 'Recovery', 'Check-in', 'Schedule', 'History'])
+const allowedViews = new Set(['Home', 'Nutrition', 'Recovery', 'Schedule', 'History'])
 
 export function normalizeDisplayPreferences(value = {}, profileUnitSystem = 'imperial') {
   return {

@@ -1,6 +1,7 @@
 const OPEN_FOOD_FACTS_BASE = 'https://world.openfoodfacts.org/api/v2'
 import { supabase } from './supabaseClient'
 import { friendlyFeatureError, recordOperationalEvent } from './operationalEvents'
+import { classifyFoodQuery, deduplicateFoods, scoreFoodResult } from './foodSearchRules'
 
 function normalizeProduct(product = {}) {
   const nutriments = product.nutriments ?? {}
@@ -31,6 +32,7 @@ function normalizeProduct(product = {}) {
     fats: nutrient('fat'),
     fiber: nutrient('fiber'),
     foodSource: 'Open Food Facts',
+    sourceType: 'open_food_facts',
     name: product.product_name ?? product.product_name_en ?? 'Unnamed food',
     protein: nutrient('proteins'),
     servingSize,
@@ -197,27 +199,10 @@ function stripFoodState(food) {
 }
 
 function rankFoods(foods, query) {
-  const seen = new Set()
-  return foods
-    .filter((food) => {
-      const key = `${food.name}|${food.brand}`.toLowerCase()
-      if (!nameMatchesQuery(food.name, query) || !isPlausibleFood(food) || seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    .sort((first, second) => scoreFood(second, query) - scoreFood(first, query))
+  const queryType = classifyFoodQuery(query, foods.map((food) => food.brand).filter(Boolean))
+  return deduplicateFoods(foods.filter((food) => nameMatchesQuery(food.name, query) && isPlausibleFood(food)))
+    .sort((first, second) => scoreFoodResult(second, query, queryType) - scoreFoodResult(first, query, queryType))
     .slice(0, 12)
-}
-
-function scoreFood(food, query) {
-  const name = food.name.toLowerCase()
-  const brand = String(food.brand ?? '').toLowerCase()
-  const sourceBoost = food.foodSource === 'USDA FoodData Central' ? 45 : 0
-  if (name === query || name.startsWith(`${query},`) || name.startsWith(`${query} `)) return 100 + sourceBoost
-  if (name.split(/[, ]/).includes(query)) return 80 + sourceBoost
-  if (name.includes(query)) return 60 + sourceBoost
-  if (brand.includes(query)) return 30 + sourceBoost
-  return sourceBoost
 }
 
 function nameMatchesQuery(name, query) {

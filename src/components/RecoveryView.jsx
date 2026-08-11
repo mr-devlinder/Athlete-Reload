@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
 import { AppIcon } from './AppIcon'
+import { normalizeRecoveryExercise } from '../domain/recovery'
+import '../styles/recovery-rework.css'
 
 const equipmentOptions = [
   'Exercise mat', 'Foam roller', 'Stretching strap', 'Yoga blocks', 'Resistance band', 'Mini band',
@@ -423,12 +425,15 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                     <li className="routine-plan-step" key={`${exercise.name}-${exercise.side}-${index}`}>
                       <strong>{exercise.name}</strong>
                       <span className="routine-step-meta">{formatExerciseBodyArea(exercise)} · {formatExerciseDose(exercise)}</span>
-                      <p>{exercise.instruction}</p>
+                      <p><strong>Setup:</strong> {exercise.setup}</p>
+                      <p><strong>Movement:</strong> {exercise.movement}</p>
+                      <p><strong>Complete when:</strong> {exercise.completionCue}</p>
                       <div className="routine-step-cues">
                         <span><b>You should feel:</b> {exercise.feel ?? 'Mild, comfortable tension or controlled movement.'}</span>
-                        <span><b>Avoid:</b> {exercise.avoid ?? 'Sharp pain, bouncing, or forcing the range.'}</span>
+                        <span><b>Stop if:</b> {exercise.stopConditions}</span>
+                        <span><b>Equipment:</b> {exercise.equipment}</span>
                       </div>
-                      {exercise.why && <em>{exercise.why}</em>}
+                      <em>{exercise.purpose}</em>
                     </li>
                   ))}
                 </ol>
@@ -454,10 +459,12 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <span><small>Body area</small><strong>{formatExerciseBodyArea(currentExercise)}</strong></span>
                 <span><small>Duration or repetitions</small><strong>{formatExerciseDose(currentExercise)}</strong></span>
               </div>
-              <p className="routine-instruction">{currentExercise?.instruction}</p>
+              <div className="routine-instruction"><p><strong>Setup</strong>{currentExercise?.setup}</p><p><strong>Movement</strong>{currentExercise?.movement}</p><p><strong>Complete when</strong>{currentExercise?.completionCue}</p></div>
               <div className="routine-current-cues">
                 <p><strong>You should feel</strong>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p>
-                <p><strong>Avoid</strong>{currentExercise?.avoid ?? 'Sharp pain, bouncing, or forcing the range.'}</p>
+                <p><strong>Stop if</strong>{currentExercise?.stopConditions}</p>
+                <p><strong>Equipment</strong>{currentExercise?.equipment}</p>
+                <p><strong>Purpose</strong>{currentExercise?.purpose}</p>
               </div>
               {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
               <div className="routine-player-actions">
@@ -548,8 +555,8 @@ function buildRoutine(routine, availableMinutes, excludedExercises = [], fallbac
   const expandAvailableExercises = (exercises) => exercises
     .flatMap(expandUnilateralExercise)
     .filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
-  const individualSteps = expandAvailableExercises(routine)
-  const alternatives = expandAvailableExercises(fallback)
+  const individualSteps = expandAvailableExercises(routine).map(normalizeRecoveryExercise)
+  const alternatives = expandAvailableExercises(fallback).map(normalizeRecoveryExercise)
     .filter((exercise) => !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
   return constrainRoutine(individualSteps, availableMinutes, alternatives)
 }
@@ -615,8 +622,10 @@ function formatExerciseBodyArea(exercise) {
 }
 
 function formatExerciseDose(exercise) {
-  if (exercise?.durationSeconds) return `${exercise.durationSeconds} seconds`
-  return `${exercise?.reps ?? 6} controlled reps`
+  const dose = exercise?.durationSeconds ? `${exercise.durationSeconds} seconds` : `${exercise?.reps ?? 6} controlled reps`
+  const sets = Number(exercise?.sets ?? 1)
+  const rest = Number(exercise?.restSeconds ?? 0)
+  return `${sets > 1 ? `${sets} sets × ` : ''}${dose}${rest > 0 ? ` · ${rest}s rest` : ''}`
 }
 
 function constrainRoutine(routine, availableMinutes, alternatives = []) {

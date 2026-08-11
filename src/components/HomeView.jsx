@@ -1,6 +1,7 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
 import { useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import '../styles/home-rework.css'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getPerformanceQuote } from '../data/performanceQuotes'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
@@ -8,11 +9,13 @@ import { SectionHeading } from './SectionHeading'
 import { PainShareModal } from './PainShareModal'
 
 export function HomeView({
+  athleteProfile,
   checkouts,
   history,
   painIssues = [],
   painReports = [],
   schedule,
+  recommendation,
   onGoCheckIn,
   onOpenCheckout,
   onSavePainIssue,
@@ -34,6 +37,12 @@ export function HomeView({
   const painTimelines = getPainTimelines(history, painReports)
   const athleteQuote = getPerformanceQuote('home', now)
   const weeklySignals = getWeeklySignals(history)
+  const todayCheckIn = history.find((entry) => entry.date === format(now, 'yyyy-MM-dd') && entry.checkInType !== 'post_event')
+  const dailyRecommendation = todayCheckIn?.recommendation ?? (checkInReminder ? recommendation : null)
+  const recommendationReasons = (dailyRecommendation?.reasons ?? [])
+    .map((reason) => typeof reason === 'string' ? reason : reason.label)
+    .filter(Boolean)
+    .slice(0, 3)
   return (
     <div className="home-view" data-tour="home-page">
       <section className="home-hero" data-tour="home-intro">
@@ -45,6 +54,24 @@ export function HomeView({
           A live view of readiness, workload, pain patterns, and today&apos;s
           event flow from your saved check-ins and checkouts.
         </p>
+      </section>
+
+      <section className={`daily-command ${dailyRecommendation?.tone ?? 'neutral'}`}>
+        <div className="daily-command__status">
+          <span>Right now</span>
+          <strong>{dailyRecommendation?.label ?? (nextEvent ? 'Prepare for what is next' : 'No urgent action')}</strong>
+          {dailyRecommendation?.confidence != null && <small>{Math.round(dailyRecommendation.confidence * 100)}% confidence · decision support, not medical clearance</small>}
+        </div>
+        <div className="daily-command__action">
+          <span>What matters</span>
+          <p>{dailyRecommendation?.primaryAction?.instruction ?? dailyRecommendation?.action ?? (nextEvent ? `Review ${getEventName(nextEvent)} and complete a check-in when it opens.` : 'Use today to recover, plan, or add your next event.')}</p>
+          {recommendationReasons.length > 0 && <details><summary>Why this guidance</summary><ul>{recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
+        </div>
+        <div className="daily-command__next">
+          <span>Next</span>
+          <strong>{dueCheckout ? `Checkout: ${getEventName(dueCheckout)}` : checkInReminder ? `Check in: ${getEventName(checkInReminder)}` : nextEvent ? getEventName(nextEvent) : 'Schedule is open'}</strong>
+          <small>{athleteProfile?.sport ? `${athleteProfile.sport}${athleteProfile.position ? ` · ${athleteProfile.position}` : ''}` : 'Add your primary activity for more specific guidance'}</small>
+        </div>
       </section>
 
       <div className="home-alerts">
@@ -285,8 +312,8 @@ function PainIssuesCard({ issues, painReports, onSaveIssue, onShareIssue }) {
                 <div className="pain-issue-controls">
                   <select value={draft.status} onChange={(event) => onSaveIssue?.({ ...draft, status: event.target.value })}>
                     <option value="active">Active</option>
-                    <option value="monitoring">Monitoring</option>
-                    <option value="evaluated">Evaluated</option>
+                    <option value="improving">Improving</option>
+                    <option value="recurring">Recurring</option>
                     <option value="resolved">Resolved</option>
                   </select>
                   {!issue && <button className="secondary-button compact-action" onClick={() => onSaveIssue?.(draft)} type="button">Track</button>}
@@ -318,6 +345,9 @@ function PainIssueNotes({ issue, onSave }) {
       {isOpen && (
         <div>
           <label>Athlete notes<textarea value={draft.athleteNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, athleteNotes: event.target.value }))} /></label>
+          <label>Functional limitation<textarea value={draft.functionalLimitation ?? ''} onChange={(event) => setDraft((current) => ({ ...current, functionalLimitation: event.target.value }))} placeholder="Example: changes running, jumping, lifting, or daily movement" /></label>
+          <label>Activity relationship<textarea value={draft.activityRelationship ?? ''} onChange={(event) => setDraft((current) => ({ ...current, activityRelationship: event.target.value }))} placeholder="When it appears or which activity changes it" /></label>
+          <label>Severity trend<select value={draft.severityTrend ?? 'unknown'} onChange={(event) => setDraft((current) => ({ ...current, severityTrend: event.target.value }))}><option value="unknown">Not enough information</option><option value="improving">Improving</option><option value="stable">Stable</option><option value="worsening">Worsening</option></select></label>
           <label>Trainer notes<textarea value={draft.trainerNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, trainerNotes: event.target.value }))} /></label>
           <label>Clinician notes<textarea value={draft.clinicianNotes ?? ''} onChange={(event) => setDraft((current) => ({ ...current, clinicianNotes: event.target.value }))} /></label>
           <button className="secondary-button compact-action" onClick={saveNotes} type="button">Save notes</button>

@@ -5,6 +5,7 @@ import { getPositionOptions, isDominantSideRelevant, sportOptions } from '../dat
 import { dietaryOptions, goalOptions } from '../data/profileOptions'
 import { ProfileMeasurements } from './ProfileMeasurements'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { getAgeAccess } from '../domain/age'
 
 function ensurePrimaryGoal(goals) {
   if (goals.length === 0 || goals.some((goal) => goal.priority === 'primary')) return goals
@@ -105,6 +106,11 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
       setIsSaving(false)
       return
     }
+    if (getAgeAccess(draft).status !== 'allowed') {
+      setMessage('Athlete Reload requires a date of birth confirming that you are at least 16.')
+      setIsSaving(false)
+      return
+    }
 
     try {
       await onSave(draft)
@@ -167,7 +173,7 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
           </label>}
           <div className="onboarding-two-col">
             <label className="select-field">
-              Gender (optional)
+              Gender identity (optional)
               <select value={draft.genderIdentity ?? ''} onChange={(event) => setDraft((current) => ({ ...current, genderIdentity: event.target.value }))}>
                 <option value="">Prefer not to say</option>
                 <option>Female</option>
@@ -176,11 +182,22 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
                 <option>Self-described</option>
               </select>
             </label>
+            <label className="select-field">
+              Biological sex for physiological estimates (optional)
+              <select value={draft.biologicalSex ?? ''} onChange={(event) => setDraft((current) => ({ ...current, biologicalSex: event.target.value }))}>
+                <option value="">Prefer not to say</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="intersex">Intersex</option>
+                <option value="not_listed">Not listed</option>
+              </select>
+            </label>
           </div>
           <ProfileMeasurements profile={draft} onChange={(field, value) => setDraft((current) => ({ ...current, [field]: value }))} />
           <label className="select-field">
-            Age (optional)
-            <input inputMode="numeric" max="120" min="16" type="number" value={draft.age ?? ''} onChange={(event) => setDraft((current) => ({ ...current, age: event.target.value }))} />
+            Date of birth
+            <input max={new Date().toISOString().slice(0, 10)} required type="date" value={draft.dateOfBirth ?? ''} onChange={(event) => setDraft((current) => ({ ...current, dateOfBirth: event.target.value }))} />
+            <small className="field-description">Used to enforce the 16+ requirement and calculate age-dependent estimates.</small>
           </label>
           <fieldset className="profile-choice-field">
             <legend>Goals</legend>

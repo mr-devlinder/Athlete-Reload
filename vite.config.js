@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { configDefaults } from 'vitest/config'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -12,6 +13,9 @@ export default defineConfig(({ mode }) => {
       cssMinify: 'lightningcss',
     },
     plugins: [react()],
+    test: {
+      exclude: [...configDefaults.exclude, 'tests/e2e/**'],
+    },
     server: {
       proxy: {
         '/local-functions': {

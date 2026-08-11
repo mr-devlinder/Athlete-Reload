@@ -6,7 +6,6 @@ export function LiquidNavigation({
   athleteName = 'Athlete',
   className = '',
   lockedView = null,
-  onOpenLegal,
   onSelect,
   onSignOut,
   views,
@@ -41,7 +40,6 @@ export function LiquidNavigation({
       <div className="sidebar-account">
         <div className="sidebar-athlete"><strong>{athleteName}</strong></div>
         <button className="sidebar-utility" onClick={() => onSelect('Settings')} type="button">Settings</button>
-        <button className="sidebar-utility" onClick={() => onOpenLegal?.('privacy')} type="button">Privacy</button>
         <button className="sidebar-utility" onClick={onSignOut} type="button">Sign out</button>
       </div>
     </nav>

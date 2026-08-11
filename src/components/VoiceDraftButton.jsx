@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { generateAiRecommendation, transcribeVoiceAudio } from '../lib/aiRecommendations'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
+import { createQuickDeterministicRecommendation, mergeAiExplanation } from '../domain/contracts'
 
 export function VoiceDraftButton({ logType = 'check_in', onApply, onQuickSave }) {
   const [open, setOpen] = useState(false)
@@ -42,11 +43,14 @@ export function VoiceDraftButton({ logType = 'check_in', onApply, onQuickSave })
     setStatus('processing')
     setMessage('Reading the information you shared...')
     try {
-      const recommendation = await generateAiRecommendation({
+      const deterministicRecommendation = createQuickDeterministicRecommendation(transcript)
+      const aiRecommendation = await generateAiRecommendation({
+        deterministicRecommendation,
         requestType: 'quick_checkin',
         logType,
         quickTranscript: transcript.trim(),
       })
+      const recommendation = mergeAiExplanation(deterministicRecommendation, aiRecommendation)
       onApply?.({ quickRecommendation: recommendation, inputMethod: 'quick', voiceTranscript: transcript.trim() })
       onQuickSave?.({ quickRecommendation: recommendation, inputMethod: 'quick', voiceTranscript: transcript.trim() })
       setOpen(false)

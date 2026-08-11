@@ -5,6 +5,7 @@ import { GuidedTour } from './components/GuidedTour'
 import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
+import { AgeGate } from './components/AgeGate'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
 import { PerformanceQuote, RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
 import { DialogShell } from './components/DialogShell'
@@ -48,6 +49,8 @@ import {
   clearTrainingCheckouts,
   createAssociation,
   createPainIssue,
+  createRecommendationRecord,
+  createRecoveryResponse,
   createRecoveryRoutineCompletion,
   createSavedRecoveryRoutine,
   createCheckIn,
@@ -66,9 +69,6 @@ import {
   deleteTrainingCheckout,
   deleteTrainingCheckoutsForEvent,
   deleteTournamentWithGames,
-  loadAthleteData,
-  loadAthleteProfile,
-  loadPrivacyPreferences,
   recordLegalConsent,
   updateAssociation,
   updateCheckIn,
@@ -77,18 +77,28 @@ import {
   upsertPrivacyPreferences,
   upsertDailyWellness,
   upsertAthleteProfile,
+  upsertAthleteBaselines,
+  upsertAthleteInsights,
+  upsertRecommendationFeedback,
   updateTrainingCheckout,
   updateScheduleEvent,
   saveTournamentWithGames,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { buildAthleteContext, buildFallbackRecommendation } from './lib/recommendationContext'
+import { mergeAiExplanation } from './domain/contracts'
+import { getAgeAccess } from './domain/age'
+import { getCheckoutRecommendation } from './domain/checkoutRecommendation'
+import { getActivityDemandProfile } from './domain/activityDemands'
+import { transitionPainIssue } from './domain/painLifecycle'
+import { useAthleteSnapshotController } from './features/app/useAthleteSnapshotController'
 import { displayPreferenceDefaults, normalizeDisplayPreferences } from './lib/displayPreferences'
 import { getSportContext } from './data/sportProfiles'
 import { hasSupabaseConfig, supabase } from './lib/supabaseClient'
 import { bodyPainAreas, getPainReportsFromMap, getPainReportsWithResolutions, getPrimaryPainArea, normalizePainMapScale } from './data/bodyPainMap'
-import { getRecommendation, getTrendInsights } from './utils/readiness'
-import { getPersonalBaseline } from './utils/baselines'
+import { getRecommendation } from './utils/readiness'
+import { getAthleteInsights } from './domain/insights'
+import { getPersonalBaseline, getRollingBaselineRecords } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
 import { canPersistGuestState, clearUserStorage, loadSavedState, saveState } from './utils/storage'
 import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
@@ -97,8 +107,11 @@ import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from
 import { useModalAccessibility } from './hooks/useModalAccessibility'
 import { shouldShowStartupLoader } from './lib/startupFlow'
 import './App.css'
+import './styles/tokens.css'
+import './styles/primitives.css'
 import './styles/ui-system.css'
 import './styles/ui-production.css'
+import './styles/shell-rework.css'
 
 const views = [
   {
@@ -112,10 +125,6 @@ const views = [
   {
     icon: 'recovery',
     label: 'Recovery',
-  },
-  {
-    icon: 'pulse',
-    label: 'Check-in',
   },
   {
     icon: 'calendar',
@@ -718,6 +727,7 @@ function App() {
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
   const [isMobileAccountMenuOpen, setIsMobileAccountMenuOpen] = useState(false)
+  const [isRestrictedDataControlsOpen, setIsRestrictedDataControlsOpen] = useState(false)
   const recommendationDialogRef = useModalAccessibility(Boolean(submittedRecommendation), () => setSubmittedRecommendation(null))
   const aiErrorDialogRef = useModalAccessibility(Boolean(checkInAiError), () => setCheckInAiError(''))
   const mobileAccountMenuRef = useModalAccessibility(isMobileAccountMenuOpen, () => setIsMobileAccountMenuOpen(false))
@@ -745,6 +755,7 @@ function App() {
   )
   const displayPreferences = normalizeDisplayPreferences(privacyPreferences.display, athleteProfile?.unitSystem)
   const athleteDisplayName = athleteProfile?.displayName || session?.user?.email || 'Athlete'
+  const ageAccess = getAgeAccess(athleteProfile)
   const isSupabaseSession = Boolean(supabase && session?.user?.id && isAppUnlocked)
   resetAccountStateRef.current = resetAccountState
   const todayIso = getTodayIso()
@@ -899,9 +910,17 @@ function App() {
   )
 
   const trendInsights = useMemo(
-    () => getTrendInsights(history),
-    [history],
+    () => getAthleteInsights({ history, checkouts, painReports, recoveryCompletions }),
+    [checkouts, history, painReports, recoveryCompletions],
   )
+
+  useEffect(() => {
+    if (!session?.user || !athleteProfile?.athleteId) return
+    upsertAthleteInsights({
+      athleteId: athleteProfile.athleteId,
+      insights: trendInsights,
+    }).catch((error) => console.warn('Unable to update athlete insights.', error))
+  }, [athleteProfile?.athleteId, session?.user, trendInsights])
 
   const resetDeletedSessionEvent = useEffectEvent(resetDeletedSession)
 
@@ -1068,164 +1087,36 @@ function App() {
     })
   }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
 
-  useEffect(() => {
-    if (!isSupabaseSession) {
-      return
-    }
+  useAthleteSnapshotController({
+    enabled: isSupabaseSession,
+    onDeletedSession: resetDeletedSession,
+    onFailure: () => setIsProfileReady(true),
+    onSnapshot: applyRemoteSnapshot,
+    onStatus: setDataStatus,
+    privacyDefaults,
+    reloadKey: todayIso,
+  })
 
-    let isMounted = true
-    setDataStatus('loading')
-
-    async function loadRemoteData() {
-      try {
-        const { data: userData, error: userError } = await supabase.auth.getUser()
-
-        const userWasDeleted = !userData.user && (
-          !userError
-          || userError.status === 401
-          || userError.status === 403
-          || userError.code === 'user_not_found'
-          || userError.code === 'invalid_token'
-        )
-
-        if (userWasDeleted) {
-          await resetDeletedSessionEvent()
-          return
-        }
-
-        if (userError) throw userError
-
-        const data = await loadAthleteData()
-        let preferences = privacyDefaults
-
-        try {
-          preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
-        } catch (preferencesError) {
-          console.warn(preferencesError)
-        }
-
-        const profile = await loadAthleteProfile()
-
-        if (!isMounted) return
-
-        setSchedule(data.schedule)
-        setAssociations(data.associations)
-        setHistory(data.history)
-        setCheckouts(data.checkouts)
-        setPainReports(data.painReports)
-        setPainIssues(data.painIssues)
-        setSavedRoutines(data.savedRoutines)
-        setRecoveryCompletions(data.recoveryCompletions ?? [])
-        setShareAuditLogs(data.shareAuditLogs)
-        setTournaments(data.tournaments)
-        setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
-        setNutritionHistory(data.wellnessHistory ?? [])
-        setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
-        setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
-        setAthleteProfile(profile)
-        setIsProfileReady(true)
-        setDataStatus('ready')
-      } catch (error) {
-        if (error?.status === 401 || error?.code === 'PGRST301') {
-          const { error: refreshError } = await supabase.auth.refreshSession()
-
-          if (!refreshError) {
-            try {
-              const data = await loadAthleteData()
-              let preferences = privacyDefaults
-
-              try {
-                preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
-              } catch (preferencesError) {
-                console.warn(preferencesError)
-              }
-
-              const profile = await loadAthleteProfile()
-
-              if (!isMounted) return
-
-              setSchedule(data.schedule)
-              setAssociations(data.associations)
-              setHistory(data.history)
-              setCheckouts(data.checkouts)
-              setPainReports(data.painReports)
-              setPainIssues(data.painIssues)
-              setSavedRoutines(data.savedRoutines)
-              setRecoveryCompletions(data.recoveryCompletions ?? [])
-              setShareAuditLogs(data.shareAuditLogs)
-              setTournaments(data.tournaments)
-              setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
-              setNutritionHistory(data.wellnessHistory ?? [])
-              setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
-              setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
-              setAthleteProfile(profile)
-              setIsProfileReady(true)
-              setDataStatus('ready')
-              return
-            } catch (retryError) {
-              console.error(retryError)
-            }
-          }
-        } else {
-          console.error(error)
-        }
-
-        // A restored browser session can briefly be ahead of the first data request.
-        // Give a cold browser session a few quiet attempts before surfacing a sync warning.
-        if (isMounted && navigator.onLine) {
-          for (const delay of [650, 1400, 2600]) {
-            try {
-              await new Promise((resolve) => window.setTimeout(resolve, delay))
-              const data = await loadAthleteData()
-              let preferences = privacyDefaults
-
-              try {
-                preferences = (await loadPrivacyPreferences()) ?? privacyDefaults
-              } catch (preferencesError) {
-                console.warn(preferencesError)
-              }
-
-              const profile = await loadAthleteProfile()
-
-              if (!isMounted) return
-
-              setSchedule(data.schedule)
-              setAssociations(data.associations)
-              setHistory(data.history)
-              setCheckouts(data.checkouts)
-              setPainReports(data.painReports)
-              setPainIssues(data.painIssues)
-              setSavedRoutines(data.savedRoutines)
-              setRecoveryCompletions(data.recoveryCompletions ?? [])
-              setShareAuditLogs(data.shareAuditLogs)
-              setTournaments(data.tournaments)
-              setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
-              setNutritionHistory(data.wellnessHistory ?? [])
-              setPrivacyPreferences({ ...privacyDefaults, ...preferences, display: normalizeDisplayPreferences(preferences.display, profile?.unitSystem) })
-              setActiveView(normalizeDisplayPreferences(preferences.display, profile?.unitSystem).defaultView)
-              setAthleteProfile(profile)
-              setIsProfileReady(true)
-              setDataStatus('ready')
-              return
-            } catch (retryError) {
-              console.warn('Supabase data retry failed.', retryError)
-            }
-          }
-        }
-
-        if (isMounted) {
-          setIsProfileReady(true)
-          setDataStatus(navigator.onLine ? 'error' : 'offline')
-        }
-      }
-    }
-
-    loadRemoteData()
-
-    return () => {
-      isMounted = false
-    }
-  }, [isSupabaseSession, todayIso])
+  function applyRemoteSnapshot({ data, preferences, profile }) {
+    setSchedule(data.schedule)
+    setAssociations(data.associations)
+    setHistory(data.history)
+    setCheckouts(data.checkouts)
+    setPainReports(data.painReports)
+    setPainIssues(data.painIssues)
+    setSavedRoutines(data.savedRoutines)
+    setRecoveryCompletions(data.recoveryCompletions ?? [])
+    setShareAuditLogs(data.shareAuditLogs)
+    setTournaments(data.tournaments)
+    setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
+    setNutritionHistory(data.wellnessHistory ?? [])
+    const display = normalizeDisplayPreferences(preferences.display, profile?.unitSystem)
+    setPrivacyPreferences({ ...privacyDefaults, ...preferences, display })
+    setActiveView(display.defaultView)
+    setAthleteProfile(profile)
+    setIsProfileReady(true)
+    setDataStatus('ready')
+  }
 
   useEffect(() => {
     if (!isSupabaseSession) {
@@ -1362,8 +1253,15 @@ function App() {
       ...rawSavedCheckIn,
       painMap: normalizePainMapScale(rawSavedCheckIn.painMap, rawSavedCheckIn.pain),
     }
-    let finalRecommendation = savedCheckIn.quickRecommendation ?? null
-    let finalRecommendationStatus = 'ai'
+    const baseline = getPersonalBaseline(history, selectedCheckInEvent)
+    const deterministicRecommendation = getRecommendation({
+      ...savedCheckIn,
+      baselineSampleSize: baseline.sampleSize,
+    })
+    let finalRecommendation = savedCheckIn.quickRecommendation
+      ? mergeAiExplanation(deterministicRecommendation, savedCheckIn.quickRecommendation)
+      : deterministicRecommendation
+    let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
 
     if (!savedCheckIn.quickRecommendation) {
       try {
@@ -1377,7 +1275,7 @@ function App() {
         const event = attachTournamentContext(selectedCheckInEvent, tournaments, schedule)
         const scheduleContext = getRecommendationScheduleContext(schedule, selectedCheckInEvent)
         const recentEvents = checkouts.slice(0, 4).map(withoutNotes)
-        finalRecommendation = await generateAiRecommendation({
+        const aiRecommendation = await generateAiRecommendation({
           athleteProfile,
           athleteContext: buildAthleteContext({
             athleteProfile,
@@ -1389,7 +1287,7 @@ function App() {
             recentPainReports: painReports,
             scheduleContext,
           }),
-          baseline: getPersonalBaseline(history, selectedCheckInEvent),
+          baseline,
           checkIn: withoutNotes(savedCheckIn),
           eventPreparationContext: getCheckInPreparationContext({
             checkInTime: new Date(),
@@ -1408,19 +1306,14 @@ function App() {
           previousCheckout: getPreviousCheckoutRecommendationContext(previousCheckout, savedCheckIn),
           previousRecoveryCompletion: withoutNotes(previousRecoveryCompletion),
           requestType: 'check_in',
+          deterministicRecommendation,
           scheduleContext,
         }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
+        finalRecommendation = mergeAiExplanation(deterministicRecommendation, aiRecommendation)
+        finalRecommendationStatus = 'ai'
       } catch (error) {
         console.error('Check-in AI recommendation failed', error)
-        finalRecommendation = buildFallbackRecommendation('check_in', buildAthleteContext({
-          athleteProfile,
-          checkIn: savedCheckIn,
-          event: selectedCheckInEvent,
-          nutritionContext,
-          recentEvents: checkouts,
-          recentPainReports: painReports,
-          scheduleContext: getRecommendationScheduleContext(schedule, selectedCheckInEvent),
-        }))
+        finalRecommendation = deterministicRecommendation
         finalRecommendationStatus = 'local'
       }
     }
@@ -1458,6 +1351,25 @@ function App() {
           ...savedPainReports,
           ...current.filter((report) => report.sourceId !== savedEntry.id),
         ])
+        if (athleteProfile?.athleteId) {
+          const recommendationRecord = await createRecommendationRecord({
+            athleteId: athleteProfile.athleteId,
+            sourceType: 'check_in',
+            sourceId: savedEntry.id,
+            recommendation: finalRecommendation,
+            contextSnapshot: {
+              eventId: savedCheckIn.eventId,
+              eventDate: savedCheckIn.eventDate,
+              engineVersion: finalRecommendation.engineVersion,
+            },
+          }).catch((error) => { console.warn('Unable to store recommendation record.', error); return null })
+          if (recommendationRecord?.id) finalRecommendation.recordId = recommendationRecord.id
+          const nextHistory = [savedEntry, ...history.filter((entry) => entry.id !== savedEntry.id)]
+          upsertAthleteBaselines({
+            athleteId: athleteProfile.athleteId,
+            records: getRollingBaselineRecords({ checkouts, event: selectedCheckInEvent, history: nextHistory, painReports, recoveryCompletions }),
+          }).catch((error) => console.warn('Unable to update athlete baselines.', error))
+        }
       } catch (error) {
         console.error(error)
         if (savedEntry) {
@@ -1516,8 +1428,14 @@ function App() {
 
   async function updateScheduleItem(id, updates) {
     const previousEvent = schedule.find((item) => item.id === id)
+    const updatedEvent = { ...previousEvent, ...updates }
+    const contextualUpdates = {
+      ...updates,
+      activityKey: updates.activityKey ?? previousEvent?.activityKey ?? athleteProfile?.sport ?? 'Other',
+      demandSnapshot: getActivityDemandProfile({ sport: athleteProfile?.sport ?? 'Other', event: updatedEvent }),
+    }
     setSchedule((current) =>
-      current.map((item) => (item.id === id ? { ...item, ...updates } : item)),
+      current.map((item) => (item.id === id ? { ...item, ...contextualUpdates } : item)),
     )
 
     if (!isSupabaseSession) {
@@ -1525,7 +1443,7 @@ function App() {
     }
 
     try {
-      const savedEvent = await updateScheduleEvent(id, updates)
+      const savedEvent = await updateScheduleEvent(id, contextualUpdates)
       setSchedule((current) => current.map((item) => item.id === id ? savedEvent : item))
       setDataStatus('synced')
       return true
@@ -1540,6 +1458,8 @@ function App() {
   async function addScheduleItem(event) {
     const eventToSave = {
       ...event,
+      activityKey: event.activityKey ?? athleteProfile?.sport ?? 'Other',
+      demandSnapshot: getActivityDemandProfile({ sport: athleteProfile?.sport ?? 'Other', event }),
       load: event.type === 'Other activity' ? event.load ?? 'Medium' : getDefaultLoadForEvent(event.type),
       title: getEventDisplayName(event),
     }
@@ -1550,7 +1470,8 @@ function App() {
         setSchedule((current) => [...current, savedEvent])
         setDataStatus('synced')
         if (onboardingTour === 'schedule') {
-          setOnboardingTour('checkin-nav')
+          setActiveView('Check-in')
+          setOnboardingTour('checkin')
         }
         return true
       } catch (error) {
@@ -1562,7 +1483,8 @@ function App() {
 
     setSchedule((current) => [...current, eventToSave])
     if (onboardingTour === 'schedule') {
-      setOnboardingTour('checkin-nav')
+      setActiveView('Check-in')
+      setOnboardingTour('checkin')
     }
     return true
   }
@@ -1769,11 +1691,7 @@ function App() {
     const existing = nextIssue.id
       ? painIssues.find((issue) => issue.id === nextIssue.id)
       : null
-    const issue = {
-      ...existing,
-      ...nextIssue,
-      resolvedDate: nextIssue.status === 'resolved' ? (nextIssue.resolvedDate ?? todayIso) : null,
-    }
+    const issue = transitionPainIssue(existing, nextIssue, todayIso)
 
     if (!isSupabaseSession) {
       setPainIssues((current) => existing
@@ -1789,6 +1707,18 @@ function App() {
       setPainIssues((current) => existing
         ? current.map((item) => item.id === savedIssue.id ? savedIssue : item)
         : [savedIssue, ...current])
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+    }
+  }
+
+  async function saveSubmittedRecommendationFeedback(usefulness) {
+    const recommendationId = submittedRecommendation?.recordId
+    if (!athleteProfile?.athleteId || !recommendationId) return
+    try {
+      await upsertRecommendationFeedback({ athleteId: athleteProfile.athleteId, recommendationId, usefulness })
+      setSubmittedRecommendation((current) => ({ ...current, feedback: usefulness }))
     } catch (error) {
       console.error(error)
       setDataStatus('error')
@@ -1945,8 +1875,12 @@ function App() {
       ...checkout,
       painMap: normalizePainMapScale(checkout.painMap, preCheckIn?.pain),
     }
-    let finalRecommendation = existingCheckout?.recommendation ?? null
-    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'loading'
+    const nextScheduledEvent = getNextScheduledEvent(schedule, event)
+    const deterministicRecommendation = getCheckoutRecommendation(checkout, event, nextScheduledEvent)
+    let finalRecommendation = existingCheckout?.recommendation
+      ? mergeAiExplanation(deterministicRecommendation, existingCheckout.recommendation)
+      : deterministicRecommendation
+    let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'local'
 
     if (supabase) {
       try {
@@ -1956,7 +1890,7 @@ function App() {
         const completedEvent = attachTournamentContext(event, tournaments, schedule)
         const scheduleContext = getRecommendationScheduleContext(schedule, event)
         const recentEvents = checkouts.filter((item) => item.id !== existingCheckout?.id).slice(0, 4).map(withoutNotes)
-        finalRecommendation = await generateAiRecommendation({
+        const aiRecommendation = await generateAiRecommendation({
           athleteProfile,
           athleteContext: buildAthleteContext({
             athleteProfile,
@@ -1973,28 +1907,21 @@ function App() {
           completedEvent,
           dailyWellness: getCheckoutWellnessContext(dailyWellness, nutritionContext),
           generatedAt,
-          nextScheduledEvent: getNextScheduledEvent(schedule, event),
+          nextScheduledEvent,
           nutritionContext,
           preCheckIn: withoutNotes(preCheckIn),
           previousCheckout: withoutNotes(previousCheckout),
           recentEvents,
           requestType: 'post_checkout',
+          deterministicRecommendation,
           scheduleContext,
           sportContext: getSportContext({ athleteProfile, event, workload: checkout.sportWorkload }),
         }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
+        finalRecommendation = mergeAiExplanation(deterministicRecommendation, aiRecommendation)
         finalRecommendationStatus = 'ai'
       } catch (error) {
         console.error(error)
-        finalRecommendation = buildFallbackRecommendation('post_checkout', buildAthleteContext({
-          athleteProfile,
-          checkIn: preCheckIn,
-          checkout,
-          event,
-          nutritionContext,
-          recentEvents: checkouts,
-          recentPainReports: painReports,
-          scheduleContext: getRecommendationScheduleContext(schedule, event),
-        }))
+        finalRecommendation = deterministicRecommendation
         finalRecommendationStatus = 'local'
       }
     }
@@ -2062,6 +1989,26 @@ function App() {
         ...savedPainReports,
         ...current.filter((report) => report.sourceId !== savedCheckout.id),
       ])
+      if (athleteProfile?.athleteId) {
+        const recommendationRecord = await createRecommendationRecord({
+          athleteId: athleteProfile.athleteId,
+          sourceType: 'checkout',
+          sourceId: savedCheckout.id,
+          recommendation: finalRecommendation,
+          contextSnapshot: { eventId: event.id, eventDate: event.date, sessionLoad: finalRecommendation.sessionLoad },
+        }).catch((error) => { console.warn('Unable to store checkout recommendation record.', error); return null })
+        if (recommendationRecord?.id) finalRecommendation.recordId = recommendationRecord.id
+        upsertAthleteBaselines({
+          athleteId: athleteProfile.athleteId,
+          records: getRollingBaselineRecords({
+            checkouts: [savedCheckout, ...checkouts.filter((item) => item.id !== savedCheckout.id)],
+            event,
+            history,
+            painReports: savedPainReports,
+            recoveryCompletions,
+          }),
+        }).catch((error) => console.warn('Unable to update checkout baselines.', error))
+      }
       setCheckoutEvent(null)
       setSubmittedRecommendation(finalRecommendation)
       setSubmittedRecommendationStatus(finalRecommendationStatus)
@@ -2256,6 +2203,18 @@ function App() {
         ? await createRecoveryRoutineCompletion(completion)
         : completion
       setRecoveryCompletions((current) => [savedCompletion, ...current.filter((item) => item.id !== savedCompletion.id)])
+      if (isSupabaseSession && athleteProfile?.athleteId && plan.feedback) {
+        createRecoveryResponse({
+          athleteId: athleteProfile.athleteId,
+          routineCompletionId: savedCompletion.id,
+          sourceCheckoutId: checkout?.id,
+          timing: 'immediate',
+          response: {
+            ...plan.feedback,
+            painChange: ({ Better: 'better', Same: 'unchanged', Worse: 'worse' })[plan.feedback.feeling] ?? 'unchanged',
+          },
+        }).catch((error) => console.warn('Unable to store normalized recovery response.', error))
+      }
     } catch (error) {
       recoveryPlanSaveInFlightRef.current = false
       console.error('Unable to save recovery history', error)
@@ -2631,7 +2590,8 @@ function App() {
 
   function advanceOnboardingTour() {
     if (onboardingTour === 'schedule-review') {
-      setOnboardingTour('checkin-nav')
+      setActiveView('Check-in')
+      setOnboardingTour('checkin')
     } else if (onboardingTour === 'checkin') {
       setOnboardingTour('nutrition-nav')
     } else if (onboardingTour === 'nutrition') {
@@ -2646,11 +2606,9 @@ function App() {
   }
 
   function rewindOnboardingTour() {
-    if (onboardingTour === 'checkin-nav') {
+    if (onboardingTour === 'checkin') {
       setActiveView('Schedule')
       setOnboardingTour('schedule-review')
-    } else if (onboardingTour === 'checkin') {
-      setOnboardingTour('checkin-nav')
     } else if (onboardingTour === 'home-nav') {
       setActiveView('Recovery')
       setOnboardingTour('recovery')
@@ -2675,9 +2633,7 @@ function App() {
   }
 
   function handleTourNavigation(view) {
-    if (onboardingTour === 'checkin-nav' && view === 'Check-in') {
-      setOnboardingTour('checkin')
-    } else if (onboardingTour === 'nutrition-nav' && view === 'Nutrition') {
+    if (onboardingTour === 'nutrition-nav' && view === 'Nutrition') {
       setOnboardingTour('nutrition')
     } else if (onboardingTour === 'recovery-nav' && view === 'Recovery') {
       setOnboardingTour('recovery')
@@ -2704,6 +2660,24 @@ function App() {
 
     if (isSupabaseSession) {
       const savedProfile = await upsertAthleteProfile(nextProfile)
+      setAthleteProfile(savedProfile)
+      return
+    }
+
+    setAthleteProfile(nextProfile)
+  }
+
+  async function confirmAthleteAge(profile) {
+    const nextProfile = {
+      ...athleteProfile,
+      ...profile,
+      onboardingCompleted: true,
+    }
+
+    if (isSupabaseSession) {
+      // Age confirmation must not fail because an optional physiology table is
+      // temporarily unavailable during the additive compatibility rollout.
+      const savedProfile = await upsertAthleteProfile(nextProfile, { skipPhysiology: true })
       setAthleteProfile(savedProfile)
       return
     }
@@ -2798,11 +2772,38 @@ function App() {
 
   function getTourNavigationTarget() {
     return {
-      'checkin-nav': 'Check-in',
       'home-nav': 'Home',
       'history-nav': 'History',
     }[onboardingTour]
   }
+
+  const accountPrivacyView = (
+    <AccountPrivacyView
+      associations={associations}
+      athleteProfile={athleteProfile}
+      checkouts={checkouts}
+      dailyWellness={dailyWellness}
+      history={history}
+      nutritionHistory={nutritionHistory}
+      painIssues={painIssues}
+      painReports={painReports}
+      preferences={privacyPreferences}
+      recoveryCompletions={recoveryCompletions}
+      savedRoutines={savedRoutines}
+      schedule={schedule}
+      session={session}
+      shareAuditLogs={shareAuditLogs}
+      tournaments={tournaments}
+      onClearAllHealthHistory={clearAllHealthHistory}
+      onAccountDeleted={resetDeletedSession}
+      onDeleteShareAuditLog={removeShareAuditLog}
+      onUpdateReminderPreference={updateReminderPreference}
+      onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
+      onUpdateDisplayPreference={updateDisplayPreference}
+      onOpenAthleteProfile={() => setIsAthleteProfileOpen(true)}
+      onOpenLegal={setActiveLegalModal}
+    />
+  )
 
   function selectNavigationView(view) {
     const requiredView = getTourNavigationTarget()
@@ -2864,7 +2865,23 @@ function App() {
         />
       )}
 
-      {isAuthReady && isAppUnlocked && session && isProfileReady && (athleteProfile?.onboardingCompleted || onboardingTour || onboardingCompleteOpen) && (
+      {isAuthReady && isAppUnlocked && session && isProfileReady && athleteProfile?.onboardingCompleted && ageAccess.status !== 'allowed' && !isRestrictedDataControlsOpen && (
+        <AgeGate
+          profile={athleteProfile}
+          onOpenDataControls={() => setIsRestrictedDataControlsOpen(true)}
+          onSave={confirmAthleteAge}
+          onSignOut={signOut}
+        />
+      )}
+
+      {isAuthReady && isAppUnlocked && session && isProfileReady && athleteProfile?.onboardingCompleted && ageAccess.status === 'restricted' && isRestrictedDataControlsOpen && (
+        <main className="restricted-data-controls">
+          <button className="secondary-button" onClick={() => setIsRestrictedDataControlsOpen(false)} type="button">Back to age notice</button>
+          {accountPrivacyView}
+        </main>
+      )}
+
+      {isAuthReady && isAppUnlocked && session && isProfileReady && ageAccess.status === 'allowed' && (athleteProfile?.onboardingCompleted || onboardingTour || onboardingCompleteOpen) && (
         <>
           <div className="dashboard-shell">
             <LiquidNavigation
@@ -2872,7 +2889,6 @@ function App() {
               athleteName={athleteDisplayName}
               className={onboardingTour && !onboardingTour.endsWith('-nav') ? 'tour-hidden-mobile' : ''}
               lockedView={getTourNavigationTarget()}
-              onOpenLegal={setActiveLegalModal}
               onSelect={selectNavigationView}
               onSignOut={signOut}
               views={views}
@@ -2910,7 +2926,6 @@ function App() {
                     <strong className="mobile-account-name">{athleteDisplayName}</strong>
                     <nav aria-label="Account actions">
                       <button onClick={() => { setIsMobileAccountMenuOpen(false); selectNavigationView('Settings') }} type="button">Settings</button>
-                      <button onClick={() => { setIsMobileAccountMenuOpen(false); setActiveLegalModal('privacy') }} type="button">Privacy</button>
                       <button onClick={() => { setIsMobileAccountMenuOpen(false); signOut() }} type="button">Sign out</button>
                     </nav>
                   </aside>
@@ -2922,16 +2937,19 @@ function App() {
           <AppErrorBoundary feature={`view-${activeView.toLowerCase()}`} key={activeView}>
           <Suspense fallback={null}>
             {dataStatus === 'error' && (
-              <div className="data-status error">
-                Your latest information could not be refreshed. The screen may be showing the last saved version.
+              <div className="data-status error" role="alert">
+                <span>Your latest information could not be refreshed. The screen may be showing the last saved version.</span>
+                <button className="secondary-button compact-action" onClick={() => window.location.reload()} type="button">Retry</button>
               </div>
             )}
 
             {dataStatus === 'offline' && (
-              <div className="data-status">
+              <div className="data-status" role="status">
                 You appear to be offline. Showing the last loaded state.
               </div>
             )}
+
+            {dataStatus === 'loading' && <div className="data-status" role="status">Refreshing your athlete context...</div>}
 
             {activeView === 'Check-in' && (
               <CheckInView
@@ -3048,31 +3066,7 @@ function App() {
             )}
 
             {activeView === 'Settings' && (
-              <AccountPrivacyView
-                associations={associations}
-                athleteProfile={athleteProfile}
-                checkouts={checkouts}
-                dailyWellness={dailyWellness}
-                history={history}
-                nutritionHistory={nutritionHistory}
-                painIssues={painIssues}
-                painReports={painReports}
-                preferences={privacyPreferences}
-                recoveryCompletions={recoveryCompletions}
-                savedRoutines={savedRoutines}
-                schedule={schedule}
-                session={session}
-                shareAuditLogs={shareAuditLogs}
-                tournaments={tournaments}
-                onClearAllHealthHistory={clearAllHealthHistory}
-                onAccountDeleted={resetDeletedSession}
-                onDeleteShareAuditLog={removeShareAuditLog}
-                onUpdateReminderPreference={updateReminderPreference}
-                onUpdateAiPersonalizationPreference={updateAiPersonalizationPreference}
-                onUpdateDisplayPreference={updateDisplayPreference}
-                onOpenAthleteProfile={() => setIsAthleteProfileOpen(true)}
-                onOpenLegal={setActiveLegalModal}
-              />
+              accountPrivacyView
             )}
           </Suspense>
           </AppErrorBoundary>
@@ -3142,6 +3136,7 @@ function App() {
               />
             ) : (
               <RecommendationCard
+                onFeedback={submittedRecommendation?.recordId ? saveSubmittedRecommendationFeedback : undefined}
                 recommendation={submittedRecommendation}
                 recommendationStatus={submittedRecommendationStatus}
                 scoreLabel={submittedRecommendationContext.scoreLabel}
@@ -3299,7 +3294,7 @@ const legalContentV2 = {
       {
         title: '2. Information We Collect',
         body: [
-          'Account and profile data includes your name or nickname, email, authentication identifiers, age, height, weight, gender if provided, sport, position or specialty, dominant side, goals, dietary preferences, unit preference, and connected sign-in providers.',
+          'Account and profile data includes your name or nickname, email, authentication identifiers, date of birth, age, height, weight, optional gender identity and physiological information, sport, position or specialty, dominant side, goals, dietary preferences, unit preference, and connected sign-in providers.',
           'Training and wellness data includes schedules, teams or associations, tournaments, check-ins, checkouts, training history and workload, injuries you describe, pain reports and body areas, soreness, sleep, fatigue, stress, recovery routines and completions, nutrition logs, food and brand details, calories, nutrients, hydration or water intake, notes, saved foods, and voice transcripts when you choose voice entry.',
           'Generated data includes readiness scores, trends, recovery plans, and AI-generated recommendations. Operational data may include authentication sessions, browser or device information supplied by your browser, security records, and service error logs.',
         ],
@@ -3314,7 +3309,7 @@ const legalContentV2 = {
       {
         title: '4. Service Providers and AI Processing',
         body: [
-          'Athlete Reload uses Supabase for authentication, database storage, and server-side functions. Recommendation and voice-extraction requests may be sent through a server-side function to OpenRouter and the selected model provider. Food searches may query food-data providers described by the search feature.',
+          'Athlete Reload uses Supabase for authentication, database storage, and server-side functions. Recommendation and voice-extraction requests may be sent through a server-side function to Google Gemini. Direct identifiers and date of birth are removed from recommendation payloads. Food searches may query food-data providers described by the search feature.',
           'These providers process information only as needed to operate app features. API keys and service secrets are intended to stay server-side and are not stored in the browser.',
         ],
       },

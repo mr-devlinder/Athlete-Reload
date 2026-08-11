@@ -4,6 +4,7 @@ import { estimatePlannedMinutes, isAllDayEvent, isOtherActivityEvent } from '../
 import { normalizePainMapScale } from '../data/bodyPainMap'
 import { fluidOuncesToMilliliters, inchesToCentimeters, milesToMeters, poundsToKilograms, yardsToMeters } from '../utils/units'
 import { normalizeDisplayPreferences } from './displayPreferences'
+import { calculateAge } from '../domain/age'
 
 function normalizeFivePointValue(value, fallback = 1) {
   const number = Number(value)
@@ -36,9 +37,11 @@ function fromScheduleRow(row) {
   const customActivityName = isOtherActivity && row.title !== row.event_type ? row.title ?? '' : ''
   return {
     allDay: isAllDay,
+    activityKey: row.activity_key ?? '',
     association: isOtherActivity ? row.association ?? 'None' : row.association ?? 'Personal',
     availability: row.availability ?? 'Required',
     environment: row.environment ?? 'Outdoor',
+    eventSubtype: row.event_subtype ?? '',
     customActivityName,
     expectedDuration: isAllDay ? null : Number(row.expected_duration ?? row.planned_minutes ?? 60),
     id: row.id,
@@ -48,11 +51,13 @@ function fromScheduleRow(row) {
     note: row.note ?? '',
     opponent: row.opponent ?? '',
     plannedMinutes: isAllDay ? undefined : Number(row.planned_minutes ?? 0) || undefined,
+    positionOrEvent: row.position_or_event ?? '',
     surface: row.surface ?? 'Grass',
     time,
     title: customActivityName || (isAllDay ? row.event_type : row.title ?? row.event_type),
     tournamentId: row.tournament_id ?? null,
     sportWorkload: row.sport_workload ?? {},
+    demandSnapshot: row.demand_snapshot ?? {},
     type: row.event_type ?? 'Training',
     venue: row.venue ?? '',
   }
@@ -62,9 +67,11 @@ function toScheduleRow(event) {
   const isAllDay = isAllDayEvent(event)
   const isOtherActivity = isOtherActivityEvent(event)
   return {
+    activity_key: event.activityKey ?? '',
     association: isOtherActivity ? event.association ?? 'None' : event.association ?? 'Personal',
     availability: event.availability ?? 'Required',
     environment: event.environment ?? 'Outdoor',
+    event_subtype: event.eventSubtype ?? '',
     expected_duration: isAllDay ? 0 : Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
     event_date: event.date,
     event_time: isAllDay ? '' : event.time ?? '',
@@ -74,10 +81,12 @@ function toScheduleRow(event) {
     note: event.note ?? '',
     opponent: event.opponent ?? '',
     planned_minutes: isAllDay ? null : Number(event.plannedMinutes ?? 0) || null,
+    position_or_event: event.positionOrEvent ?? '',
     surface: event.surface ?? 'Grass',
     title: isOtherActivity ? event.customActivityName?.trim() || event.title || event.type : isAllDay ? event.type : event.title || event.type,
     tournament_id: event.tournamentId ?? null,
     sport_workload: event.sportWorkload ?? {},
+    demand_snapshot: event.demandSnapshot ?? {},
     updated_at: new Date().toISOString(),
     venue: event.venue ?? '',
   }
@@ -314,7 +323,10 @@ function fromPrivacyPreferencesRow(row) {
 
 function fromAthleteProfileRow(row) {
   return {
-    age: row.age_years ?? null,
+    age: calculateAge(row.date_of_birth) ?? row.age_years ?? null,
+    ageVerifiedAt: row.age_verified_at ?? null,
+    biologicalSex: row.biological_sex ?? '',
+    dateOfBirth: row.date_of_birth ?? '',
     displayName: row.display_name ?? '',
     dominantSide: row.dominant_side ?? 'Right',
     dietaryPreferences: row.dietary_preferences ?? [],
@@ -333,7 +345,9 @@ function fromAthleteProfileRow(row) {
 
 function toAthleteProfileRow(profile) {
   return {
-    age_years: profile.age ? Number(profile.age) : null,
+    age_years: calculateAge(profile.dateOfBirth) ?? (profile.age ? Number(profile.age) : null),
+    age_verified_at: profile.dateOfBirth ? (profile.ageVerifiedAt ?? new Date().toISOString()) : null,
+    date_of_birth: profile.dateOfBirth || null,
     display_name: profile.displayName ?? '',
     dominant_side: profile.dominantSide ?? 'Right',
     dietary_preferences: profile.dietaryPreferences ?? [],
@@ -365,12 +379,16 @@ function fromDailyWellnessRow(row) {
 
 function fromPainIssueRow(row) {
   return {
+    activityRelationship: row.activity_relationship ?? '',
     athleteNotes: row.athlete_notes ?? '',
     bodyPart: row.body_part,
     clinicianNotes: row.clinician_notes ?? '',
     firstReportedDate: row.first_reported_date,
+    functionalLimitation: row.functional_limitation ?? '',
     id: row.id,
+    recurrenceCount: Number(row.recurrence_count ?? 0),
     resolvedDate: row.resolved_date,
+    severityTrend: row.severity_trend ?? 'unknown',
     side: row.side ?? 'center',
     status: row.status ?? 'active',
     trainerNotes: row.trainer_notes ?? '',
@@ -412,11 +430,15 @@ function fromRecoveryRoutineCompletionRow(row) {
 
 function toPainIssueRow(issue) {
   return {
+    activity_relationship: issue.activityRelationship ?? '',
     athlete_notes: issue.athleteNotes ?? '',
     body_part: issue.bodyPart,
     clinician_notes: issue.clinicianNotes ?? '',
     first_reported_date: issue.firstReportedDate ?? format(new Date(), 'yyyy-MM-dd'),
+    functional_limitation: issue.functionalLimitation ?? '',
+    recurrence_count: Math.max(0, Number(issue.recurrenceCount ?? 0)),
     resolved_date: issue.resolvedDate ?? null,
+    severity_trend: issue.severityTrend ?? 'unknown',
     side: issue.side ?? 'center',
     status: issue.status ?? 'active',
     trainer_notes: issue.trainerNotes ?? '',
@@ -444,8 +466,12 @@ function toPrivacyPreferencesRow(preferences) {
   }
 }
 
-export async function loadAthleteData() {
-  const { data: compatibility, error: compatibilityError } = await supabase.rpc('get_release_compatibility')
+function withAbortSignal(query, signal) {
+  return signal ? query.abortSignal(signal) : query
+}
+
+export async function loadAthleteData({ signal } = {}) {
+  const { data: compatibility, error: compatibilityError } = await withAbortSignal(supabase.rpc('get_release_compatibility'), signal)
   if (compatibilityError || Number(compatibility?.schemaVersion) < 20260809000830) {
     const error = new Error('Athlete Reload needs a service update before your data can be loaded.')
     error.code = 'SCHEMA_VERSION_MISMATCH'
@@ -464,55 +490,55 @@ export async function loadAthleteData() {
     shareAuditResponse,
     wellnessResponse,
   ] = await Promise.all([
-    supabase
+    withAbortSignal(supabase
       .from('schedule_events')
       .select('*')
       .order('event_date', { ascending: true })
-      .order('event_time', { ascending: true }),
-    supabase
+      .order('event_time', { ascending: true }), signal),
+    withAbortSignal(supabase
       .from('athlete_associations')
       .select('*')
-      .order('name', { ascending: true }),
-    supabase
+      .order('name', { ascending: true }), signal),
+    withAbortSignal(supabase
       .from('check_ins')
       .select('*')
       .order('check_in_date', { ascending: false })
-      .order('created_at', { ascending: false }),
-    supabase
+      .order('created_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('training_checkouts')
       .select('*')
       .order('session_date', { ascending: false })
-      .order('created_at', { ascending: false }),
-    supabase
+      .order('created_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('pain_reports')
       .select('*')
       .order('report_date', { ascending: false })
-      .order('created_at', { ascending: false }),
-    supabase
+      .order('created_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('pain_issues')
       .select('*')
-      .order('updated_at', { ascending: false }),
-    supabase
+      .order('updated_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('saved_recovery_routines')
       .select('*')
       .order('is_favorite', { ascending: false })
-      .order('updated_at', { ascending: false }),
-    supabase
+      .order('updated_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('recovery_routine_completions')
       .select('*')
-      .order('completed_at', { ascending: false }),
-    supabase
+      .order('completed_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('tournaments')
       .select('*')
-      .order('start_date', { ascending: true }),
-    supabase
+      .order('start_date', { ascending: true }), signal),
+    withAbortSignal(supabase
       .from('share_audit_log')
       .select('*')
-      .order('created_at', { ascending: false }),
-    supabase
+      .order('created_at', { ascending: false }), signal),
+    withAbortSignal(supabase
       .from('daily_wellness')
       .select('*')
-      .order('wellness_date', { ascending: false }),
+      .order('wellness_date', { ascending: false }), signal),
   ])
 
   if (scheduleResponse.error) throw scheduleResponse.error
@@ -723,11 +749,11 @@ export async function deleteRecoveryRoutineCompletion(id) {
   if (error) throw error
 }
 
-export async function loadPrivacyPreferences() {
-  const { data, error } = await supabase
+export async function loadPrivacyPreferences({ signal } = {}) {
+  const { data, error } = await withAbortSignal(supabase
     .from('privacy_preferences')
     .select('*')
-    .maybeSingle()
+    .maybeSingle(), signal)
 
   if (error) throw error
   if (!data) return null
@@ -735,19 +761,34 @@ export async function loadPrivacyPreferences() {
   return fromPrivacyPreferencesRow(data)
 }
 
-export async function loadAthleteProfile() {
-  const { data, error } = await supabase
+export async function loadAthleteProfile({ signal } = {}) {
+  const { data, error } = await withAbortSignal(supabase
     .from('athlete_profiles')
     .select('*')
-    .maybeSingle()
+    .maybeSingle(), signal)
 
   if (error) throw error
   if (!data) return null
 
-  return fromAthleteProfileRow(data)
+  const profile = fromAthleteProfileRow(data)
+  const { data: athlete } = await withAbortSignal(supabase.from('athletes').select('id').eq('owner_user_id', data.user_id).maybeSingle(), signal)
+  if (!athlete?.id) return profile
+  const { data: physiology, error: physiologyError } = await withAbortSignal(supabase
+    .from('athlete_physiology_profiles')
+    .select('biological_sex, menstrual_context_enabled, menstrual_symptoms')
+    .eq('athlete_id', athlete.id)
+    .maybeSingle(), signal)
+  if (physiologyError) throw physiologyError
+  return {
+    ...profile,
+    athleteId: athlete.id,
+    biologicalSex: physiology?.biological_sex ?? '',
+    menstrualContextEnabled: Boolean(physiology?.menstrual_context_enabled),
+    menstrualSymptoms: physiology?.menstrual_symptoms ?? {},
+  }
 }
 
-export async function upsertAthleteProfile(profile) {
+export async function upsertAthleteProfile(profile, { skipPhysiology = false } = {}) {
   const { data, error } = await supabase
     .from('athlete_profiles')
     .upsert(toAthleteProfileRow(profile), { onConflict: 'user_id' })
@@ -756,7 +797,27 @@ export async function upsertAthleteProfile(profile) {
 
   if (error) throw error
 
-  return fromAthleteProfileRow(data)
+  const savedProfile = fromAthleteProfileRow(data)
+  if (skipPhysiology) {
+    return {
+      ...savedProfile,
+      athleteId: profile.athleteId,
+      biologicalSex: profile.biologicalSex ?? '',
+      menstrualContextEnabled: Boolean(profile.menstrualContextEnabled),
+      menstrualSymptoms: profile.menstrualSymptoms ?? {},
+    }
+  }
+  const { data: athlete, error: athleteError } = await supabase.from('athletes').select('id').eq('owner_user_id', data.user_id).single()
+  if (athleteError) throw athleteError
+  const { error: physiologyError } = await supabase.from('athlete_physiology_profiles').upsert({
+    athlete_id: athlete.id,
+    biological_sex: profile.biologicalSex ?? '',
+    menstrual_context_enabled: Boolean(profile.menstrualContextEnabled),
+    menstrual_symptoms: profile.menstrualSymptoms ?? {},
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'athlete_id' })
+  if (physiologyError) throw physiologyError
+  return { ...savedProfile, athleteId: athlete.id, biologicalSex: profile.biologicalSex ?? '' }
 }
 
 export async function upsertPrivacyPreferences(preferences) {
@@ -769,6 +830,100 @@ export async function upsertPrivacyPreferences(preferences) {
   if (error) throw error
 
   return fromPrivacyPreferencesRow(data)
+}
+
+export async function createRecommendationRecord({ athleteId, sourceType, sourceId, recommendation, contextSnapshot = {} }) {
+  if (!athleteId || !recommendation) return null
+  const { data, error } = await supabase.from('recommendations').insert({
+    athlete_id: athleteId,
+    source_type: sourceType,
+    source_id: sourceId ?? null,
+    schema_version: Number(recommendation.schemaVersion ?? 1),
+    engine_version: recommendation.engineVersion ?? 'legacy',
+    status: recommendation.status ?? 'adjust',
+    confidence: Math.max(0, Math.min(1, Number(recommendation.confidence ?? 0.5))),
+    score: Number.isFinite(Number(recommendation.score)) ? Number(recommendation.score) : null,
+    result_json: recommendation,
+    context_snapshot: contextSnapshot,
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function upsertRecommendationFeedback({ athleteId, recommendationId, usefulness, followedAction = null, comment = '' }) {
+  if (!athleteId || !recommendationId) throw new Error('Recommendation feedback requires an athlete and recommendation.')
+  const { data, error } = await supabase.from('recommendation_feedback').upsert({
+    athlete_id: athleteId,
+    recommendation_id: recommendationId,
+    usefulness,
+    followed_action: followedAction,
+    comment,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'athlete_id,recommendation_id' }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function createRecoveryResponse({ athleteId, routineCompletionId, sourceCheckoutId, timing, response }) {
+  if (!athleteId) throw new Error('Recovery response requires an athlete.')
+  const { data, error } = await supabase.from('recovery_responses').insert({
+    athlete_id: athleteId,
+    routine_completion_id: routineCompletionId ?? null,
+    source_checkout_id: sourceCheckoutId ?? null,
+    response_timing: timing,
+    fatigue: Number(response?.fatigue) || null,
+    soreness: Number(response?.soreness) || null,
+    pain_change: response?.painChange ?? 'unchanged',
+    response_json: response ?? {},
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function upsertAthleteBaselines({ athleteId, records = [] }) {
+  if (!athleteId || records.length === 0) return []
+  const rows = records.map((record) => ({
+    athlete_id: athleteId,
+    metric_key: record.metricKey,
+    cohort_key: record.cohortKey ?? 'all',
+    window_days: record.windowDays ?? 28,
+    sample_size: record.sampleSize ?? 0,
+    baseline_value: record.value,
+    confidence: record.confidence ?? 0,
+    calculation_version: record.calculationVersion ?? 'baseline-2.0.0',
+    calculated_at: new Date().toISOString(),
+  }))
+  const { data, error } = await supabase.from('athlete_baselines').upsert(rows, { onConflict: 'athlete_id,metric_key,cohort_key,window_days' }).select('*')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function upsertAthleteInsights({ athleteId, insights = [] }) {
+  if (!athleteId) return []
+  const { error: expireError } = await supabase
+    .from('athlete_insights')
+    .update({ status: 'expired', updated_at: new Date().toISOString() })
+    .eq('athlete_id', athleteId)
+    .eq('status', 'active')
+  if (expireError) throw expireError
+  if (insights.length === 0) return []
+  const rows = insights.map((insight) => ({
+    athlete_id: athleteId,
+    insight_key: insight.id,
+    status: 'active',
+    sample_size: insight.sampleSize ?? 0,
+    confidence: insight.confidence ?? 0,
+    window_start: insight.windowStart,
+    window_end: insight.windowEnd,
+    insight_json: insight,
+    calculation_version: insight.version ?? 'insights-2.0.0',
+    updated_at: new Date().toISOString(),
+  }))
+  const { data, error } = await supabase.from('athlete_insights').upsert(rows, {
+    onConflict: 'athlete_id,insight_key,window_start,window_end',
+  }).select('*')
+  if (error) throw error
+  return data ?? []
 }
 
 export async function createAssociation(name) {

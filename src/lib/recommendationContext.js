@@ -1,3 +1,7 @@
+import { getActivityDemandProfile, getDemandSummary } from '../domain/activityDemands'
+import { evaluateSafety } from '../domain/safety'
+import { summarizeRecentLoad } from '../domain/workload'
+
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 
@@ -39,6 +43,10 @@ export function buildAthleteContext({
     nutritionContext.hasFoodLogs !== true && 'recent food',
     nutritionContext.hasHydrationLogs !== true && 'recent hydration',
   ].filter(Boolean)
+  const activityDemand = getActivityDemandProfile({ sport: athleteProfile.sport, event, workload: checkout ?? {} })
+  const safetyFindings = evaluateSafety(checkout ?? checkIn ?? {})
+  const recentLoad = summarizeRecentLoad(recentEvents, now)
+  const confidence = Math.round(Math.max(0.35, Math.min(0.98, 1 - missing.length * 0.08 + Math.min(0.2, recentEvents.length * 0.03))) * 100) / 100
 
   return {
     schemaVersion: RECOMMENDATION_SCHEMA_VERSION,
@@ -68,6 +76,24 @@ export function buildAthleteContext({
       sleepQuality: numberOrNull(checkIn?.sleepQuality),
       soreness: numberOrNull(checkout?.postSoreness ?? checkIn?.soreness),
     }),
+    currentState: compact({
+      energy: numberOrNull(checkIn?.energy),
+      fatigue: numberOrNull(checkout?.postFatigue ?? checkIn?.fatigue),
+      illnessSymptoms: numberOrNull(checkIn?.illnessSymptoms),
+      pain: currentPain,
+      sleepHours: numberOrNull(checkIn?.sleep),
+      sleepQuality: numberOrNull(checkIn?.sleepQuality),
+      soreness: numberOrNull(checkout?.postSoreness ?? checkIn?.soreness),
+      stress: numberOrNull(checkIn?.stress),
+    }),
+    recentLoad,
+    upcomingDemand: {
+      profile: activityDemand,
+      strongestDemands: getDemandSummary(activityDemand),
+      eventCountToday: Number(scheduleContext?.sameDayEvents?.length ?? scheduleContext?.eventCountToday ?? 1),
+    },
+    safetyFindings,
+    confidence,
     environment: heat,
     nutrition: compact({
       hasFoodLogs: nutritionContext.hasFoodLogs === true,

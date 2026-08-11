@@ -1,3 +1,6 @@
+import { createStructuredRecommendation } from '../domain/contracts'
+import { evaluateSafety, hasStopFinding } from '../domain/safety'
+
 const statusLevels = [
   { max: 40, label: 'Stop and Check In', intensity: 'No training' },
   { max: 55, label: 'Rehab / Mobility', intensity: 'Very light' },
@@ -363,23 +366,15 @@ function getReasons(checkIn) {
 }
 
 function hasRedFlag(checkIn) {
+  const findings = evaluateSafety(checkIn)
   const pain = getPain(checkIn)
-
-  return (
-    pain >= 8 ||
-    checkIn.injuryType === 'Concussion concern' ||
-    checkIn.injuryType === 'Bone stress' ||
-    checkIn.painType === 'Numbness' ||
-    checkIn.painType === 'Tingling' ||
-    checkIn.painType === 'Headache / dizziness' ||
+  return hasStopFinding(findings) ||
     (checkIn.painType === 'Shooting' && pain >= 3) ||
     (checkIn.painType === 'Instability' && pain >= 3) ||
     (checkIn.painType === 'Swelling' && pain >= 4) ||
     (checkIn.painType === 'Sharp / stabbing' && pain >= 5) ||
-    checkIn.hurtsWhen === 'Breathing' ||
     (checkIn.hurtsWhen === 'At rest' && pain >= 4) ||
     (['Head', 'Neck'].includes(checkIn.location) && pain >= 2)
-  )
 }
 
 function getInjuryTypeRisk(checkIn, pain) {
@@ -615,7 +610,7 @@ export function getRecommendation(checkIn) {
   const avoid = getContextualAvoid(checkIn, redFlag)
   const focus = getContextualFocus(checkIn, status, redFlag)
 
-  return {
+  return createStructuredRecommendation({
     score,
     label: status.label,
     tone:
@@ -634,7 +629,19 @@ export function getRecommendation(checkIn) {
     action: getPersonalAction(checkIn, status, redFlag),
     breakdown: breakdown.length ? breakdown : [{ label: 'Clean check-in', value: 0 }],
     coachMessage: `Coach, I am at ${score}/100 readiness today. I can do ${checkIn.session.toLowerCase()}, but I need to manage ${avoid.slice(0, 2).join(' and ').toLowerCase() || 'my load'} if symptoms increase.`,
-  }
+    reportSections: [
+      { id: 'readiness-status', title: status.label, summary: getSummary(checkIn, status, reasons), items: [`Planned intensity: ${status.intensity}`] },
+      { id: 'warm-up-focus', title: 'What to do', summary: getPersonalAction(checkIn, status, redFlag), items: focus },
+      ...(avoid.length ? [{ id: 'pain-guidance', title: 'What to watch', summary: 'Use these limits while you prepare and participate.', items: avoid }] : []),
+      { id: 'event-preparation', title: 'Why this plan', summary: reasons.length ? `The strongest signals are ${reasons.join(', ')}.` : 'Your current check-in does not show a meaningful limitation.', items: [] },
+    ],
+    contextFactors: reasons,
+    redFlag,
+  }, {
+    answeredInputs: ['energy', 'sleep', 'sleepQuality', 'fatigue', 'soreness', 'stress', 'illnessSymptoms', 'pain']
+      .filter((key) => checkIn[key] !== undefined && checkIn[key] !== null && checkIn[key] !== '').length,
+    baselineSampleSize: Number(checkIn.baselineSampleSize ?? 0),
+  })
 }
 
 export function getTrendInsights(history) {

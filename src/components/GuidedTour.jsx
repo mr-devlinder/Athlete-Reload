@@ -14,14 +14,6 @@ const tourSteps = {
     target: '[data-tour="add-event"]',
     title: 'Your schedule is ready',
   },
-  'checkin-nav': {
-    awaitingClick: true,
-    navigationStep: true,
-    body: 'Next, click Check-in in the navigation bar.',
-    eyebrow: 'Step 2 of 6',
-    target: '[data-view="Check-in"]',
-    title: 'Open Check-in',
-  },
   checkin: {
     body: 'This page is where you record sleep, energy, fatigue, soreness, hydration, and pain before an event. When an event has started, this is also where you complete its checkout.',
     bubbleTarget: '[data-tour="check-in-intro"]',

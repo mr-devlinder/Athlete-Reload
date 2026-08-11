@@ -36,10 +36,12 @@ const emptyEvent = {
   date: todayIso,
   expectedDuration: 60,
   environment: 'Outdoor',
+  eventSubtype: '',
   load: 'Medium',
   location: '',
   note: '',
   opponent: '',
+  positionOrEvent: '',
   surface: 'Grass',
   time: '18:00',
   title: 'Team practice',
@@ -238,7 +240,7 @@ export function ScheduleView({
       customActivityName: isOtherActivity ? draftEvent.customActivityName.trim() : '',
       environment: getEnvironmentForSurface(draftEvent.surface),
       expectedDuration: isAllDay ? null : Number(draftEvent.expectedDuration ?? 60),
-      load: isOtherActivity ? draftEvent.load : getDefaultLoadForEvent(draftEvent.type),
+      load: draftEvent.load ?? getDefaultLoadForEvent(draftEvent.type),
       plannedMinutes: isAllDay ? undefined : Number(draftEvent.expectedDuration ?? 60),
       time: isAllDay ? '' : draftEvent.time,
       title: displayName,
@@ -900,6 +902,8 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
               <input required value={draftEvent.customActivityName ?? ''} onChange={(event) => onUpdate('customActivityName', event.target.value)} placeholder="Hike, bike ride, pickup game..." />
             </label>
           )}
+          {!isAllDay && <label className="compact-field">Event subtype<input value={draftEvent.eventSubtype ?? ''} onChange={(event) => onUpdate('eventSubtype', event.target.value)} placeholder="Scrimmage, intervals, strength, skills…" /></label>}
+          {!isAllDay && <label className="compact-field">Position or event<input value={draftEvent.positionOrEvent ?? athleteProfile?.position ?? ''} onChange={(event) => onUpdate('positionOrEvent', event.target.value)} placeholder="Optional event-specific role" /></label>}
           {!isAllDay && <TimePicker value={draftEvent.time} onChange={(value) => onUpdate('time', value)} />}
           {!isAllDay && (
             <label className="compact-field">
@@ -923,7 +927,7 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
             </select>
           </label>
           {!isAllDay && <Select label="Event importance" value={draftEvent.availability ?? 'Required'} options={['Required max effort', 'Required', 'Optional', 'Recovery']} onChange={(value) => onUpdate('availability', value)} />}
-          {isOtherActivity && <Select label="Planned load" value={draftEvent.load ?? 'Medium'} options={['Low', 'Medium', 'High']} onChange={(value) => onUpdate('load', value)} />}
+          {!isAllDay && <Select label="Expected intensity" value={draftEvent.load ?? 'Medium'} options={['Low', 'Medium', 'High']} onChange={(value) => onUpdate('load', value)} />}
           {draftEvent.type === competitionLabel && (
             <>
               <label className="compact-field">

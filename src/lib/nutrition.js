@@ -38,7 +38,8 @@ export function getNutritionTargets(profile = {}, schedule = [], date = getLocal
     return { calories: null, carbohydrates: null, fats: null, protein: null, isEstimate: true, reason: 'Add age, height, and weight in your profile to estimate daily targets.' }
   }
 
-  const sexOffset = profile.genderIdentity === 'Male' ? 5 : profile.genderIdentity === 'Female' ? -161 : -78
+  const normalizedSex = String(profile.biologicalSex ?? '').toLowerCase()
+  const sexOffset = normalizedSex === 'male' ? 5 : normalizedSex === 'female' ? -161 : -78
   const baseline = (10 * weightKg) + (6.25 * heightCm) - (5 * age) + sexOffset
   const activity = activityMultipliers[profile.trainingStyle] ?? 1.6
   const dayEvents = schedule.filter((event) => event.date === date)
@@ -82,4 +83,22 @@ export function getHydrationTarget(profile = {}, schedule = [], date = getLocalD
   const baseline = weightKg ? Math.round(weightKg * 35) : 2366
   const eventMinutes = schedule.filter((event) => event.date === date).reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
   return Math.max(1893, Math.min(5323, baseline + Math.round(eventMinutes * 7.4)))
+}
+
+export function getHydrationGuidance(profile = {}, schedule = [], date = getLocalDate()) {
+  const midpointMl = getHydrationTarget(profile, schedule, date)
+  const dayEvents = schedule.filter((event) => event.date === date)
+  const eventMinutes = dayEvents.reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
+  const environmentUncertainty = dayEvents.some((event) => /outdoor|hot|humid/i.test(`${event.environment ?? ''} ${event.note ?? ''}`)) ? 0.18 : 0.12
+  const spread = Math.max(250, Math.round(midpointMl * environmentUncertainty))
+  return {
+    minimumMl: Math.max(1500, midpointMl - spread),
+    maximumMl: Math.min(6000, midpointMl + spread),
+    midpointMl,
+    sessionMinutes: eventMinutes,
+    isEstimate: true,
+    practicalCue: eventMinutes >= 60
+      ? 'Start hydrated and drink regularly during the session; increase toward the top of the range in heat or with heavy sweating.'
+      : 'Drink regularly across the day and use thirst and urine color as practical checks.',
+  }
 }

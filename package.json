@@ -8,6 +8,8 @@
     "build": "vite build",
     "lint": "oxlint",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:release": "npm run lint && npm test && npm run build && npm run check:bundle",
     "test:watch": "vitest",
@@ -27,6 +29,8 @@
     "recharts": "^3.7.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.55.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",

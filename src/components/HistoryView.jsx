@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { format, parseISO, startOfYear } from 'date-fns'
 import { calendarWeekStart, localDateKey, parseLocalCalendarDate } from '../utils/calendarDate'
 import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
+import '../styles/history-rework.css'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { formatHydration } from '../utils/units'
@@ -29,8 +30,14 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   const [selectedWeek, setSelectedWeek] = useState(null)
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey(weekStartsOn)]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
+  const [timeWindow, setTimeWindow] = useState('28')
+  const [customRange, setCustomRange] = useState({ start: '', end: '' })
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
-  const archive = getHistoryArchive(history, checkouts, recoveryCompletions, weekStartsOn)
+  const filteredHistory = filterByWindow(history, timeWindow, customRange)
+  const filteredCheckouts = filterByWindow(checkouts, timeWindow, customRange)
+  const filteredRecovery = filterByWindow(recoveryCompletions, timeWindow, customRange)
+  const archive = getHistoryArchive(filteredHistory, filteredCheckouts, filteredRecovery, weekStartsOn)
+  const summary = getWindowSummary(filteredHistory, filteredCheckouts)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -98,12 +105,26 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
         </div>
       </div>
 
+      <section className="history-window-controls" aria-label="History time window">
+        <div role="group" aria-label="Preset time windows">
+          {[['7', '7 days'], ['28', '28 days'], ['84', '12 weeks'], ['all', 'All time'], ['custom', 'Custom']].map(([value, label]) => <button aria-pressed={timeWindow === value} className={timeWindow === value ? 'active' : ''} key={value} onClick={() => setTimeWindow(value)} type="button">{label}</button>)}
+        </div>
+        {timeWindow === 'custom' && <div className="history-custom-range"><label>From<input type="date" value={customRange.start} onChange={(event) => setCustomRange((current) => ({ ...current, start: event.target.value }))} /></label><label>To<input type="date" value={customRange.end} onChange={(event) => setCustomRange((current) => ({ ...current, end: event.target.value }))} /></label></div>}
+      </section>
+
+      <section className="history-question-summary">
+        <div><span>How have I felt?</span><strong>{summary.readiness == null ? 'Building baseline' : `${summary.readiness}/100 readiness`}</strong><small>{summary.checkInCount} comparable check-ins</small></div>
+        <div><span>What have I done?</span><strong>{summary.load} load units</strong><small>{summary.checkoutCount} completed sessions</small></div>
+        <div><span>What is changing?</span><strong>{summary.sorenessChange == null ? 'Not enough data' : `${summary.sorenessChange > 0 ? '+' : ''}${summary.sorenessChange} soreness`}</strong><small>Recent half versus earlier half</small></div>
+      </section>
+
       <div className="trend-grid">
         {insights.map((insight) => (
-          <article className="insight-card" key={insight}>
-            {insight}
+          <article className="insight-card" key={insight.id ?? insight}>
+            {typeof insight === 'string' ? insight : <><strong>{insight.title}</strong><p>{insight.summary}</p><small>{insight.window} · {insight.sampleSize} records · {Math.round(insight.confidence * 100)}% confidence</small></>}
           </article>
         ))}
+        {insights.length === 0 && <article className="insight-card muted"><strong>No reliable pattern yet</strong><p>Insights appear only when enough comparable records support something worth watching.</p></article>}
       </div>
 
       <div className="history-list">
@@ -182,6 +203,37 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
       )}
     </div>
   )
+}
+
+function filterByWindow(entries, windowValue, customRange) {
+  if (windowValue === 'all') return entries
+  const today = new Date()
+  const cutoff = windowValue === 'custom'
+    ? (customRange.start ? new Date(`${customRange.start}T00:00:00`) : null)
+    : new Date(today.getTime() - (Number(windowValue) - 1) * 86400000)
+  const end = windowValue === 'custom' && customRange.end ? new Date(`${customRange.end}T23:59:59`) : today
+  return entries.filter((entry) => {
+    const value = entry.date ?? entry.sessionDate ?? entry.completedAt ?? entry.createdAt
+    if (!value) return false
+    const parsed = new Date(String(value).includes('T') ? value : `${value}T12:00:00`)
+    return !Number.isNaN(parsed.getTime()) && (!cutoff || parsed >= cutoff) && parsed <= end
+  })
+}
+
+function getWindowSummary(history, checkouts) {
+  const readiness = average(history.map((entry) => Number(entry.score)))
+  const load = Math.round(checkouts.reduce((sum, entry) => sum + (Number(entry.sessionLoad) || (Number(entry.actualMinutes) || 0) * (Number(entry.difficulty) || 0)), 0))
+  const soreness = history.map((entry) => Number(entry.soreness)).filter(Number.isFinite)
+  const midpoint = Math.floor(soreness.length / 2)
+  const recent = midpoint ? average(soreness.slice(0, midpoint)) : null
+  const earlier = midpoint ? average(soreness.slice(midpoint)) : null
+  return {
+    checkInCount: history.length,
+    checkoutCount: checkouts.length,
+    load,
+    readiness,
+    sorenessChange: recent == null || earlier == null ? null : Math.round((recent - earlier) * 10) / 10,
+  }
 }
 
 function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recoveryCompletions }) {

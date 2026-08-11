@@ -3,6 +3,7 @@ import { SectionHeading } from './SectionHeading'
 import { getPositionOptions, isDominantSideRelevant, sportOptions } from '../data/sportProfiles'
 import { dietaryOptions, goalOptions } from '../data/profileOptions'
 import { ProfileMeasurements } from './ProfileMeasurements'
+import { getAgeAccess } from '../domain/age'
 
 export function OnboardingFlow({ associations = [], initialDisplayName = '', onComplete, onCreateAssociation }) {
   const [step, setStep] = useState('profile')
@@ -16,9 +17,10 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     dominantSide: 'Right',
     unitSystem: 'imperial',
     genderIdentity: '',
+    biologicalSex: '',
+    dateOfBirth: '',
     heightCm: null,
     weightKg: null,
-    age: '',
     goals: [],
     dietaryPreferences: [],
   })
@@ -46,6 +48,10 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     }
     if (positionOptions.length > 0 && !positionOptions.includes(profile.position)) {
       setError('Select a position or specialty for your chosen sport.')
+      return
+    }
+    if (getAgeAccess(profile).status !== 'allowed') {
+      setError('Athlete Reload requires a date of birth confirming that you are at least 16.')
       return
     }
     setStep('nutrition')
@@ -160,6 +166,11 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
           </label>}
           <div className="onboarding-two-col">
             <label className="select-field">
+              Date of birth
+              <input max={new Date().toISOString().slice(0, 10)} required type="date" value={profile.dateOfBirth} onChange={(event) => updateProfile('dateOfBirth', event.target.value)} />
+              <small className="field-description">Used to confirm the 16+ requirement and calculate age-dependent estimates.</small>
+            </label>
+            <label className="select-field">
               Training style
               <select value={profile.trainingStyle} onChange={(event) => updateProfile('trainingStyle', event.target.value)}>
                 <option>Team and individual</option>
@@ -184,21 +195,16 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
         <form className="onboarding-panel glass-panel" onSubmit={continueFromNutrition}>
           <SectionHeading eyebrow="Fueling context" title="Personalize your daily targets." />
           <p className="onboarding-copy">These optional details help estimate nutrition and hydration targets. They are guidance, not a prescription, and can be changed from your profile.</p>
-          <div className="onboarding-two-col onboarding-three-col">
-            <label className="select-field">
-              Age
-              <input inputMode="numeric" max="120" min="16" type="number" value={profile.age} onChange={(event) => updateProfile('age', event.target.value)} placeholder="Optional" />
-            </label>
-          </div>
           <ProfileMeasurements profile={profile} onChange={updateProfile} />
           <label className="select-field">
-            Gender
-            <select value={profile.genderIdentity} onChange={(event) => updateProfile('genderIdentity', event.target.value)}>
+            Biological sex for physiological estimates (optional)
+            <small className="field-description">Used only where physiology changes a calculation. It is not inferred from gender identity.</small>
+            <select value={profile.biologicalSex} onChange={(event) => updateProfile('biologicalSex', event.target.value)}>
               <option value="">Prefer not to say</option>
-              <option>Female</option>
-              <option>Male</option>
-              <option>Nonbinary</option>
-              <option>Another identity</option>
+              <option value="female">Female</option>
+              <option value="male">Male</option>
+              <option value="intersex">Intersex</option>
+              <option value="not_listed">Not listed</option>
             </select>
           </label>
           <fieldset className="profile-choice-field onboarding-choice-field">
