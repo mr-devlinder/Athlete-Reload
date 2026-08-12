@@ -1,5 +1,6 @@
 import { calculateDailyEnergyContext } from '../domain/nutrition/dailyEnergy'
 import { getHydrationResult } from '../domain/nutrition/hydration'
+import { calculateAge } from '../domain/age'
 
 export const mealOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Custom']
 
@@ -19,13 +20,13 @@ export function getNutritionTargets(profile = {}, schedule = [], date = getLocal
   profile = profile ?? {}
   const weightKg = Number(profile.weightKg)
   const heightCm = Number(profile.heightCm)
-  const age = Number(profile.age)
+  const age = Number(profile.age) || calculateAge(profile.dateOfBirth)
 
   if (!weightKg || !heightCm || !age) {
     return { calories: null, carbohydrates: null, fats: null, protein: null, isEstimate: true, reason: 'Add age, height, and weight in your profile to estimate daily targets.' }
   }
 
-  const energy = calculateDailyEnergyContext(profile, schedule, date)
+  const energy = calculateDailyEnergyContext({ ...profile, age }, schedule, date)
   const calories = energy.midpointKcal
   const selectedGoals = (profile.goals ?? []).map((goal) => ({ name: goal.name ?? goal }))
   const proteinGoal = selectedGoals.some((goal) => ['Gain muscle', 'Improve strength'].includes(goal.name))

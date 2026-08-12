@@ -23,6 +23,9 @@ import { getCheckoutForEvent, getEventDisplayName, isAllDayEvent, isOtherActivit
 import { searchLocations } from '../lib/weather'
 import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, getSportSurfaces, getSportWorkloadFields } from '../data/sportProfiles'
 import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
+import { compareEventsChronologically, getEventColorStyle, getEventSemanticType } from '../domain/events/eventSemantics'
+import { getEventFormSchema } from '../domain/events/eventFormSchema'
+import '../styles/schedule-semantics.css'
 
 const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
 const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -92,7 +95,7 @@ export function ScheduleView({
     start: startOfWeek(parseISO(selectedDate), { weekStartsOn: 0 }),
     end: endOfWeek(parseISO(selectedDate), { weekStartsOn: 0 }),
   }), [selectedDate])
-  const selectedEvents = schedule.filter((event) => event.date === selectedDate)
+  const selectedEvents = schedule.filter((event) => event.date === selectedDate).sort(compareEventsChronologically)
   const selectedTournaments = tournaments.filter((tournament) => isTournamentDate(tournament, selectedDate))
   const activeTournamentSummaries = tournaments.filter(isTournamentSummaryVisible)
   const monthLabel = format(visibleMonth, 'MMMM yyyy')
@@ -253,7 +256,8 @@ export function ScheduleView({
         const events = createRecurringEvents(event)
 
         for (const scheduledEvent of events) {
-          if (!(await onAdd(scheduledEvent))) throw new Error('create_failed')
+          const result = await onAdd(scheduledEvent)
+          if (result !== true) throw result instanceof Error ? result : new Error('create_failed')
         }
       }
 
@@ -261,7 +265,10 @@ export function ScheduleView({
       closeModal()
     } catch (error) {
       console.error(error)
-      setSaveError('The event could not be saved. Check your connection and try again.')
+      const cause = String(error?.message ?? '')
+      setSaveError(cause && cause !== 'create_failed'
+        ? `The event could not be saved: ${cause}`
+        : 'The event could not be saved. Check your connection and try again.')
     } finally {
       setIsSavingEvent(false)
     }
@@ -319,7 +326,7 @@ export function ScheduleView({
             const load = completed.reduce((total, checkout) => total + Number(checkout.actualMinutes ?? 0) * Number(checkout.difficulty ?? 0), 0)
             const nextGame = games
               .filter((game) => new Date(`${game.date}T${game.time || '23:59'}`).getTime() > Date.now())
-              .sort((first, second) => `${first.date} ${first.time}`.localeCompare(`${second.date} ${second.time}`))[0]
+              .sort(compareEventsChronologically)[0]
 
             return (
               <article className="tournament-summary" key={tournament.id}>
@@ -410,8 +417,8 @@ export function ScheduleView({
                         {tournament.name}
                       </button>
                     ))}
-                    {events.slice(0, Math.max(0, 2 - dayTournaments.length)).map((event) => (
-                      <small className={`${event.load.toLowerCase()}${isAllDayEvent(event) ? ' rest-day' : ''}`} key={event.id}>
+                    {events.sort(compareEventsChronologically).slice(0, Math.max(0, 2 - dayTournaments.length)).map((event) => (
+                      <small className={`semantic-event semantic-${getEventSemanticType(event)}${isAllDayEvent(event) ? ' rest-day' : ''}`} key={event.id} style={getEventColorStyle(event)}>
                         {getEventDisplayName(event)}{event.allDay ? ' · All day' : ''}
                       </small>
                     ))}
@@ -453,7 +460,7 @@ export function ScheduleView({
                 const checkIn = getCheckInForEvent(checkIns, event.id)
 
                 return (
-                  <article className={`event-card${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id}>
+                  <article className={`event-card semantic-event semantic-${getEventSemanticType(event)}${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id} style={getEventColorStyle(event)}>
                     <span className={`load ${event.load.toLowerCase()}`}>
                       {event.association || 'Personal'}
                     </span>
@@ -513,7 +520,7 @@ export function ScheduleView({
               const events = schedule
                 .filter((event) => event.date === iso)
                 .slice()
-                .sort((first, second) => String(first.time ?? '').localeCompare(String(second.time ?? '')))
+                .sort(compareEventsChronologically)
 
               return (
                 <article className={`week-day${selectedDate === iso ? ' selected' : ''}`} key={iso}>
@@ -523,7 +530,7 @@ export function ScheduleView({
                   </button>
                   <div className="week-day-events">
                     {events.length === 0 ? <small>No event</small> : events.map((event) => (
-                      <button className={`week-event ${event.load?.toLowerCase() ?? 'medium'}${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id} onClick={() => openEditModal(event)} type="button">
+                      <button className={`week-event semantic-event semantic-${getEventSemanticType(event)}${isAllDayEvent(event) ? ' rest-day-event' : ''}`} key={event.id} onClick={() => openEditModal(event)} style={getEventColorStyle(event)} type="button">
                         <strong>{event.allDay ? 'All day' : event.time ? formatTimeLabel(event.time) : 'Time TBA'}</strong>
                         <span>{getEventDisplayName(event)}</span>
                         <em>{event.association || 'Personal'}</em>
@@ -540,9 +547,9 @@ export function ScheduleView({
         <section className="schedule-list-view">
           {schedule.length === 0 ? <p>No scheduled events yet.</p> : schedule
             .slice()
-            .sort((first, second) => `${first.date} ${first.time}`.localeCompare(`${second.date} ${second.time}`))
+            .sort(compareEventsChronologically)
             .map((event) => (
-              <article className="schedule-list-row" key={event.id}>
+              <article className={`schedule-list-row semantic-event semantic-${getEventSemanticType(event)}`} key={event.id} style={getEventColorStyle(event)}>
                 <div><strong>{formatDisplayDate(event.date)}</strong><span>{event.allDay ? 'All day' : event.time ? formatTimeLabel(event.time) : 'Time not set'}</span></div>
                 <div><strong>{getEventDisplayName(event)}</strong><span>{event.association || 'Personal'}{event.opponent ? ` · vs ${event.opponent}` : ''}</span></div>
                 <em>{event.availability ?? 'Required'}</em>
@@ -790,6 +797,7 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
   const [citySearchError, setCitySearchError] = useState('')
   const [isCitySearching, setIsCitySearching] = useState(false)
+  const [positionOverride, setPositionOverride] = useState(() => Boolean(draftEvent.positionOrEvent && draftEvent.positionOrEvent !== athleteProfile?.position))
 
   useEffect(() => {
     document.body.classList.add('modal-open')
@@ -834,10 +842,10 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
     position: athleteProfile?.position,
     eventType: draftEvent.type,
   })
-  const competitionLabel = getCompetitionLabel(athleteProfile?.sport)
   const isAllDay = isAllDayEvent(draftEvent)
   const isRestDay = isRestDayEvent(draftEvent)
   const isOtherActivity = isOtherActivityEvent(draftEvent)
+  const formSchema = getEventFormSchema(draftEvent, athleteProfile)
   const activitySurfaces = ['Trail', 'Road', 'Grass', 'Court', 'Water', 'Indoor', 'Outdoor', 'Other']
   const visibleSurfaces = isOtherActivity ? activitySurfaces : surfaces
 
@@ -882,6 +890,15 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
         </div>
 
         <div className="modal-form">
+          <div className="event-type-lead">
+            <Select
+              label="Event type"
+              value={draftEvent.type}
+              options={eventTypes.includes(draftEvent.type) ? eventTypes : [draftEvent.type, ...eventTypes]}
+              onChange={(value) => onUpdate('type', value)}
+            />
+            <p>The questions below adapt to this event, so you only enter details that matter.</p>
+          </div>
           <label className="compact-field">
             Date
             <input
@@ -890,20 +907,14 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
               onChange={(event) => onUpdate('date', event.target.value)}
             />
           </label>
-          <Select
-            label="Event type"
-            value={draftEvent.type}
-            options={eventTypes.includes(draftEvent.type) ? eventTypes : [draftEvent.type, ...eventTypes]}
-            onChange={(value) => onUpdate('type', value)}
-          />
           {isOtherActivity && (
             <label className="compact-field">
               Activity name
               <input required value={draftEvent.customActivityName ?? ''} onChange={(event) => onUpdate('customActivityName', event.target.value)} placeholder="Hike, bike ride, pickup game..." />
             </label>
           )}
-          {!isAllDay && <label className="compact-field">Event subtype<input value={draftEvent.eventSubtype ?? ''} onChange={(event) => onUpdate('eventSubtype', event.target.value)} placeholder="Scrimmage, intervals, strength, skills…" /></label>}
-          {!isAllDay && <label className="compact-field">Position or event<input value={draftEvent.positionOrEvent ?? athleteProfile?.position ?? ''} onChange={(event) => onUpdate('positionOrEvent', event.target.value)} placeholder="Optional event-specific role" /></label>}
+          {formSchema.showSubtype && <Select label="Event subtype" value={draftEvent.eventSubtype ?? ''} options={draftEvent.eventSubtype && !formSchema.subtypeOptions.includes(draftEvent.eventSubtype) ? [draftEvent.eventSubtype, ...formSchema.subtypeOptions] : ['', ...formSchema.subtypeOptions]} onChange={(value) => onUpdate('eventSubtype', value)} />}
+          {formSchema.showPosition && (!positionOverride && formSchema.profilePosition ? <div className="profile-derived-field"><span>Position</span><strong>{formSchema.profilePosition}</strong><button onClick={() => setPositionOverride(true)} type="button">Change for this event</button></div> : <label className="compact-field">Position or event<input value={draftEvent.positionOrEvent ?? formSchema.profilePosition} onChange={(event) => onUpdate('positionOrEvent', event.target.value)} placeholder="Optional event-specific role" /></label>)}
           {!isAllDay && <TimePicker value={draftEvent.time} onChange={(value) => onUpdate('time', value)} />}
           {!isAllDay && (
             <label className="compact-field">
@@ -928,12 +939,12 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
           </label>
           {!isAllDay && <Select label="Event importance" value={draftEvent.availability ?? 'Required'} options={['Required max effort', 'Required', 'Optional', 'Recovery']} onChange={(value) => onUpdate('availability', value)} />}
           {!isAllDay && <Select label="Expected intensity" value={draftEvent.load ?? 'Medium'} options={['Low', 'Medium', 'High']} onChange={(value) => onUpdate('load', value)} />}
-          {draftEvent.type === competitionLabel && (
+          {formSchema.showOpponent && (
             <>
-              <label className="compact-field">
+              {formSchema.showVenue && <label className="compact-field">
                 Opponent
                 <input value={draftEvent.opponent ?? ''} onChange={(event) => onUpdate('opponent', event.target.value)} placeholder="Optional opponent" />
-              </label>
+              </label>}
               <label className="compact-field">
                 Home or away
                 <select value={draftEvent.venue ?? ''} onChange={(event) => onUpdate('venue', event.target.value)}>
@@ -945,13 +956,13 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
               </label>
             </>
           )}
-          {!isAllDay && <Select
-            label={isOtherActivity ? 'Surface or environment' : 'Surface'}
+          {formSchema.showSurface && <Select
+            label={isOtherActivity ? 'Surface or environment' : formSchema.surfaceLabel}
             value={draftEvent.surface ?? visibleSurfaces[0]}
             options={visibleSurfaces.includes(draftEvent.surface) ? visibleSurfaces : [draftEvent.surface, ...visibleSurfaces].filter(Boolean)}
             onChange={(value) => onUpdate('surface', value)}
           />}
-          {!isAllDay && !isOtherActivity && workloadFields.map((field) => (
+          {formSchema.showWorkload && !isOtherActivity && workloadFields.map((field) => (
             <SportWorkloadField
               field={field}
               key={field.key}

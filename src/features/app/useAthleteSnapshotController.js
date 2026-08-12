@@ -15,6 +15,8 @@ export function useAthleteSnapshotController({ enabled, onDeletedSession, onFail
   useEffect(() => {
     if (!enabled) return undefined
     const controller = new AbortController()
+    let retryTimer
+    let retryAttempt = 0
     onStatusEvent('loading')
 
     async function load() {
@@ -26,7 +28,10 @@ export function useAthleteSnapshotController({ enabled, onDeletedSession, onFail
         }
         if (error) throw error
         const snapshot = await loadAthleteSnapshot(privacyDefaults, { signal: controller.signal })
-        if (!controller.signal.aborted) onSnapshotEvent(snapshot)
+        if (!controller.signal.aborted) {
+          retryAttempt = 0
+          onSnapshotEvent(snapshot)
+        }
       } catch (error) {
         if (controller.signal.aborted || error?.code === 'ABORTED') return
         if (error?.status === 401 || error?.code === 'PGRST301') {
@@ -40,10 +45,22 @@ export function useAthleteSnapshotController({ enabled, onDeletedSession, onFail
         console.error(error)
         onFailureEvent(error)
         onStatusEvent(navigator.onLine ? 'error' : 'offline')
+        const retryDelay = navigator.onLine
+          ? Math.min(2_000 * (2 ** retryAttempt), 30_000)
+          : 5_000
+        retryAttempt += 1
+        retryTimer = window.setTimeout(() => {
+          if (controller.signal.aborted) return
+          onStatusEvent('loading')
+          void load()
+        }, retryDelay)
       }
     }
 
     load()
-    return () => controller.abort()
+    return () => {
+      controller.abort()
+      window.clearTimeout(retryTimer)
+    }
   }, [enabled, privacyDefaults, reloadKey])
 }

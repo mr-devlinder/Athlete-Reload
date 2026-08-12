@@ -7,6 +7,7 @@ import { normalizeDisplayPreferences } from './displayPreferences'
 import { calculateAge } from '../domain/age'
 
 function normalizeFivePointValue(value, fallback = 1) {
+  if (value === null || value === undefined || value === '') return fallback
   const number = Number(value)
 
   if (!Number.isFinite(number)) return fallback
@@ -68,6 +69,7 @@ function toScheduleRow(event) {
   const isOtherActivity = isOtherActivityEvent(event)
   return {
     activity_key: event.activityKey ?? '',
+    ...(event.athleteId ? { athlete_id: event.athleteId } : {}),
     association: isOtherActivity ? event.association ?? 'None' : event.association ?? 'Personal',
     availability: event.availability ?? 'Required',
     environment: event.environment ?? 'Outdoor',
@@ -146,7 +148,7 @@ function fromCheckInRow(row) {
     eventTitle: row.session_title ?? row.session_type,
     fatigue: normalizeFivePointValue(row.fatigue, 0),
     illnessSymptoms: normalizeIllnessValue(row.illness_symptoms),
-    legHeaviness: normalizeFivePointValue(row.leg_heaviness, 0),
+    legHeaviness: normalizeFivePointValue(row.leg_heaviness, null),
     hurtsWhen: row.hurts_when,
     hydration: row.hydration,
     hydrationMl: Number(row.hydration_ml ?? fluidOuncesToMilliliters(row.hydration_oz) ?? 0),
@@ -167,9 +169,9 @@ function fromCheckInRow(row) {
     sleep: Number(row.sleep),
     sleepQuality: normalizeFivePointValue(row.sleep_quality, 5),
     soreness: normalizeFivePointValue(row.soreness, 0),
-    stress: normalizeStressValue(row.stress),
+    stress: row.stress == null ? null : normalizeStressValue(row.stress),
     yesterdayLoad: row.yesterday_load,
-    expectedDifficulty: Math.max(1, Math.min(10, Math.round(Number(row.expected_difficulty) || 5))),
+    expectedDifficulty: row.expected_difficulty == null ? null : Math.max(1, Math.min(10, Math.round(Number(row.expected_difficulty)))),
   }
 }
 
@@ -182,7 +184,7 @@ function toCheckInRow(checkIn, recommendation) {
     event_time: checkIn.eventTime ?? '',
     fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
     illness_symptoms: String(checkIn.illnessSymptoms ?? 0),
-    leg_heaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
+    leg_heaviness: normalizeFivePointValue(checkIn.legHeaviness, null),
     hurts_when: checkIn.hurtsWhen,
     hydration: checkIn.hydration,
     hydration_ml: Number(checkIn.hydrationMl ?? fluidOuncesToMilliliters(checkIn.hydrationOz) ?? 0),
@@ -198,15 +200,15 @@ function toCheckInRow(checkIn, recommendation) {
     recommendation_json: recommendation,
     recovery_actions: checkIn.recoveryActions ?? [],
     schedule_event_id: checkIn.eventId ?? null,
-    score: recommendation.score,
+    score: Number.isFinite(Number(recommendation.score)) ? Math.round(Number(recommendation.score)) : null,
     session_title: checkIn.eventTitle ?? checkIn.session,
     session_type: checkIn.session,
     sleep: checkIn.sleep,
     sleep_quality: normalizeFivePointValue(checkIn.sleepQuality, 5),
     soreness: normalizeFivePointValue(checkIn.soreness, 0),
-    stress: String(checkIn.stress ?? 0),
+    stress: checkIn.stress == null ? null : String(checkIn.stress),
     yesterday_load: checkIn.yesterdayLoad,
-    expected_difficulty: Number(checkIn.expectedDifficulty ?? 5),
+    expected_difficulty: checkIn.expectedDifficulty == null ? null : Number(checkIn.expectedDifficulty),
   }
 }
 
@@ -223,8 +225,8 @@ function fromCheckoutRow(row) {
     eventId: row.schedule_event_id,
     id: row.id,
     notes: row.notes ?? '',
-    mentalFocus: row.mental_focus ?? 3,
-    motivation: row.motivation ?? 3,
+    mentalFocus: row.mental_focus ?? null,
+    motivation: row.motivation ?? null,
     movementChanged: row.movement_changed ?? false,
     newPain: row.new_pain ?? false,
     painChange: row.pain_change,
@@ -234,8 +236,8 @@ function fromCheckoutRow(row) {
     plannedLoad: row.planned_load,
     plannedMinutes: row.planned_minutes ?? estimatePlannedMinutes(row.planned_load),
     plannedType: row.planned_type,
-    postFatigue: row.post_fatigue ?? 3,
-    postSoreness: row.post_soreness ?? 3,
+    postFatigue: row.post_fatigue ?? null,
+    postSoreness: row.post_soreness ?? null,
     performanceRating: row.performance_rating ?? 'Normal',
     recommendation: row.recommendation_json,
     title: row.session_title,
@@ -253,8 +255,8 @@ function toCheckoutRow(event, checkout, options = {}) {
     difficulty: Number(checkout.difficulty),
     fatigue_affected_technique: Boolean(checkout.fatigueAffectedTechnique),
     heat_symptoms: checkout.heatSymptoms ?? [],
-    mental_focus: Number(checkout.mentalFocus ?? 3),
-    motivation: Number(checkout.motivation ?? 3),
+    mental_focus: checkout.mentalFocus == null ? null : Number(checkout.mentalFocus),
+    motivation: checkout.motivation == null ? null : Number(checkout.motivation),
     movement_changed: Boolean(checkout.movementChanged),
     new_pain: Boolean(checkout.newPain),
     notes: checkout.notes ?? '',
@@ -265,8 +267,8 @@ function toCheckoutRow(event, checkout, options = {}) {
     planned_load: event.load ?? 'Medium',
     planned_minutes: Number(checkout.plannedMinutes) || Number(event.plannedMinutes) || estimatePlannedMinutes(event.load),
     planned_type: event.type ?? 'Training',
-    post_fatigue: Number(checkout.postFatigue ?? 3),
-    post_soreness: Number(checkout.postSoreness ?? 3),
+    post_fatigue: checkout.postFatigue == null ? null : Number(checkout.postFatigue),
+    post_soreness: checkout.postSoreness == null ? null : Number(checkout.postSoreness),
     performance_rating: checkout.performanceRating ?? 'Normal',
     schedule_event_id: event.id,
     session_date: event.date,
@@ -959,11 +961,18 @@ export async function deleteAssociation(id) {
 }
 
 export async function createScheduleEvent(event) {
-  const { data, error } = await supabase
+  const row = toScheduleRow(event)
+  let { data, error } = await supabase
     .from('schedule_events')
-    .insert(toScheduleRow(event))
+    .insert(row)
     .select('*')
     .single()
+
+  if (isUnreleasedScheduleColumnError(error)) {
+    const retry = await supabase.from('schedule_events').insert(withoutUnreleasedScheduleColumns(row)).select('*').single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) throw error
 
@@ -971,22 +980,73 @@ export async function createScheduleEvent(event) {
 }
 
 export async function updateScheduleEvent(id, event) {
-  const { data, error } = await supabase
+  const row = toScheduleRow(event)
+  let { data, error } = await supabase
     .from('schedule_events')
-    .update(toScheduleRow(event))
+    .update(row)
     .eq('id', id)
     .select('*')
     .single()
+
+  if (isUnreleasedScheduleColumnError(error)) {
+    const retry = await supabase.from('schedule_events').update(withoutUnreleasedScheduleColumns(row)).eq('id', id).select('*').single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) throw error
 
   return fromScheduleRow(data)
 }
 
+export function isUnreleasedScheduleColumnError(error) {
+  if (!error) return false
+  const details = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`
+  return /PGRST204|schema cache/i.test(details)
+    && /athlete_id|event_subtype|position_or_event/i.test(details)
+}
+
+export function withoutUnreleasedScheduleColumns(row) {
+  const compatibleRow = { ...row }
+  delete compatibleRow.athlete_id
+  delete compatibleRow.event_subtype
+  delete compatibleRow.position_or_event
+  return compatibleRow
+}
+
 export async function deleteScheduleEvent(id) {
   const { error } = await supabase.rpc('delete_schedule_event_complete', { p_event_id: id })
 
+  if (isMissingAtomicWriteRpc(error, 'delete_schedule_event_complete')) {
+    await deleteScheduleEventLegacy(id)
+    return
+  }
   if (error) throw error
+}
+
+async function deleteScheduleEventLegacy(id) {
+  const [checkInsResult, checkoutsResult] = await Promise.all([
+    supabase.from('check_ins').select('id').eq('schedule_event_id', id),
+    supabase.from('training_checkouts').select('id').eq('schedule_event_id', id),
+  ])
+  if (checkInsResult.error) throw checkInsResult.error
+  if (checkoutsResult.error) throw checkoutsResult.error
+
+  const sourceIds = [
+    ...(checkInsResult.data ?? []).map((row) => row.id),
+    ...(checkoutsResult.data ?? []).map((row) => row.id),
+  ]
+  if (sourceIds.length) {
+    const { error: painError } = await supabase.from('pain_reports').delete().in('source_id', sourceIds)
+    if (painError) throw painError
+  }
+
+  const { error: checkInError } = await supabase.from('check_ins').delete().eq('schedule_event_id', id)
+  if (checkInError) throw checkInError
+  const { error: checkoutError } = await supabase.from('training_checkouts').delete().eq('schedule_event_id', id)
+  if (checkoutError) throw checkoutError
+  const { error: eventError } = await supabase.from('schedule_events').delete().eq('id', id)
+  if (eventError) throw eventError
 }
 
 export async function deleteHistoryEntryComplete(kind, id) {
@@ -1025,6 +1085,17 @@ export async function saveCheckInWithPainReports(checkIn, recommendation, report
     p_pain_reports: reports.map(toPainReportRow),
     p_check_in_id: id,
   })
+  if (isMissingAtomicWriteRpc(error, 'save_checkin_with_pain_reports')) {
+    const row = withoutUnknownCheckInFields(toCheckInRow(checkIn, recommendation))
+    const query = id
+      ? supabase.from('check_ins').update(row).eq('id', id)
+      : supabase.from('check_ins').insert(row)
+    const legacy = await query.select('*').single()
+    if (legacy.error) throw legacy.error
+    const record = fromCheckInRow(legacy.data)
+    const painReports = await replaceLegacyPainReports('check_in', record.id, reports)
+    return { record, painReports }
+  }
   if (error) throw error
   return {
     record: fromCheckInRow(data.record),
@@ -1167,6 +1238,17 @@ export async function saveCheckoutWithPainReports(event, checkout, reports, id =
     p_pain_reports: reports.map(toPainReportRow),
     p_checkout_id: id,
   })
+  if (isMissingAtomicWriteRpc(error, 'save_checkout_with_pain_reports')) {
+    const row = withoutUnknownCheckoutFields(toCheckoutRow(event, checkout))
+    const query = id
+      ? supabase.from('training_checkouts').update(row).eq('id', id)
+      : supabase.from('training_checkouts').insert(row)
+    const legacy = await query.select('*').single()
+    if (legacy.error) throw legacy.error
+    const record = fromCheckoutRow(legacy.data)
+    const painReports = await replaceLegacyPainReports('checkout', record.id, reports)
+    return { record, painReports }
+  }
   if (error) throw error
   return {
     record: fromCheckoutRow(data.record),
@@ -1197,6 +1279,35 @@ function isMissingRecommendationColumn(error) {
   return String(error.message ?? error.details ?? '')
     .toLowerCase()
     .includes('recommendation_json')
+}
+
+export function isMissingAtomicWriteRpc(error, functionName) {
+  if (!error) return false
+  const details = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`
+  return /PGRST202|schema cache/i.test(details) && details.includes(functionName)
+}
+
+export function withoutUnknownCheckInFields(row) {
+  const compatibleRow = { ...row }
+  for (const field of ['leg_heaviness', 'stress', 'expected_difficulty']) {
+    if (compatibleRow[field] == null) delete compatibleRow[field]
+  }
+  return compatibleRow
+}
+
+export function withoutUnknownCheckoutFields(row) {
+  const compatibleRow = { ...row }
+  for (const field of ['post_fatigue', 'post_soreness', 'mental_focus', 'motivation']) {
+    if (compatibleRow[field] == null) delete compatibleRow[field]
+  }
+  return compatibleRow
+}
+
+async function replaceLegacyPainReports(sourceType, sourceId, reports) {
+  const { error: deleteError } = await supabase.from('pain_reports').delete().eq('source_type', sourceType).eq('source_id', sourceId)
+  if (deleteError) throw deleteError
+  if (reports.length === 0) return []
+  return createPainReports(reports.map((report) => ({ ...report, sourceId, sourceType })))
 }
 
 function normalizeLegacySportWorkload(workload = {}, units) {

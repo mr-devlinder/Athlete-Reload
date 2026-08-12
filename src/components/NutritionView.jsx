@@ -4,13 +4,14 @@ import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMont
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
 import { getHydrationGuidance, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
-import { calculatePerformanceTargets } from '../lib/recommendationContext'
+import { buildDailyFuelingContext } from '../domain/nutrition/dailyFuelingContext'
 import { getCanonicalServing, getSourceServingFactor, getSourceServingOptions } from '../lib/foodServing'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
 import { AppIcon } from './AppIcon'
+import { clearDraft, loadDraft, saveDraft } from '../utils/draftStorage'
 import '../styles/nutrition-rework.css'
 
 const imperialWaterAmounts = [8, 16, 24]
@@ -27,18 +28,13 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
   const [detailsOpen, setDetailsOpen] = useState(false)
   const wellness = nutritionHistory.find((entry) => entry.date === selectedDate) ?? { date: selectedDate, hydrationMl: 0, nutritionEntries: [] }
   const entries = wellness.nutritionEntries ?? []
+  const hasFoodLogs = entries.length > 0
+  const hasHydrationLogs = Number(wellness.hydrationMl) > 0
   const totals = getNutritionTotals(entries)
   const targets = useMemo(() => getNutritionTargets(athleteProfile, schedule, selectedDate), [athleteProfile, schedule, selectedDate])
   const visibleTargets = showTargets ? targets : {}
   const hydrationGuidance = getHydrationGuidance(athleteProfile, schedule, selectedDate)
-  const performanceEvent = schedule
-    .filter((event) => event.date === selectedDate && !/rest|recovery/i.test(event.type ?? ''))
-    .sort((first, second) => String(first.time ?? '').localeCompare(String(second.time ?? '')))[0]
-  const performanceTargets = performanceEvent ? calculatePerformanceTargets({
-    durationMinutes: Number(performanceEvent.plannedMinutes ?? performanceEvent.expectedDuration ?? 0),
-    intensity: { Low: 3, Medium: 6, High: 8 }[performanceEvent.load] ?? 5,
-    weightKg: athleteProfile?.weightKg,
-  }) : null
+  const fuelingContext = buildDailyFuelingContext({ athleteProfile, date: selectedDate, entries, hydrationMl: wellness.hydrationMl, schedule })
   const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
   const quickWaterAmounts = unitSystem === 'metric' ? metricWaterAmounts : imperialWaterAmounts
   const hydrationGoalMl = hydrationGuidance.midpointMl
@@ -74,21 +70,26 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
         <button className="nutrition-detail-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button"><AppIcon name="expand" size={18} />More nutrients</button>
       </section>
 
-      <section className="nutrition-calorie-card">
-        <div><span>Calories</span><NutritionProgressValue showTarget={showTargets} target={targets.calories} unit="kCal" value={totals.calories} /></div>
-        <Progress value={totals.calories} target={visibleTargets.calories} tone="calories" />
-      </section>
-
-      <section className="nutrition-macro-card">
-        <Macro label="Carbs" value={totals.carbohydrates} target={visibleTargets.carbohydrates} unit="g" tone="carbs" />
-        <Macro label="Fat" value={totals.fats} target={visibleTargets.fats} unit="g" tone="fat" />
-        <Macro label="Protein" value={totals.protein} target={visibleTargets.protein} unit="g" tone="protein" />
+      <section className="nutrition-intake-card">
+        <div className="nutrition-calorie-orbit" style={{ '--calorie-progress': `${Math.min(360, (totals.calories / Math.max(1, Number(visibleTargets.calories) || totals.calories || 1)) * 360)}deg` }}><span><strong>{Math.round(totals.calories)}</strong><small>kcal logged</small></span></div>
+        <div className="nutrition-intake-content">
+          <header className="nutrition-intake-head">
+            <div><span>Daily intake</span><strong>{hasFoodLogs ? `${Math.round(totals.calories)} / ${Number(targets.calories) > 0 ? `~${Math.round(targets.calories)}` : '—'} kcal` : 'No food logged yet'}</strong></div>
+            {showTargets && Number(targets.calories) > 0 ? <small><b>{Math.max(0, Math.round(targets.calories - totals.calories))}</b> kcal estimated remaining</small> : <small>Add profile details to estimate a target</small>}
+          </header>
+          <Progress value={totals.calories} target={visibleTargets.calories} tone="calories" />
+          <div className="nutrition-macro-list">
+            <Macro label="Carbs" value={totals.carbohydrates} target={visibleTargets.carbohydrates} unit="g" tone="carbs" />
+            <Macro label="Fat" value={totals.fats} target={visibleTargets.fats} unit="g" tone="fat" />
+            <Macro label="Protein" value={totals.protein} target={visibleTargets.protein} unit="g" tone="protein" />
+          </div>
+        </div>
       </section>
 
       <section className="nutrition-water-strip">
         <div className="nutrition-water-summary">
-          <span>Water</span>
-          <strong>{formatHydration(wellness.hydrationMl, unitSystem)} <small>/ {formatHydration(hydrationGoalMl, unitSystem)} goal</small></strong>
+          <span>Hydration</span>
+          <strong>{hasHydrationLogs ? formatHydration(wellness.hydrationMl, unitSystem) : 'No intake logged'} {hasHydrationLogs && <small>/ estimated {formatHydration(hydrationGoalMl, unitSystem)} context</small>}</strong>
           <div aria-label={`${hydrationProgress}% of water goal`} aria-valuemax="100" aria-valuemin="0" aria-valuenow={hydrationProgress} className="nutrition-water-progress" role="progressbar"><i style={{ width: `${hydrationProgress}%` }} /></div>
         </div>
         <div className="nutrition-water-actions">
@@ -98,13 +99,10 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
         </div>
       </section>
 
-      <section className="performance-fueling-strip">
-        <div><span>Performance fueling</span><strong>{performanceEvent ? performanceEvent.title || performanceEvent.type : 'No demanding event scheduled'}</strong></div>
-        {performanceTargets ? <div className="performance-fueling-values">
-          <span><b>Before</b>{performanceTargets.fueling.preEventCarbsG ? `${performanceTargets.fueling.preEventCarbsG.low}–${performanceTargets.fueling.preEventCarbsG.high}g carbohydrate` : 'A familiar meal or snack'}</span>
-          <span><b>During</b>{performanceTargets.fueling.duringCarbsGPerHour ? `${performanceTargets.fueling.duringCarbsGPerHour.low}–${performanceTargets.fueling.duringCarbsGPerHour.high}g carbohydrate/hour if tolerated` : 'Usually not needed for this duration'}</span>
-          <span><b>After</b>{performanceTargets.recovery.proteinG ? `${performanceTargets.recovery.proteinG.low}–${performanceTargets.recovery.proteinG.high}g protein with carbohydrate` : 'A familiar balanced meal or snack'}</span>
-        </div> : <p>Add an event to connect fueling guidance with its duration and expected intensity.</p>}
+      <section className={`performance-fueling-strip daily-fueling-context demand-${fuelingContext.demand}`}>
+        <header><div><span>Today&apos;s fueling context</span><strong>{fuelingContext.headline}</strong></div><small>{fuelingContext.eventCount ? `${fuelingContext.eventCount} event${fuelingContext.eventCount === 1 ? '' : 's'}` : 'Normal day'}</small></header>
+        <p>{fuelingContext.summary}</p>
+        <div className="daily-fueling-timeline">{fuelingContext.moments.map((item) => <article className={item.tone} key={`${item.time}-${item.title}`}><time>{item.time}</time><div><strong>{item.title}</strong><p>{item.guidance}</p></div></article>)}</div>
       </section>
 
       <section className="nutrition-meals-section">
@@ -318,13 +316,15 @@ const manualNutrientFields = [
 ]
 
 function ManualFoodForm({ meal, onCancel, onSave }) {
-  const [draft, setDraft] = useState({ brand: '', calories: '', carbohydrates: '', fats: '', name: '', protein: '', servingWeight: '', servingWeightUnit: 'g', standardServingSize: '1 serving' })
+  const identity = useMemo(() => ({ accountId: 'active-session', feature: 'nutrition-manual', scope: meal }), [meal])
+  const [draft, setDraft] = useState(() => loadDraft(identity) ?? { brand: '', calories: '', carbohydrates: '', fats: '', name: '', protein: '', servingWeight: '', servingWeightUnit: 'g', standardServingSize: '1 serving' })
   const [isCurator, setIsCurator] = useState(false)
   const [jsonEntry, setJsonEntry] = useState('')
   const [curatorMessage, setCuratorMessage] = useState('')
   const [preview, setPreview] = useState(null)
 
   useEffect(() => { getFoodCuratorStatus().then(setIsCurator).catch(() => setIsCurator(false)) }, [])
+  useEffect(() => { saveDraft(identity, draft) }, [draft, identity])
 
   function update(field, value) {
     setDraft((current) => ({ ...current, [field]: value }))
@@ -332,7 +332,13 @@ function ManualFoodForm({ meal, onCancel, onSave }) {
 
   function submit(event) {
     event.preventDefault()
+    clearDraft(identity)
     onSave(draftToFood(draft, meal))
+  }
+
+  function discard() {
+    clearDraft(identity)
+    onCancel()
   }
 
   async function previewVerifiedFood() {
@@ -361,7 +367,7 @@ function ManualFoodForm({ meal, onCancel, onSave }) {
 
   return (
     <form className="manual-food-form" onSubmit={submit}>
-      <div className="manual-food-heading"><div><strong>Manual food entry</strong><span>Add the values for one serving.</span></div><button onClick={onCancel} type="button">Cancel</button></div>
+      <div className="manual-food-heading"><div><strong>Manual food entry</strong><span>Saved in this session until you add or discard it.</span></div><button onClick={discard} type="button">Discard</button></div>
       {isCurator && <details className="manual-nutrients curator-entry"><summary>Curator JSON entry <span>Optional</span></summary><label>Food JSON<textarea value={jsonEntry} onChange={(event) => { setJsonEntry(event.target.value); setPreview(null) }} placeholder='{"name":"Food name","calories":100,"protein":5,"carbohydrates":15,"fats":2,"standardServingSize":"1 serving"}' /></label></details>}
       <div className="manual-food-grid identity">
         <label>Food name<input autoFocus required={!jsonEntry.trim()} value={draft.name} onChange={(event) => update('name', event.target.value)} placeholder="e.g. Homemade granola" /></label>
@@ -584,7 +590,8 @@ function MealDetailModal({ date, entries, meal, onClose, onDateChange, onDelete,
   useModalAccessibility(true, onClose)
   const mealEntries = entries.filter((entry) => entry.meal === meal)
   const totals = getNutritionTotals(mealEntries)
-  return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div><div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => { const serving = parseStoredServing(entry); return <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{serving.servingSize} · {serving.servings} serving{serving.servings === 1 ? '' : 's'}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article> })}</div></section></div>
+  const nutrientRows = [['Fiber', 'fiber', 'g'], ['Sugar', 'sugar', 'g'], ['Saturated fat', 'saturatedFat', 'g'], ['Sodium', 'sodium', 'mg'], ['Potassium', 'potassium', 'mg'], ['Calcium', 'calcium', 'mg'], ['Iron', 'iron', 'mg'], ['Vitamin A', 'vitaminA', 'mcg RAE'], ['Vitamin C', 'vitaminC', 'mg'], ['Vitamin D', 'vitaminD', 'mcg'], ['Vitamin E', 'vitaminE', 'mg'], ['Vitamin K', 'vitaminK', 'mcg']].filter(([, key]) => mealEntries.some((entry) => entry[key] != null))
+  return <div className="modal-backdrop" onClick={onClose}><section className="meal-detail-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div><span className="meal-detail-eyebrow">{meal === 'Snack' ? 'Snacks' : meal}</span><label className="meal-detail-date"><input type="date" value={date} onChange={(event) => onDateChange(event.target.value)} /><Icon name="chevron" /></label></div><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="meal-detail-totals"><span>Calories<strong>{Math.round(totals.calories)}</strong></span><span>Protein<strong>{roundNutrient(totals.protein)}g</strong></span><span>Carbs<strong>{roundNutrient(totals.carbohydrates)}g</strong></span><span>Fat<strong>{roundNutrient(totals.fats)}g</strong></span></div>{mealEntries.length > 0 && <details className="meal-nutrition-details"><summary>Nutrition details</summary><div>{nutrientRows.length ? nutrientRows.map(([label, key, unit]) => <span key={key}>{label}<strong>{roundNutrient(totals[key])} {unit}</strong></span>) : <p>Additional nutrient data is not available for the foods in this meal.</p>}</div></details>}<div className="meal-detail-list">{mealEntries.length === 0 ? <p>No foods logged for this meal.</p> : mealEntries.map((entry) => { const serving = parseStoredServing(entry); return <article key={entry.id}><button className="meal-entry-main" onClick={() => onEdit(entry)} type="button"><strong>{entry.name}</strong><span>{serving.servingSize} · {serving.servings} serving{serving.servings === 1 ? '' : 's'}</span><em>{entry.calories} calories · P {entry.protein}g · C {entry.carbohydrates}g · F {entry.fats}g</em></button><div><button onClick={() => onEdit(entry)} type="button">Edit</button><button className="remove" onClick={() => onDelete(entry.id)} type="button">Delete</button></div></article> })}</div></section></div>
 }
 
 function NutritionDetailsModal({ entries, hydrationMl, onClose, targets, totals, unitSystem }) {

@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useEffectEvent, useMemo, useRef, useState } 
 import { format, subDays } from 'date-fns'
 import { OnboardingFlow } from './components/OnboardingFlow'
 import { GuidedTour } from './components/GuidedTour'
-import { CheckInView } from './components/CheckInView'
 import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AgeGate } from './components/AgeGate'
@@ -42,6 +41,7 @@ const HistoryView = lazy(() => loadView('History').then((module) => ({ default: 
 const NutritionView = lazy(() => loadView('Nutrition').then((module) => ({ default: module.NutritionView })))
 const RecoveryView = lazy(() => loadView('Recovery').then((module) => ({ default: module.RecoveryView })))
 const ScheduleView = lazy(() => loadView('Schedule').then((module) => ({ default: module.ScheduleView })))
+const CheckInView = lazy(() => import('./components/CheckInView').then((module) => ({ default: module.CheckInView })))
 const AuthGate = lazy(() => loadAuthGate().then((module) => ({ default: module.AuthGate })))
 import {
   clearCheckIns,
@@ -85,6 +85,7 @@ import { getAgeAccess } from './domain/age'
 import { getCheckoutRecommendation } from './domain/checkoutRecommendation'
 import { getActivityDemandProfile } from './domain/activityDemands'
 import { transitionPainIssue } from './domain/painLifecycle'
+import { RECOVERY_EXERCISE_LIST } from './domain/recovery/exerciseCatalog'
 import { useAthleteSnapshotController } from './features/app/useAthleteSnapshotController'
 import { displayPreferenceDefaults, normalizeDisplayPreferences } from './lib/displayPreferences'
 import { getSportContext } from './data/sportProfiles'
@@ -100,7 +101,8 @@ import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActiona
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
 import { fluidOuncesToMilliliters, inchesToCentimeters, poundsToKilograms } from './utils/units'
 import { useModalAccessibility } from './hooks/useModalAccessibility'
-import { shouldShowStartupLoader } from './lib/startupFlow'
+import { shouldRestartStartupForAuthEvent, shouldShowStartupLoader } from './lib/startupFlow'
+import { clearAccountDrafts, clearDraft, loadDraft, saveDraft } from './utils/draftStorage'
 import './App.css'
 import './styles/tokens.css'
 import './styles/primitives.css'
@@ -264,6 +266,7 @@ function getMealNutritionBreakdown(entries = []) {
 }
 
 function normalizeFivePointValue(value, fallback = 1) {
+  if (value === null || value === undefined || value === '') return null
   const number = Number(value)
 
   if (!Number.isFinite(number)) return fallback
@@ -274,26 +277,28 @@ function normalizeFivePointValue(value, fallback = 1) {
 function normalizeCheckInScales(checkIn) {
   return {
     ...checkIn,
-    energy: normalizeFivePointValue(checkIn.energy, 5),
-    expectedDifficulty: Math.max(1, Math.min(10, Math.round(Number(checkIn.expectedDifficulty) || 5))),
-    fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
-    legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, 0),
-    sleep: Math.max(3, Math.min(10, Math.round(Number(checkIn.sleep) || 10))),
+    energy: normalizeFivePointValue(checkIn.energy, null),
+    expectedDifficulty: checkIn.expectedDifficulty == null ? null : Math.max(1, Math.min(10, Math.round(Number(checkIn.expectedDifficulty)))),
+    fatigue: normalizeFivePointValue(checkIn.fatigue, null),
+    legHeaviness: normalizeFivePointValue(checkIn.legHeaviness, null),
+    sleep: checkIn.sleep == null ? null : Math.max(3, Math.min(10, Number(checkIn.sleep))),
     illnessSymptoms: normalizeIllnessValue(checkIn.illnessSymptoms),
-    sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, 5),
-    soreness: normalizeFivePointValue(checkIn.soreness, 0),
+    sleepQuality: normalizeFivePointValue(checkIn.sleepQuality, null),
+    soreness: normalizeFivePointValue(checkIn.soreness, null),
     stress: normalizeStressValue(checkIn.stress),
     painMap: normalizePainMapScale(checkIn.painMap, checkIn.pain),
   }
 }
 
 function normalizeStressValue(value) {
+  if (value === null || value === undefined || value === '') return null
   const parsed = Number.parseInt(String(value), 10)
   if (!Number.isFinite(parsed)) return 0
   return Math.max(0, Math.min(5, String(value).includes('Low') ? parsed - 1 : parsed))
 }
 
 function normalizeIllnessValue(value) {
+  if (value === null || value === undefined || value === '') return null
   if (typeof value === 'number') return Math.max(0, Math.min(5, value))
   const normalized = String(value ?? '').toLowerCase()
   if (normalized === 'none') return 0
@@ -701,6 +706,8 @@ function App() {
   const [isAppUnlocked, setIsAppUnlocked] = useState(false)
   const [isAuthReady, setIsAuthReady] = useState(!hasSupabaseConfig)
   const [isStartupComplete, setIsStartupComplete] = useState(false)
+  const hasEnteredAuthenticatedAppRef = useRef(false)
+  const hydratedCheckInDraftKeyRef = useRef('')
   const [areViewsReady, setAreViewsReady] = useState(false)
   const isSigningOutRef = useRef(false)
   const resetAccountStateRef = useRef(null)
@@ -766,12 +773,18 @@ function App() {
     () => new Set(checkouts.map((checkout) => checkout.eventId).filter(Boolean)),
     [checkouts],
   )
+  const completedCheckInEventIds = useMemo(
+    () => new Set(history.map((entry) => entry.eventId).filter(Boolean)),
+    [history],
+  )
   const currentTodayCheckInEvent = useMemo(
     () => {
-      const nextRequiredEvent = todayEvents.find((event) => isInsideCheckInWindow(event) && !completedCheckoutEventIds.has(event.id))
+      const nextRequiredEvent = todayEvents.find((event) => isInsideCheckInWindow(event)
+        && !completedCheckoutEventIds.has(event.id)
+        && !completedCheckInEventIds.has(event.id))
       return nextRequiredEvent && isInsideCheckInWindow(nextRequiredEvent) ? nextRequiredEvent : null
     },
-    [completedCheckoutEventIds, todayEvents],
+    [completedCheckInEventIds, completedCheckoutEventIds, todayEvents],
   )
   const nextEvent = useMemo(
     () => sortScheduleEvents(schedule.filter((event) => event.date > todayIso))[0],
@@ -925,6 +938,7 @@ function App() {
 
   useEffect(() => {
     setIsMobileAccountMenuOpen(false)
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }, [activeView])
 
   useEffect(() => {
@@ -1021,7 +1035,7 @@ function App() {
       if (isMounted) {
         void savePendingOauthConsent(data.session)
         setSession(data.session)
-        if (data.session) setIsStartupComplete(false)
+        if (data.session && !hasEnteredAuthenticatedAppRef.current) setIsStartupComplete(false)
         setIsAppUnlocked(Boolean(data.session))
         setIsAuthReady(true)
       }
@@ -1044,7 +1058,9 @@ function App() {
         setIsAppUnlocked(false)
         setAuthEntryMode('landing')
       } else if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
-        setIsStartupComplete(false)
+        if (shouldRestartStartupForAuthEvent({ event, hasEnteredAuthenticatedApp: hasEnteredAuthenticatedAppRef.current })) {
+          setIsStartupComplete(false)
+        }
         setIsAppUnlocked(true)
       } else if (event === 'TOKEN_REFRESHED') {
         setIsAppUnlocked(true)
@@ -1057,6 +1073,26 @@ function App() {
       subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (isStartupComplete && isAppUnlocked && session?.user) hasEnteredAuthenticatedAppRef.current = true
+  }, [isAppUnlocked, isStartupComplete, session?.user])
+
+  useEffect(() => {
+    const accountId = session?.user?.id ?? 'guest'
+    const scope = selectedCheckInEvent?.id ?? todayIso
+    const identity = { accountId, feature: 'checkin', scope }
+    hydratedCheckInDraftKeyRef.current = `${accountId}:${scope}`
+    const savedDraft = loadDraft(identity)
+    if (savedDraft) setCheckIn(normalizeCheckInScales({ ...getFreshCheckInDefaults(), ...savedDraft }))
+  }, [selectedCheckInEvent?.id, session?.user?.id, todayIso])
+
+  useEffect(() => {
+    const accountId = session?.user?.id ?? 'guest'
+    const scope = selectedCheckInEvent?.id ?? todayIso
+    if (hydratedCheckInDraftKeyRef.current !== `${accountId}:${scope}`) return
+    saveDraft({ accountId, feature: 'checkin', scope }, checkIn)
+  }, [checkIn, selectedCheckInEvent?.id, session?.user?.id, todayIso])
 
   useEffect(() => {
     if (!canPersistGuestState({
@@ -1089,7 +1125,7 @@ function App() {
   useAthleteSnapshotController({
     enabled: isSupabaseSession,
     onDeletedSession: resetDeletedSession,
-    onFailure: () => setIsProfileReady(true),
+    onFailure: () => setIsProfileReady(false),
     onSnapshot: applyRemoteSnapshot,
     onStatus: setDataStatus,
     privacyDefaults,
@@ -1181,12 +1217,10 @@ function App() {
     }
 
     if (field === 'painMap') {
-      const nextCheckIn = applyPainMapToCheckIn({
-        ...checkIn,
+      setCheckIn((current) => applyPainMapToCheckIn({
+        ...current,
         painMap: value,
-      })
-
-      setCheckIn(nextCheckIn)
+      }))
       return
     }
 
@@ -1281,6 +1315,7 @@ function App() {
         setSubmittedRecommendation(deterministicRecommendation)
         setSubmittedRecommendationStatus('local')
         setSubmittedRecommendationContext({ scoreLabel: 'readiness', session: savedCheckIn.session, title: 'Check-in report' })
+        setDataStatus('synced')
         setIsSavingCheckIn(false)
       } catch (error) {
         console.error(error)
@@ -1353,7 +1388,7 @@ function App() {
           {
             date: savedCheckIn.eventDate ?? todayIso,
             notes: savedCheckIn.notes,
-            sourceId: savedEntry.id,
+            sourceId: deterministicSave?.record.id ?? (isEditingToday ? previousEntry?.id : null),
             sourceType: 'check_in',
             triggerMovement: savedCheckIn.hurtsWhen,
           },
@@ -1392,6 +1427,7 @@ function App() {
             records: getRollingBaselineRecords({ checkouts, event: selectedCheckInEvent, history: nextHistory, painReports, recoveryCompletions }),
           }).catch((error) => console.warn('Unable to update athlete baselines.', error))
         }
+        setDataStatus('synced')
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -1426,6 +1462,7 @@ function App() {
 
     setIsEditingToday(false)
     setSubmittedRecommendation(finalRecommendation)
+    clearDraft({ accountId: session?.user?.id ?? 'guest', feature: 'checkin', scope: selectedCheckInEvent?.id ?? todayIso })
     setSubmittedRecommendationStatus(finalRecommendationStatus)
     setSubmittedRecommendationContext({
       scoreLabel: 'readiness',
@@ -1468,6 +1505,7 @@ function App() {
     const eventToSave = {
       ...event,
       activityKey: event.activityKey ?? athleteProfile?.sport ?? 'Other',
+      athleteId: athleteProfile?.athleteId ?? null,
       demandSnapshot: getActivityDemandProfile({ sport: athleteProfile?.sport ?? 'Other', event }),
       load: event.type === 'Other activity' ? event.load ?? 'Medium' : getDefaultLoadForEvent(event.type),
       title: getEventDisplayName(event),
@@ -1486,7 +1524,7 @@ function App() {
       } catch (error) {
         console.error(error)
         setDataStatus('error')
-        return false
+        return error
       }
     }
 
@@ -2024,6 +2062,8 @@ function App() {
       })
       if (savedCheckout.recommendationNotPersisted) {
         setDataStatus('offline')
+      } else {
+        setDataStatus('synced')
       }
       advanceCheckInAfterCheckout(event, savedCheckout)
       return
@@ -2080,12 +2120,12 @@ function App() {
     const latestCheckout = [...checkouts]
       .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
 
-    if (!latestCheckout && planType === 'last-checkout') {
+    if (!latestCheckout && ['session', 'competition'].includes(planType)) {
       setRecoveryPlanStatus('error')
       return
     }
 
-    const usesCheckoutContext = ['last-checkout', 'competition'].includes(planType)
+    const usesCheckoutContext = ['session', 'competition'].includes(planType)
     const contextCheckout = usesCheckoutContext ? latestCheckout : null
     const completedEvent = contextCheckout ? schedule.find((event) => event.id === contextCheckout.eventId) : null
     const preCheckIn = contextCheckout ? history.find((entry) => entry.eventId === contextCheckout.eventId) : null
@@ -2157,6 +2197,7 @@ function App() {
         recentRoutineExerciseNames,
         recentRoutineSequences,
         recoveryCompletions: recoveryCompletions.slice(0, 5),
+        recoveryCatalog: RECOVERY_EXERCISE_LIST.map(({ id, name, category, equipment, sportDemandTags, recoveryGoalTags }) => ({ id, name, category, equipment, sportDemandTags, recoveryGoalTags })),
         requestType: 'recovery_plan',
         scheduleContext,
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
@@ -2182,7 +2223,14 @@ function App() {
         recentPainReports: painReports,
         scheduleContext: getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent),
       }))
-      setGeneratedRecoveryPlan(fallback)
+      setGeneratedRecoveryPlan({
+        ...fallback,
+        planType,
+        routine: {
+          ...fallback.routine,
+          durationMinutes: Math.max(5, Math.min(30, Number.parseInt(timeAvailable, 10) || 15)),
+        },
+      })
       setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
       setRecoveryPlanStatus('local')
     }
@@ -2751,6 +2799,7 @@ function App() {
 
   function resetAccountState() {
     isSigningOutRef.current = true
+    clearAccountDrafts(session?.user?.id ?? 'guest')
     setSchedule([])
     setAssociations([])
     setHistory([])

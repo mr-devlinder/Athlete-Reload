@@ -136,20 +136,32 @@ async function hasValidSession(request: Request) {
 
 function applyDeterministicGuard(aiRecommendation: Recommendation, deterministic: any) {
   if (!deterministic || typeof deterministic !== 'object') return aiRecommendation
+  const safetyLocked = Boolean(deterministic.redFlag)
+    || ['limit', 'stop_and_seek_help'].includes(String(deterministic.status ?? ''))
+    || deterministic.label === 'Stop and Check In'
+  const deterministicScore = Math.round(Number(deterministic.score) || 0)
+  const aiScore = Number(aiRecommendation.score)
+  const score = safetyLocked || !Number.isFinite(aiScore)
+    ? deterministicScore
+    : Math.max(0, Math.min(100, Math.round(Math.max(deterministicScore - 12, Math.min(deterministicScore + 12, aiScore)))))
+  const deterministicAvoid = Array.isArray(deterministic.avoid) ? deterministic.avoid : []
+  const aiAvoid = Array.isArray(aiRecommendation.avoid) ? aiRecommendation.avoid : []
+  const avoid = [...new Set([...aiAvoid, ...deterministicAvoid])].slice(0, 6)
+
   return {
     ...aiRecommendation,
     schemaVersion: Number(deterministic.schemaVersion) || aiRecommendation.schemaVersion,
-    action: String(deterministic.primaryAction?.instruction ?? deterministic.action ?? aiRecommendation.action),
-    avoid: Array.isArray(deterministic.avoid) ? deterministic.avoid : aiRecommendation.avoid,
-    breakdown: Array.isArray(deterministic.breakdown) ? deterministic.breakdown : aiRecommendation.breakdown,
-    focus: Array.isArray(deterministic.focus) ? deterministic.focus : aiRecommendation.focus,
-    intensity: String(deterministic.intensity ?? aiRecommendation.intensity),
-    label: String(deterministic.label ?? aiRecommendation.label),
-    reasons: Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.reasons,
-    score: Number.isFinite(Number(deterministic.score)) ? Number(deterministic.score) : aiRecommendation.score,
-    tone: deterministic.tone ?? aiRecommendation.tone,
-    reportSections: Array.isArray(deterministic.reportSections) ? deterministic.reportSections : aiRecommendation.reportSections,
-    contextFactors: Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.contextFactors,
+    action: safetyLocked ? String(deterministic.primaryAction?.instruction ?? deterministic.action ?? aiRecommendation.action) : aiRecommendation.action,
+    avoid,
+    breakdown: safetyLocked && Array.isArray(deterministic.breakdown) ? deterministic.breakdown : aiRecommendation.breakdown,
+    focus: safetyLocked && Array.isArray(deterministic.focus) ? deterministic.focus : aiRecommendation.focus,
+    intensity: safetyLocked ? String(deterministic.intensity ?? aiRecommendation.intensity) : aiRecommendation.intensity,
+    label: safetyLocked ? String(deterministic.label ?? aiRecommendation.label) : aiRecommendation.label,
+    reasons: safetyLocked && Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.reasons,
+    score,
+    tone: safetyLocked ? deterministic.tone ?? aiRecommendation.tone : aiRecommendation.tone,
+    reportSections: safetyLocked && Array.isArray(deterministic.reportSections) ? deterministic.reportSections : aiRecommendation.reportSections,
+    contextFactors: safetyLocked && Array.isArray(deterministic.contextFactors) ? deterministic.contextFactors : aiRecommendation.contextFactors,
   }
 }
 
@@ -307,8 +319,8 @@ function buildPrompt(payload: unknown) {
 You are Athlete Reload's training readiness assistant for student athletes.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
 
-The supplied deterministicRecommendation is authoritative. Copy its score, status, label, tone, intensity, reasons, actions, warnings, and safety limits exactly. Your role is limited to concise explanation and contextual presentation. Never weaken, strengthen, or replace its decision.
-Authoritative deterministic recommendation:
+The supplied deterministicRecommendation is a safety baseline, not the final recommendation. You own the personalized readiness score, event-specific label, action plan, focus items, and report sections. Use the full athlete and event context so materially different check-ins produce materially different plans. The server will keep your score within a safe range of the deterministic baseline and will preserve any hard stop or limit.
+Deterministic safety baseline:
 ${JSON.stringify((payload as any)?.deterministicRecommendation ?? null)}
 
 Return ONLY valid JSON. No markdown. No extra commentary.
@@ -464,8 +476,9 @@ function safeJson(value: unknown) {
 }
 
 function buildRecoveryPlanPrompt(payload: unknown) {
-  const planType = stringOrFallback((payload as any)?.planType, 'last-checkout')
+  const planType = stringOrFallback((payload as any)?.planType, 'session')
   const planTypeDirective = getRecoveryPlanTypeDirective(planType, (payload as any)?.targetedAreas)
+  const recoveryCatalog = Array.isArray((payload as any)?.recoveryCatalog) ? (payload as any).recoveryCatalog.slice(0, 180) : []
 
   return `
 You are Athlete Reload's recovery planning assistant for student athletes.
@@ -482,9 +495,9 @@ Important behavior:
 - Match the response strength to the evidence. Normal manageable post-event fatigue should produce ordinary recovery guidance; high fatigue/soreness, worsening or new pain, changed movement, concerning symptoms, or a short turnaround should produce more protective and specific guidance. Never let zero pain erase other adverse recovery signals.
 - currentRecoveryContext is the sole source of truth for current pain and restrictions. A missing body part or severity 0 is not active pain and must not cause protection language, altered exercises, painAware=true, or a restriction. recentPainReports are history only and must never override currentRecoveryContext.
 - The PRIMARY ROUTINE CONTRACT controls the routine goal, exercise selection and order, recovery steps, timeline, action, summary, and insights. Athlete context may personalize this contract or remove unsafe movements, but must not replace it with a generic recovery plan.
-- When planType is last-checkout or competition, connect the plan to the supplied completed event. For every other plan type, do not imply that a completed event caused the request and do not invent why the athlete selected it. Build the requested routine outcome, then personalize it with athleteProfile, weeklyWorkloadContext, recentEvents, recoveryCompletions, currentRecoveryContext, nutritionContext, and future schedule.
+- When planType is session or competition, connect the plan to the supplied completed event. For every other plan type, do not imply that a completed event caused the request and do not invent why the athlete selected it. Build the requested routine outcome, then personalize it with athleteProfile, weeklyWorkloadContext, recentEvents, recoveryCompletions, currentRecoveryContext, nutritionContext, and future schedule.
 - Do not decide whether the athlete is cleared for the next event.
-- Honor planType as the plan's primary goal: last-checkout responds directly to the completed session; full-body balances major regions; flexibility emphasizes comfortable range over intensity; targeted prioritizes targetedAreas while still including adjacent joints; quick is a focused 5-10 minute plan; competition prioritizes turnaround and avoids unnecessary fatigue; recovery-day provides a practical day plan; mobility uses only comfortable mobility work.
+- Honor planType as the plan's primary goal: session responds directly to the completed session; full-body balances major regions; flexibility emphasizes comfortable range over intensity; targeted prioritizes targetedAreas while still including adjacent joints; quick is a focused 5-10 minute plan; competition prioritizes turnaround and avoids unnecessary fatigue; recovery-day provides a practical day plan; pre-event avoids long passive stretching and unnecessary fatigue.
 - Use generatedAt and nextScheduledEvent to make timing labels truthful. Morning plans should address the current morning and later day; evening plans should prioritize what remains before sleep. Never say "tonight" when it is already morning unless referring to the coming night.
 - Compare the next event time with generatedAt. A short turnaround should prioritize the few highest-value actions; a longer window can spread actions across meals, hydration, sleep, and mobility. Use next-event type and planned workload, not just its title.
 - Use recoveryCompletions to avoid stacking another demanding routine immediately after one was completed. A recent completion should favor follow-through actions such as food, fluids, and sleep or a shorter gentle routine.
@@ -497,10 +510,10 @@ Important behavior:
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
 - A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.
 - Do not imply stretching prevents soreness or injury or that temporary looseness proves healing. Present it as optional comfortable mobility or relaxation.
-- Treat the supplied timeAvailable as an exact routine time budget, not merely a maximum. Set routine.durationMinutes to exactly that selected whole-minute duration. The sum of the individual timed exercise steps must land within about one minute of that duration, with enough distinct exercises for the selected plan type. Adjust the content to effort, duration, participation, and the next event. The equipment array describes what is available, but the routine does not need to use every item. Always include a no-equipment option.
-- Never require equipment that is absent from the supplied equipment array. Selected equipment enables an option; it does not obligate its use. Every exercise must include "equipment":"None" or the exact name of one selected item.
-- Build a real routine with enough distinct, useful steps to fill exactly 5, 10, 15, 20, 25, or 30 selected minutes. Let the athlete context and routine flow determine exercise count: added time may add exercises, extend appropriate holds, or add controlled repetitions. Short plans should be concise and longer plans should contain enough variety, but never pad the plan with filler or multi-minute static holds.
-- Every genuinely unilateral movement must be returned as two consecutive exercise objects: one with side "Left" and one with side "Right". Give each object the full duration or repetition dose and side-specific setup, movement, and completion instructions. Never put "switch sides" inside an exercise because each object receives its own timer. Keep bilateral, simultaneous, full-body, and central-body movements as one object with side "Both sides". In every step, put laterality in either side or area without duplicating it: use side "Left" with area "Hip", or side "Both sides" with area "Hips"; never side "Left" with area "Left Hip".
+- Treat timeAvailable as the application's exact routine budget. Select a useful ordered set of vetted IDs; the application owns dosing, side expansion, equipment requirements, substitutions, and the final duration calculation.
+- Prefer IDs whose catalog equipment is compatible with the supplied equipment, while retaining no-equipment choices. Do not output equipment fields.
+- Select exercises only by stable ID from the supplied recoveryCatalog below. Never invent an exercise, ID, dose, instruction, contraindication, or substitute. The application owns vetted instructions, safety filtering, substitutions, side expansion, and real duration calculation.
+- Return each selected stable ID at most once. The application expands unilateral movements into left and right steps.
 - Unless planType is targeted, flexibility, quick, or mobility, build a full-body recovery routine that includes the major regions relevant after activity. For specialized plan types, stay focused on the selected outcome while keeping adjacent joints and basic whole-body balance where useful. Keep painful or concerning areas protected rather than forcing direct stretching.
 - Do not include standalone walking, breathing, or generic ankle rolls as routine exercises. They are not acceptable filler. Only include a short cooldown movement when it is specific to the completed sport or a symptom/safety concern, and it must never replace the stretching and mobility work.
 - Use sportContext workload when present to select sport-relevant recovery priorities, but never diagnose or predict injury risk from workload. All symptom and red-flag safety rules override workload-based guidance.
@@ -509,14 +522,13 @@ Important behavior:
 - Prefer conventional, widely recognized exercise and stretch names with clear form cues. Do not treat any example list or familiar pair as a template, and do not routinely begin with the same two movements. Use niche movements sparingly and only when the athlete context makes them more useful than a familiar option.
 - Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
 - For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
-- Every exercise, including the final exercise, must fully populate setup, movement, completionCue, sideCue, feel, and avoid. Write for someone who has never performed the movement: name joint positions, movement direction, what remains still, the exact end of a repetition or hold, how to change sides, expected muscle sensation, common form errors, and symptoms that mean stop. Never become shorter or less specific later in the routine.
-- Static stretches and sustained positions must use durationSeconds and omit reps. Controlled mobility repetitions must use reps and omit durationSeconds. Use side "Left" or "Right" for unilateral exercise objects and "Both sides" only when both sides move together.
+- Every routine exercise object must contain exactly one field: id. Do not output names, cues, sides, timing, repetitions, or any other exercise content.
 - Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
 - If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
 - Do not use a readiness score in this response. A stored score may be 0.
 - Do not generate the legacy recoverySteps or timeline fields. The visible recovery output is reportSections plus the personalized routine.
-- For flexibility, mobility, targeted, full-body, or quick routine requests, return reportSections as an empty array. These users requested a routine, not a full recovery report. Keep the routine personalized from profile, current body state, targeted areas, time, and available equipment.
-- For last-checkout, competition, or recovery-day plans, Recovery Priorities must contain only the highest-value session-specific actions not covered by the dedicated nutrition, hydration, sleep/rest, or pain sections. Never repeat those dedicated goals in Recovery Priorities.
+- For flexibility, targeted, full-body, quick, or pre-event routine requests, return reportSections as an empty array. These users requested a routine, not a full recovery report. Keep the routine personalized from profile, current body state, targeted areas, time, and available equipment.
+- For session, competition, or recovery-day plans, Recovery Priorities must contain only the highest-value session-specific actions not covered by the dedicated nutrition, hydration, sleep/rest, or pain sections. Never repeat those dedicated goals in Recovery Priorities.
 - Nutrition Guidance must state a real recovery goal in plain language. Use current logged nutrition, time of day, athlete goals, and the completed session when supplied. Explain whether carbohydrates, protein, or an ordinary balanced meal/snack deserves priority and why; do not merely print macro numbers.
 - Hydration Guidance must never estimate exact sweat or fluid loss. Distinguish between returning to normal steady hydration after a light session and deliberately replacing fluids after longer, hotter, or harder work, using symptoms and logged hydration when available.
 - Sleep and Rest Guidance must fit generatedAt and the next event. Do not say only "get sleep"; explain the useful rest priority for the remaining recovery window.
@@ -533,7 +545,7 @@ JSON shape:
   "contextFactors": ["2-8 supplied factors that materially shaped this plan"],
   "reportSections": [{"id":"recovery-status","title":"Recovery Status","summary":"estimated demand and primary drivers","items":[]},{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"active-recovery-rest","title":"Active Recovery or Rest","summary":"which is more useful now and why","items":[]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on supplied targets and logs","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"use supplied target ranges without claiming measured fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]},{"id":"recovery-timeline","title":"Recovery Timeline","summary":"remainder of today through the next relevant checkpoint","items":[]},{"id":"next-event-impact","title":"Tomorrow or Next Event","summary":"include only when future schedule is supplied","items":[]}],
   "planType": "${planType}",
-  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"name":"movement name","type":"Mobility","area":"body area","side":"Both sides","equipment":"None","sets":1,"restSeconds":0,"durationSeconds":30,"setup":"exact starting body position and equipment placement","movement":"step-by-step movement direction plus what must remain still","completionCue":"how to know one repetition or hold is complete","sideCue":"how and when to switch sides, or state that both sides move together","why":"short reason this movement fits the selected routine type and athlete context","feel":"specific muscle or area that should work or stretch","avoid":"specific form faults and symptoms that mean stop"}]},
+  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"id":"one-vetted-catalog-id"}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -544,6 +556,8 @@ JSON shape:
 }
 
 Athlete data:
+Vetted recoveryCatalog:
+${JSON.stringify(recoveryCatalog)}
 ${JSON.stringify(payload, null, 2)}
 `
 }
@@ -552,15 +566,15 @@ function getRecoveryPlanTypeDirective(planType: string, targetedAreas: unknown) 
   const directives: Record<string, string> = {
     'full-body': 'Create a balanced head-to-toe recovery sequence. Distribute work across upper body, trunk, hips, legs, and ankles, then adapt emphasis to the athlete profile, weekly workload, recovery history, current body state, and future events.',
     targeted: `Focus primarily on these selected areas: ${stringArray(targetedAreas).join(', ') || 'none supplied'}. Put their safe movements first, include directly related joints, and omit unrelated filler. Pain safety can remove an area but must not redirect the routine to a different body region.`,
-    'last-checkout': 'Build directly from the latest checkout. Exercise order and recovery actions must respond to session type, workload, soreness, pain changes, and the next event.',
+    session: 'Build directly from the latest checkout. Exercise order and recovery actions must respond to session type, workload, soreness, pain changes, and the next event.',
     quick: 'Create a condensed routine containing only the highest-value actions for the selected 5-10 minute budget. Start immediately with useful movement and avoid repeated or low-priority steps.',
     competition: 'Create post-match or tournament recovery. Prioritize downshifting after competition, food and fluids, symptom monitoring, sleep, and the next competitive turnaround; use only gentle movement that does not add fatigue.',
     'recovery-day': 'Create a low-intensity off-day plan spread across the current day. Emphasize easy circulation, comfortable movement, nutrition, hydration, and sleep without treating the day like a post-match cooldown.',
-    mobility: 'Create a controlled joint-mobility sequence focused on movement quality, active range, rotations, and smooth repetitions. Minimize passive stretching and do not turn it into a generic cooldown.',
+    'pre-event': 'Create a short pre-event mobility sequence using active range, controlled repetitions, and low-fatigue activation. Avoid long passive holds and anything that could leave the athlete fatigued.',
     flexibility: 'Create a flexibility-first routine, never label it as mobility. Use mostly recognizable sustained stretches held 20-45 seconds for hamstrings, hip flexors, adductors, calves, glutes, chest, back, and neck where safe. Include progressive mild-to-moderate tension guidance. The title, summary, timing, and at least two-thirds of exercises must explicitly develop flexibility; mobility may appear only as brief preparation.',
   }
 
-  return directives[planType] ?? directives['last-checkout']
+  return directives[planType] ?? directives.session
 }
 
 function stripJsonFence(value: string) {
@@ -608,7 +622,7 @@ function normalizeRecommendation(value: any, payload?: any): Recommendation {
     contextSnapshot: payload?.athleteContext ?? {},
     targets: payload?.athleteContext?.targets ?? {},
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
-    planType: stringOrFallback(value?.planType, String(payload?.planType ?? 'last-checkout')),
+    planType: stringOrFallback(value?.planType, String(payload?.planType ?? 'session')),
     action,
     avoid: stringArray(value.avoid).slice(0, 4),
     breakdown: normalizeBreakdown(value.breakdown),
@@ -665,7 +679,7 @@ function getSafetyCalibration(payload: any) {
 
 function normalizeReportSections(value: unknown, payload: any) {
   if (!Array.isArray(value)) return []
-  if (payload?.requestType === 'recovery_plan' && ['flexibility', 'mobility', 'targeted', 'full-body', 'quick'].includes(payload?.planType)) return []
+  if (payload?.requestType === 'recovery_plan' && ['flexibility', 'targeted', 'full-body', 'quick', 'pre-event'].includes(payload?.planType)) return []
   const hasCurrentPain = payload?.requestType === 'recovery_plan'
     ? Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
     : payload?.requestType === 'post_checkout'
@@ -736,14 +750,14 @@ function getRoutineGoal(planType: unknown) {
   const goals: Record<string, string> = {
     'full-body': 'Balanced whole-body recovery',
     targeted: 'Focused recovery for selected body areas',
-    'last-checkout': 'Recover from the latest completed session',
+    session: 'Recover from the latest completed session',
     quick: 'Complete the highest-value recovery work quickly',
     competition: 'Support recovery between competitive efforts',
     'recovery-day': 'Use an off day for low-intensity recovery',
-    mobility: 'Improve controlled joint movement quality',
+    'pre-event': 'Prepare comfortable movement before the next event',
     flexibility: 'Develop comfortable flexibility in major muscle groups',
   }
-  return goals[String(planType ?? '')] ?? goals['last-checkout']
+  return goals[String(planType ?? '')] ?? goals.session
 }
 
 function normalizeRecoverySteps(value: any, fallback: string[]) {
@@ -793,29 +807,28 @@ function normalizeRecoveryTimeline(value: any, preparation: string[], during: st
   ]
 }
 
+const fallbackApprovedRecoveryExerciseIds = new Set([
+  'cat-cow', 'open-book', 'shoulder-circles', 'doorway-chest-stretch', 'hip-switches-90-90',
+  'adductor-rock-back', 'half-kneeling-hip-flexor', 'supine-hamstring-stretch', 'standing-calf-stretch',
+])
+
 function normalizeRoutine(value: any, payload?: any) {
-  const availableEquipment = new Set(stringArray(payload?.equipment).map((item) => item.toLowerCase()))
-  const generatedExercises = Array.isArray(value?.exercises)
-    ? value.exercises.filter((exercise: any) => {
-      const required = String(exercise?.equipment ?? 'None').trim().toLowerCase()
-      const exerciseText = `${exercise?.name ?? ''} ${exercise?.instruction ?? ''}`.toLowerCase()
-      const inferredRequirement = [
-        ['exercise mat', /exercise mat/], ['foam roller', /foam roll/], ['stretching strap', /stretching strap|yoga strap/],
-        ['yoga blocks', /yoga block/], ['resistance band', /resistance band|long band|banded/], ['mini band', /mini band|loop band/],
-        ['massage ball', /massage ball|lacrosse ball/], ['massage stick', /massage stick/], ['towel', /\btowel\b/],
-        ['chair or bench', /\bchair\b|\bbench\b/], ['stability ball', /stability ball|swiss ball/],
-        ['stationary bike', /stationary bike|cycling/], ['pool', /pool|swim|aquatic/], ['compression equipment', /compression boot|compression sleeve/],
-      ].find(([, pattern]) => (pattern as RegExp).test(exerciseText))?.[0]
-      if (inferredRequirement && !availableEquipment.has(inferredRequirement as string)) return false
-      return !required || required === 'none' || required === 'bodyweight' || availableEquipment.has(required)
-    }).slice(0, 32).flatMap((exercise: any) => expandRecoveryExerciseSides(normalizeRecoveryExercise(exercise)))
+  const suppliedIds = Array.isArray(payload?.recoveryCatalog)
+    ? payload.recoveryCatalog.map((item: any) => String(item?.id ?? '')).filter(Boolean)
     : []
-  const exercises = avoidRepeatedRoutineOpening(generatedExercises, payload?.recentRoutineSequences, payload?.variationKey)
+  const approvedRecoveryExerciseIds = suppliedIds.length ? new Set(suppliedIds) : fallbackApprovedRecoveryExerciseIds
+  const generatedExercises = Array.isArray(value?.exercises)
+    ? [...new Set(value.exercises
+      .map((exercise: any) => String(exercise?.id ?? ''))
+      .filter((id: string) => approvedRecoveryExerciseIds.has(id)))]
+      .slice(0, approvedRecoveryExerciseIds.size)
+      .map((id) => ({ id }))
+    : []
 
   const hasCurrentPain = Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
   return {
     durationMinutes: getRequestedRoutineMinutes(payload?.timeAvailable) ?? Math.max(5, Math.min(30, Math.round(Number(value?.durationMinutes) || 10))),
-    exercises,
+    exercises: generatedExercises,
     goal: stringOrFallback(value?.goal, getRoutineGoal(payload?.planType)),
     painAware: hasCurrentPain && Boolean(value?.painAware),
     summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
@@ -823,6 +836,7 @@ function normalizeRoutine(value: any, payload?: any) {
   }
 }
 
+/* oxlint-disable no-unused-vars -- retained temporarily to decode older saved routine payloads during rollout */
 function normalizeRecoveryExercise(exercise: any) {
   const name = stringOrFallback(exercise?.name, 'Gentle mobility')
   const type = stringOrFallback(exercise?.type, 'Mobility')
@@ -845,6 +859,7 @@ function normalizeRecoveryExercise(exercise: any) {
     .join(' ')
 
   return {
+    id: String(exercise?.id ?? ''),
     area: stringOrFallback(exercise?.area, 'Comfortable range'),
     avoid: stringOrFallback(exercise?.avoid, 'Stop for sharp or worsening pain, numbness, instability, or changed movement.'),
     durationSeconds: isHold
@@ -929,6 +944,7 @@ function avoidRepeatedRoutineOpening(exercises: any[], recentSequences: unknown,
 function getExerciseFamilyName(value: unknown) {
   return String(value ?? '').replace(/\s*-\s*(left|right)$/i, '').trim().toLowerCase()
 }
+/* oxlint-enable no-unused-vars */
 
 function getRoutineTitle(planType: unknown) {
   const titles: Record<string, string> = {
@@ -937,6 +953,8 @@ function getRoutineTitle(planType: unknown) {
     quick: 'Quick recovery reset',
     competition: 'Competition recovery',
     'recovery-day': 'Recovery day routine',
+    'pre-event': 'Pre-event mobility',
+    session: 'Session recovery',
   }
   return titles[String(planType ?? '')] ?? 'Post-session recovery'
 }

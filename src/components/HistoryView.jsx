@@ -31,13 +31,15 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey(weekStartsOn)]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const [timeWindow, setTimeWindow] = useState('28')
+  const [recordFilter, setRecordFilter] = useState('all')
   const [customRange, setCustomRange] = useState({ start: '', end: '' })
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
   const filteredHistory = filterByWindow(history, timeWindow, customRange)
   const filteredCheckouts = filterByWindow(checkouts, timeWindow, customRange)
   const filteredRecovery = filterByWindow(recoveryCompletions, timeWindow, customRange)
-  const archive = getHistoryArchive(filteredHistory, filteredCheckouts, filteredRecovery, weekStartsOn)
+  const archive = getHistoryArchive(recordFilter === 'checkout' || recordFilter === 'recovery' ? [] : filteredHistory, recordFilter === 'check-in' || recordFilter === 'recovery' ? [] : filteredCheckouts, recordFilter === 'check-in' || recordFilter === 'checkout' ? [] : filteredRecovery, weekStartsOn)
   const summary = getWindowSummary(filteredHistory, filteredCheckouts)
+  const analytics = getHistoryAnalytics(filteredHistory, filteredCheckouts, filteredRecovery)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -91,8 +93,8 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
 
   return (
     <div className="history-view" data-tour="history-page">
-      <div className="schedule-header">
-        <div className="page-header-copy"><SectionHeading eyebrow="History" title="Patterns are the product." /><p className="page-header-description">Review readiness, workload, pain, and recovery over time.</p></div>
+      <div className="schedule-header history-page-header">
+        <div className="page-header-copy"><SectionHeading eyebrow="History & insights" title="Learn what changes your day." /><p className="page-header-description">Patterns first. Every original record remains available below.</p></div>
         <div className="history-actions">
           <button
             className="remove-button compact-action"
@@ -112,21 +114,30 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
         {timeWindow === 'custom' && <div className="history-custom-range"><label>From<input type="date" value={customRange.start} onChange={(event) => setCustomRange((current) => ({ ...current, start: event.target.value }))} /></label><label>To<input type="date" value={customRange.end} onChange={(event) => setCustomRange((current) => ({ ...current, end: event.target.value }))} /></label></div>}
       </section>
 
-      <section className="history-question-summary">
-        <div><span>How have I felt?</span><strong>{summary.readiness == null ? 'Building baseline' : `${summary.readiness}/100 readiness`}</strong><small>{summary.checkInCount} comparable check-ins</small></div>
-        <div><span>What have I done?</span><strong>{summary.load} load units</strong><small>{summary.checkoutCount} completed sessions</small></div>
-        <div><span>What is changing?</span><strong>{summary.sorenessChange == null ? 'Not enough data' : `${summary.sorenessChange > 0 ? '+' : ''}${summary.sorenessChange} soreness`}</strong><small>Recent half versus earlier half</small></div>
+      <section className="history-overview" aria-label="Athlete analytics">
+        <div className="history-overview-lead"><span>Current window</span><strong>{summary.readiness == null ? 'Building your baseline' : summary.readiness >= 80 ? 'Responding near your normal' : summary.readiness >= 65 ? 'More recovery demand than usual' : 'A demanding stretch'}</strong><p>{summary.checkInCount} check-ins and {summary.checkoutCount} completed sessions contribute to this view.</p></div>
+        <HistoryMetric label="Readiness" value={summary.readiness == null ? '—' : summary.readiness} unit={summary.readiness == null ? '' : '/100'} detail={analytics.readinessDetail} />
+        <HistoryMetric label="Weekly load" value={analytics.weeklyLoad} unit="units" detail={`${analytics.sessionMinutes} min completed`} />
+        <HistoryMetric label="Recovery" value={analytics.recoveryRate == null ? '—' : `${analytics.recoveryRate}%`} detail={`${filteredRecovery.length} routines recorded`} />
       </section>
 
-      <div className="trend-grid">
+      <div className="history-analytics-grid">
+        <AnalyticsPanel title="Performance" eyebrow="How sessions felt" rows={[['Performance vs normal', analytics.performance], ['Average session RPE', analytics.averageRpe], ['High-intensity sessions', analytics.highIntensity]]} />
+        <AnalyticsPanel title="Recovery" eyebrow="How your body responded" rows={[['Average sleep', analytics.sleep], ['Average fatigue', analytics.fatigue], ['Average soreness', analytics.soreness]]} />
+        <AnalyticsPanel title="Load" eyebrow="What you have done" rows={[['Completed minutes', analytics.sessionMinutes], ['Session-RPE load', summary.load], ['Completed sessions', summary.checkoutCount]]} />
+        <AnalyticsPanel title="Pain & availability" eyebrow="What affected movement" rows={[['Check-ins with pain', analytics.painReports], ['Recurring areas', analytics.painAreas], ['Current direction', analytics.painDirection]]} />
+      </div>
+
+      <section className="history-insights-section"><div className="history-section-heading"><div><span>Insights</span><h2>Patterns worth watching</h2></div><p>Associations only—not proof that one factor caused another.</p></div><div className="trend-grid">
         {insights.map((insight) => (
           <article className="insight-card" key={insight.id ?? insight}>
             {typeof insight === 'string' ? insight : <><strong>{insight.title}</strong><p>{insight.summary}</p><small>{insight.window} · {insight.sampleSize} records · {Math.round(insight.confidence * 100)}% confidence</small></>}
           </article>
         ))}
         {insights.length === 0 && <article className="insight-card muted"><strong>No reliable pattern yet</strong><p>Insights appear only when enough comparable records support something worth watching.</p></article>}
-      </div>
+      </div></section>
 
+      <section className="history-records-section"><div className="history-section-heading records-heading"><div><span>Records</span><h2>Your Athlete Reload archive</h2></div><div className="record-filters" role="group" aria-label="Record type">{[['all','All'],['check-in','Check-ins'],['checkout','Checkouts'],['recovery','Recovery']].map(([value,label]) => <button aria-pressed={recordFilter === value} key={value} onClick={() => setRecordFilter(value)} type="button">{label}</button>)}</div></div>
       <div className="history-list">
         {archive.length === 0 ? (
           <article className="history-row empty-history">
@@ -175,6 +186,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
           ))
         )}
       </div>
+      </section>
 
       {selectedEntry && createPortal(
         <HistoryModal
@@ -218,6 +230,42 @@ function filterByWindow(entries, windowValue, customRange) {
     const parsed = new Date(String(value).includes('T') ? value : `${value}T12:00:00`)
     return !Number.isNaN(parsed.getTime()) && (!cutoff || parsed >= cutoff) && parsed <= end
   })
+}
+
+function HistoryMetric({ detail, label, unit = '', value }) {
+  return <div className="history-overview-metric"><span>{label}</span><strong>{value}<small>{unit}</small></strong><p>{detail}</p></div>
+}
+
+function AnalyticsPanel({ eyebrow, rows, title }) {
+  return <article className="history-analytics-panel"><header><span>{eyebrow}</span><h3>{title}</h3></header><div>{rows.map(([label, value]) => <p key={label}><span>{label}</span><strong>{value ?? 'Not enough data'}</strong></p>)}</div></article>
+}
+
+function getHistoryAnalytics(history, checkouts, recovery) {
+  const finite = (items) => items.map(Number).filter(Number.isFinite)
+  const averageDisplay = (items, suffix = '') => items.length ? `${average(items)}${suffix}` : 'Not enough data'
+  const performanceValues = checkouts.map((entry) => entry.performanceRating).filter(Boolean)
+  const favorable = performanceValues.filter((value) => ['Better', 'Much better', 'Normal', 'A little better'].includes(value)).length
+  const painEntries = history.filter((entry) => Number(entry.pain) > 0 || Object.values(entry.painMap ?? {}).some((value) => Number(value) > 0))
+  const painAreas = new Set(painEntries.flatMap((entry) => Object.entries(entry.painMap ?? {}).filter(([, value]) => Number(value) > 0).map(([key]) => key)))
+  const sessionMinutes = checkouts.reduce((sum, entry) => sum + Number(entry.actualMinutes ?? 0), 0)
+  const completedRecovery = recovery.filter((entry) => entry.entry?.completedAt || entry.completedAt)
+  const firstHalfPain = painEntries.slice(Math.floor(painEntries.length / 2)).length
+  const recentPain = painEntries.slice(0, Math.max(1, Math.floor(painEntries.length / 2))).length
+  return {
+    averageRpe: averageDisplay(finite(checkouts.map((entry) => entry.difficulty)), '/10'),
+    fatigue: averageDisplay(finite(history.map((entry) => entry.fatigue)), '/5'),
+    highIntensity: checkouts.filter((entry) => Number(entry.difficulty) >= 8).length,
+    painAreas: painAreas.size || 'None recorded',
+    painDirection: painEntries.length < 2 ? 'Not enough data' : recentPain < firstHalfPain ? 'Less frequent' : recentPain > firstHalfPain ? 'More frequent' : 'Stable',
+    painReports: painEntries.length,
+    performance: performanceValues.length ? `${favorable} of ${performanceValues.length} normal or better` : 'Not enough data',
+    readinessDetail: history.length >= 4 ? 'Compared across saved check-ins' : 'More check-ins needed for a stable baseline',
+    recoveryRate: recovery.length ? Math.round((completedRecovery.length / recovery.length) * 100) : null,
+    sessionMinutes,
+    sleep: averageDisplay(finite(history.map((entry) => entry.sleep)), 'h'),
+    soreness: averageDisplay(finite(history.map((entry) => entry.soreness)), '/5'),
+    weeklyLoad: Math.round(checkouts.reduce((sum, entry) => sum + (Number(entry.sessionLoad) || Number(entry.actualMinutes ?? 0) * Number(entry.difficulty ?? 0)), 0) / Math.max(1, Math.ceil(28 / 7))),
+  }
 }
 
 function getWindowSummary(history, checkouts) {

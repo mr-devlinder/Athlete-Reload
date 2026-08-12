@@ -348,12 +348,12 @@ function getReasons(checkIn) {
   const pain = getPain(checkIn)
   const reasons = []
 
-  if (checkIn.sleep < 7) reasons.push('low sleep')
-  if (Number(checkIn.energy) <= 2) reasons.push('low energy')
-  if (Number(checkIn.soreness) >= 4) reasons.push('high soreness')
-  if (Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
-  if (Number(checkIn.stress) >= 4) reasons.push('high stress')
-  if (Number(checkIn.illnessSymptoms) >= 3) reasons.push('illness symptoms')
+  if (isKnown(checkIn.sleep) && Number(checkIn.sleep) < 7) reasons.push('low sleep')
+  if (isKnown(checkIn.energy) && Number(checkIn.energy) <= 2) reasons.push('low energy')
+  if (isKnown(checkIn.soreness) && Number(checkIn.soreness) >= 4) reasons.push('high soreness')
+  if (isKnown(checkIn.fatigue) && Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
+  if (isKnown(checkIn.stress) && Number(checkIn.stress) >= 4) reasons.push('high stress')
+  if (isKnown(checkIn.illnessSymptoms) && Number(checkIn.illnessSymptoms) >= 3) reasons.push('illness symptoms')
   if (['Hard', 'Game'].includes(checkIn.yesterdayLoad)) {
     reasons.push(`a ${checkIn.yesterdayLoad.toLowerCase()} session yesterday`)
   }
@@ -561,25 +561,25 @@ function getSummary(checkIn, status, reasons) {
 export function getRecommendation(checkIn) {
   const pain = getPain(checkIn)
   const breakdown = [
-    { label: 'Energy', value: -Math.max(0, 5 - checkIn.energy) * 5 },
-    { label: 'Sleep', value: -Math.max(0, 8 - checkIn.sleep) * 6 },
-    { label: 'Sleep quality', value: -Math.max(0, 5 - Number(checkIn.sleepQuality ?? 5)) * 4 },
-    { label: 'Fatigue', value: -Math.max(0, checkIn.fatigue - 1) * 5 },
-    { label: 'Soreness', value: -Math.max(0, checkIn.soreness - 1) * 5 },
-    { label: 'Leg heaviness', value: -Math.max(0, (checkIn.legHeaviness ?? 1) - 1) * 4 },
+    isKnown(checkIn.energy) ? { label: 'Energy', value: -Math.max(0, 5 - Number(checkIn.energy)) * 5 } : null,
+    isKnown(checkIn.sleep) ? { label: 'Sleep', value: -Math.max(0, 8 - Number(checkIn.sleep)) * 6 } : null,
+    isKnown(checkIn.sleepQuality) ? { label: 'Sleep quality', value: -Math.max(0, 5 - Number(checkIn.sleepQuality)) * 4 } : null,
+    isKnown(checkIn.fatigue) ? { label: 'Fatigue', value: -Math.max(0, Number(checkIn.fatigue) - 1) * 5 } : null,
+    isKnown(checkIn.soreness) ? { label: 'Soreness', value: -Math.max(0, Number(checkIn.soreness) - 1) * 5 } : null,
+    isKnown(checkIn.legHeaviness) ? { label: 'Leg heaviness', value: -Math.max(0, Number(checkIn.legHeaviness) - 1) * 4 } : null,
     { label: 'Pain level', value: -pain * 8 },
     { label: 'Injury type', value: -getInjuryTypeRisk(checkIn, pain) },
     { label: 'Pain type', value: -getPainTypeRisk(checkIn, pain) },
     { label: 'Trigger', value: -getMovementRisk(checkIn, pain) },
     { label: 'Scheduled session', value: -getSessionRisk(checkIn, pain) },
-    {
+    isKnown(checkIn.stress) ? {
       label: 'Stress',
-      value: -Math.max(0, Number(checkIn.stress ?? 0)) * 2.4,
-    },
-    {
+      value: -Math.max(0, Number(checkIn.stress)) * 2.4,
+    } : null,
+    isKnown(checkIn.illnessSymptoms) ? {
       label: 'Illness',
-      value: -Math.max(0, Number(checkIn.illnessSymptoms ?? 0)) * 4,
-    },
+      value: -Math.max(0, Number(checkIn.illnessSymptoms)) * 4,
+    } : null,
     {
       label: 'Yesterday',
       value: -riskFromChoice(checkIn.yesterdayLoad, {
@@ -594,7 +594,7 @@ export function getRecommendation(checkIn) {
       label: 'Hydration',
       value: -riskFromChoice(checkIn.hydration, { Good: 0, Okay: 4, Poor: 10 }),
     },
-  ].filter((item) => item.value !== 0)
+  ].filter((item) => item && item.value !== 0)
   const adjustment = breakdown.reduce((total, item) => total + item.value, 0)
   const rawScore = Math.max(6, Math.min(98, 100 + adjustment))
   const redFlag = hasRedFlag(checkIn)
@@ -640,6 +640,10 @@ export function getRecommendation(checkIn) {
       .filter((key) => checkIn[key] !== undefined && checkIn[key] !== null && checkIn[key] !== '').length,
     baselineSampleSize: Number(checkIn.baselineSampleSize ?? 0),
   })
+}
+
+function isKnown(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
 }
 
 export function getTrendInsights(history) {

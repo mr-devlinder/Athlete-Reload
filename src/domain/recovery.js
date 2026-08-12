@@ -4,16 +4,21 @@ function text(value, fallback) {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback
 }
 
+function textList(value, fallback) {
+  if (Array.isArray(value)) return value.filter(Boolean).join(' ')
+  return text(value, fallback)
+}
+
 export function normalizeRecoveryExercise(exercise = {}) {
   const name = text(exercise.name, 'Gentle mobility')
   const type = text(exercise.type, 'Mobility')
-  const isTimed = Number(exercise.durationSeconds) > 0 || /stretch|hold|flexibility/i.test(`${name} ${type}`)
-  const setup = text(exercise.setup, `Choose a stable position where you can perform ${name.toLowerCase()} without losing balance.`)
+  const isTimed = exercise.doseModel === 'timer' || exercise.dose?.model === 'timer' || Number(exercise.durationSeconds) > 0
+  const setup = textList(exercise.setup, `Choose a stable position where you can perform ${name.toLowerCase()} without losing balance.`)
   const movement = text(exercise.movement, text(exercise.instruction, 'Move slowly through a comfortable range while keeping the rest of your body controlled.'))
   const completionCue = text(exercise.completionCue, isTimed ? 'Ease out under control when the timer ends.' : 'Return to the starting position under control to complete one repetition.')
   const side = text(exercise.side, 'Both sides')
   const purpose = text(exercise.purpose ?? exercise.why, 'Support comfortable movement for the selected recovery goal.')
-  const stopConditions = text(exercise.stopConditions ?? exercise.avoid, 'Stop for sharp or worsening pain, numbness, instability, dizziness, or changed movement.')
+  const stopConditions = textList(exercise.stopConditions ?? exercise.avoid, 'Stop for sharp or worsening pain, numbness, instability, dizziness, or changed movement.')
 
   return {
     ...exercise,
@@ -27,10 +32,11 @@ export function normalizeRecoveryExercise(exercise = {}) {
     why: purpose,
     stopConditions,
     avoid: stopConditions,
-    equipment: text(exercise.equipment, 'None'),
+    equipment: Array.isArray(exercise.equipment) ? (exercise.equipment.join(', ') || 'None') : text(exercise.equipment, 'None'),
     feel: text(exercise.feel, isTimed ? 'Mild, comfortable tension in the named area.' : 'Smooth, controlled movement without pinching.'),
-    durationSeconds: isTimed ? Math.max(15, Math.min(90, Number(exercise.durationSeconds) || 30)) : 0,
-    reps: isTimed ? 0 : Math.max(1, Math.min(20, Number(exercise.reps) || 6)),
+    doseModel: isTimed ? 'timer' : 'reps',
+    durationSeconds: isTimed ? Math.max(15, Math.min(90, Number(exercise.durationSeconds ?? exercise.dose?.durationSeconds) || 30)) : 0,
+    reps: isTimed ? 0 : Math.max(1, Math.min(20, Number(exercise.reps ?? exercise.dose?.reps) || 6)),
     restSeconds: Math.max(0, Math.min(120, Number(exercise.restSeconds) || 0)),
     sets: Math.max(1, Math.min(4, Number(exercise.sets) || 1)),
     instruction: `${setup} ${movement} ${completionCue}`,

@@ -36,7 +36,7 @@ begin
       coalesce(p_check_in->'pain_details', '{}'::jsonb), coalesce(p_check_in->'pain_map', '{}'::jsonb),
       p_check_in->>'pain_trend', p_check_in->>'pain_location', p_check_in->>'pain_type',
       p_check_in->>'planned_intensity', p_check_in->'recommendation_json', coalesce(p_check_in->'recovery_actions', '[]'::jsonb),
-      nullif(p_check_in->>'schedule_event_id', '')::uuid, (p_check_in->>'score')::integer,
+      nullif(p_check_in->>'schedule_event_id', '')::uuid, round((p_check_in->>'score')::numeric)::integer,
       p_check_in->>'session_title', p_check_in->>'session_type', (p_check_in->>'sleep')::numeric,
       (p_check_in->>'sleep_quality')::integer, (p_check_in->>'soreness')::integer, p_check_in->>'stress',
       p_check_in->>'yesterday_load', (p_check_in->>'expected_difficulty')::integer
@@ -53,7 +53,7 @@ begin
       pain_trend=p_check_in->>'pain_trend', pain_location=p_check_in->>'pain_location', pain_type=p_check_in->>'pain_type',
       planned_intensity=p_check_in->>'planned_intensity', recommendation_json=p_check_in->'recommendation_json',
       recovery_actions=coalesce(p_check_in->'recovery_actions','[]'::jsonb), schedule_event_id=nullif(p_check_in->>'schedule_event_id','')::uuid,
-      score=(p_check_in->>'score')::integer, session_title=p_check_in->>'session_title', session_type=p_check_in->>'session_type',
+      score=round((p_check_in->>'score')::numeric)::integer, session_title=p_check_in->>'session_title', session_type=p_check_in->>'session_type',
       sleep=(p_check_in->>'sleep')::numeric, sleep_quality=(p_check_in->>'sleep_quality')::integer,
       soreness=(p_check_in->>'soreness')::integer, stress=p_check_in->>'stress', yesterday_load=p_check_in->>'yesterday_load',
       expected_difficulty=(p_check_in->>'expected_difficulty')::integer
@@ -132,7 +132,7 @@ begin
 end;
 $$;
 
-revoke all on function public.save_checkin_with_pain_reports(jsonb,jsonb,uuid) from public;
-revoke all on function public.save_checkout_with_pain_reports(jsonb,jsonb,uuid) from public;
+revoke all on function public.save_checkin_with_pain_reports(jsonb,jsonb,uuid) from public, anon;
+revoke all on function public.save_checkout_with_pain_reports(jsonb,jsonb,uuid) from public, anon;
 grant execute on function public.save_checkin_with_pain_reports(jsonb,jsonb,uuid) to authenticated;
 grant execute on function public.save_checkout_with_pain_reports(jsonb,jsonb,uuid) to authenticated;

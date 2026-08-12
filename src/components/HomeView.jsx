@@ -1,9 +1,9 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
 import { useState } from 'react'
+import { m } from 'motion/react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import '../styles/home-rework.css'
 import { bodyPainAreas } from '../data/bodyPainMap'
-import { getPerformanceQuote } from '../data/performanceQuotes'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { SectionHeading } from './SectionHeading'
 import { PainShareModal } from './PainShareModal'
@@ -34,8 +34,6 @@ export function HomeView({
   const todayPlan = getTodayPlan(schedule, history, checkouts, now)
   const recovery = getRecoverySummary(recentHistory, previousHistory)
   const workload = getWorkloadSummary(schedule, checkouts)
-  const painTimelines = getPainTimelines(history, painReports)
-  const athleteQuote = getPerformanceQuote('home', now)
   const weeklySignals = getWeeklySignals(history)
   const todayCheckIn = history.find((entry) => entry.date === format(now, 'yyyy-MM-dd') && entry.checkInType !== 'post_event')
   const dailyRecommendation = todayCheckIn?.recommendation ?? (checkInReminder ? recommendation : null)
@@ -47,12 +45,11 @@ export function HomeView({
     <div className="home-view" data-tour="home-page">
       <section className="home-hero" data-tour="home-intro">
         <SectionHeading
-          eyebrow="Athlete Reload"
-          title="Training dashboard."
+          eyebrow="Today"
+          title="Your status and next action."
         />
         <p className="page-header-description">
-          A live view of readiness, workload, pain patterns, and today&apos;s
-          event flow from your saved check-ins and checkouts.
+          What matters now, why it matters, and what is coming next.
         </p>
       </section>
 
@@ -100,25 +97,21 @@ export function HomeView({
         )}
       </div>
 
-      <section className="dashboard-summary">
-        <DashboardMetric
-          label="7-day readiness"
-          value={recovery.readinessAverage}
-          detail={formatChange(recovery.readinessChange, 'vs previous 7')}
-          tone={getReadinessTone(recovery.readinessAverage)}
-        />
-        <DashboardMetric
-          label="Average sleep"
-          value={`${recovery.sleepAverage}h`}
-        />
-        <DashboardMetric
-          label="Next event"
-          value={nextEvent ? getEventCountdown(nextEvent, now) : 'Open'}
-          detail={nextEvent ? getEventName(nextEvent) : 'Nothing scheduled'}
-        />
-      </section>
+      <m.section className="home-performance-stage" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .5, ease: [0.22, 1, 0.36, 1] }}>
+        <article className="readiness-visual">
+          <div className={`readiness-orbit ${getReadinessTone(recovery.readinessAverage)}`} style={{ '--readiness-value': `${Math.max(0, Math.min(100, Number(recovery.readinessAverage) || 0)) * 3.6}deg` }}><span><strong>{recovery.readinessAverage}</strong><small>readiness</small></span></div>
+          <div><span className="visual-kicker">Performance pulse</span><h2>{getReadinessHeadline(recovery.readinessAverage)}</h2><p>{formatChange(recovery.readinessChange, 'compared with your previous week')}</p></div>
+        </article>
+        <article className="day-load-visual">
+          <header><span className="visual-kicker">Today&apos;s demand</span><strong>{todayPlan.length} event{todayPlan.length === 1 ? '' : 's'}</strong></header>
+          <div className="load-bars">{todayPlan.length ? todayPlan.slice(0, 4).map((event, index) => <span key={event.id} style={{ '--bar-height': `${Math.max(24, Math.min(100, Number(event.expectedDuration ?? event.plannedMinutes ?? 45)))}%`, '--bar-delay': `${index * 90}ms` }}><i /><small>{formatTimeLabel(event.time) || 'All day'}</small></span>) : <p>Your day is open—schedule training to preview demand.</p>}</div>
+        </article>
+        <article className="next-moment-visual">
+          <span className="visual-kicker">Next moment</span><strong>{nextEvent ? getEventCountdown(nextEvent, now) : 'Open'}</strong><h3>{nextEvent ? getEventName(nextEvent) : 'No event queued'}</h3><p>{nextEvent ? `${format(parseISO(nextEvent.date), 'EEE, MMM d')}${nextEvent.time ? ` · ${formatTimeLabel(nextEvent.time)}` : ''}` : 'Use the space for recovery or planning.'}</p>
+        </article>
+      </m.section>
 
-      <section className="home-dashboard-grid">
+      <section className="home-focus-grid">
         <article className="home-panel today-flow-panel">
           <div className="panel-heading">
             <span>Today</span>
@@ -160,38 +153,23 @@ export function HomeView({
           </div>
         </article>
 
-        <article className="home-panel next-event-panel">
-          <div className="panel-heading">
-            <span>Next event</span>
-            <strong>{nextEvent ? format(parseISO(nextEvent.date), 'EEE, MMM d') : 'Open'}</strong>
+        <aside className="home-panel home-signal-panel">
+          <div className="panel-heading"><span>Current signals</span><strong>7 days</strong></div>
+          <div className="home-signal-list">
+            <DashboardMetric label="Readiness" value={recovery.readinessAverage} detail={formatChange(recovery.readinessChange, 'vs prior week')} tone={getReadinessTone(recovery.readinessAverage)} />
+            <DashboardMetric label="Average sleep" value={`${recovery.sleepAverage}h`} detail="nightly average" />
+            <DashboardMetric label="Training time" value={`${workload.thisWeekMinutes} min`} detail={workload.weekCount ? `${workload.averageWeeklyMinutes} min weekly average` : 'building your baseline'} />
+            <DashboardMetric label="Next event" value={nextEvent ? getEventCountdown(nextEvent, now) : 'Open'} detail={nextEvent ? getEventName(nextEvent) : 'nothing scheduled'} />
           </div>
-          {nextEvent ? (
-            <>
-              <h3>{getEventName(nextEvent)}</h3>
-              <p>
-                {nextEvent.association || 'Personal'} {nextEvent.time ? `at ${formatTimeLabel(nextEvent.time)}` : ''}
-              </p>
-              <div className="event-meta-grid">
-                <span><strong>Type</strong>{nextEvent.type}</span>
-                <span><strong>Planned load</strong>{nextEvent.load}</span>
-              </div>
-            </>
-          ) : (
-            <>
-              <h3>No future training scheduled.</h3>
-              <p>Add an event on the schedule to connect check-ins, checkouts, and workload.</p>
-            </>
-          )}
-        </article>
-        <article className="home-panel weekly-signals-panel">
+        </aside>
+      </section>
+
+      {weeklySignals.length >= 4 && <section className="home-panel weekly-signals-panel">
           <div className="panel-heading">
             <span>Weekly signals</span>
             <strong>Last 7 days</strong>
           </div>
           <h3>Readiness, sleep, fatigue, and soreness</h3>
-          {weeklySignals.length < 4 ? (
-            <p>Keep checking in. This view begins after four entries so a single day never looks like a trend.</p>
-          ) : (
             <ResponsiveContainer height={180} width="100%">
               <AreaChart accessibilityLayer={false} data={weeklySignals} margin={{ bottom: 2, left: -20, right: 6, top: 8 }}>
                 <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.12)" strokeDasharray="3 5" vertical={false} />
@@ -204,56 +182,10 @@ export function HomeView({
                 <Area animationDuration={860} dataKey="soreness" fill="transparent" stroke="#ff6f61" strokeDasharray="2 4" strokeWidth={2} type="monotone" />
               </AreaChart>
             </ResponsiveContainer>
-          )}
           <div className="signal-legend"><span className="readiness">Readiness</span><span className="sleep">Sleep</span><span className="fatigue">Fatigue</span><span className="soreness">Soreness</span></div>
-        </article>
-        <article className="home-panel">
-          <div className="panel-heading">
-            <span>Workload</span>
-          </div>
-          <h3>Weekly minutes</h3>
-          <p>
-            This uses the minutes you log in checkouts. Once you
-            have more weeks saved, the average becomes more useful.
-          </p>
-          <div className="weekly-minutes-card">
-            <strong>{workload.averageWeeklyMinutes}</strong>
-            <span>average minutes per week</span>
-          </div>
-          <div className="workload-list compact-workload-list">
-            <span>
-              <strong>This week</strong>
-              <em>{workload.thisWeekMinutes} min logged</em>
-            </span>
-            <span>
-              <strong>Logged weeks</strong>
-              <em>{workload.weekCount || 'None yet'}</em>
-            </span>
-          </div>
-        </article>
+        </section>}
 
-        <PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} />
-        <article className="home-panel">
-          <div className="panel-heading">
-            <span>Pain timeline</span>
-          </div>
-          <h3>Pain by body area</h3>
-          <div className="pain-timeline-list">
-            {painTimelines.length === 0 ? (
-              <p>Report the same pain area on two different days to see its timeline here.</p>
-            ) : (
-              painTimelines.map((timeline) => <PainTimelineChart key={timeline.label} timeline={timeline} />)
-            )}
-          </div>
-        </article>
-
-        <article className="home-panel home-quote-panel">
-          <div className="panel-heading">
-            <span>Daily encouragement</span>
-          </div>
-          <h3>&ldquo;{athleteQuote}&rdquo;</h3>
-        </article>
-      </section>
+      {painReports.length > 0 && <section className="home-attention"><PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} /></section>}
     </div>
   )
 }
@@ -276,6 +208,12 @@ function getWeeklySignals(history) {
       sleep: Math.min(100, (Number(entry.sleep ?? 0) / 10) * 100),
       soreness: Number(entry.soreness ?? 0) * 20,
     }))
+}
+
+function getReadinessHeadline(value) {
+  if (Number(value) >= 80) return 'Ready to express your work.'
+  if (Number(value) >= 60) return 'Build into the day.'
+  return 'Protect the quality of today.'
 }
 
 function PainIssuesCard({ issues, painReports, onSaveIssue, onShareIssue }) {
@@ -412,7 +350,7 @@ function DashboardMetric({ detail, label, tone = 'neutral', value }) {
   )
 }
 
-function PainTimelineChart({ timeline }) {
+function _PainTimelineChart({ timeline }) {
   const gradientId = `pain-fill-${timeline.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
   return (
@@ -665,7 +603,7 @@ function getRecentPainEntries(history, painReports) {
     .sort((first, second) => new Date(`${second.date}T12:00:00`) - new Date(`${first.date}T12:00:00`))
 }
 
-function getPainTimelines(history, painReports) {
+function _getPainTimelines(history, painReports) {
   const byArea = new Map()
 
   getRecentPainEntries(history, painReports).forEach((entry) => {

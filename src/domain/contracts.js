@@ -53,19 +53,52 @@ export function createStructuredRecommendation(recommendation = {}, context = {}
 
 export function mergeAiExplanation(deterministic, ai = {}) {
   if (!deterministic) return deterministic
-  return {
+  const safetyLocked = deterministic.redFlag
+    || ['limit', 'stop_and_seek_help'].includes(deterministic.status)
+    || deterministic.label === 'Stop and Check In'
+  const deterministicScore = Math.round(Number(deterministic.score) || 0)
+  const proposedScore = Number(ai.score)
+  const score = safetyLocked || !Number.isFinite(proposedScore)
+    ? deterministicScore
+    : Math.max(0, Math.min(100, Math.round(Math.max(deterministicScore - 12, Math.min(deterministicScore + 12, proposedScore)))))
+  const aiPlan = !safetyLocked && Array.isArray(ai.reportSections) && ai.reportSections.length > 0
+  const aiFocus = !safetyLocked && Array.isArray(ai.focus) ? ai.focus.filter(Boolean) : []
+  const aiAvoid = !safetyLocked && Array.isArray(ai.avoid) ? ai.avoid.filter(Boolean) : []
+  const warnings = [...(deterministic.warnings ?? [])]
+  for (const warning of aiAvoid) {
+    const message = typeof warning === 'string' ? warning : warning?.message
+    if (message && !warnings.some((item) => (typeof item === 'string' ? item : item?.message) === message)) {
+      warnings.push({ id: `ai-warning-${warnings.length + 1}`, message })
+    }
+  }
+
+  return createStructuredRecommendation({
     ...deterministic,
+    ...(safetyLocked ? {} : {
+      action: typeof ai.action === 'string' && ai.action.trim() ? ai.action.trim() : deterministic.action,
+      avoid: aiAvoid.length ? aiAvoid : deterministic.avoid,
+      breakdown: Array.isArray(ai.breakdown) && ai.breakdown.length ? ai.breakdown : deterministic.breakdown,
+      contextFactors: Array.isArray(ai.contextFactors) && ai.contextFactors.length ? ai.contextFactors : deterministic.contextFactors,
+      focus: aiFocus.length ? aiFocus : deterministic.focus,
+      intensity: typeof ai.intensity === 'string' && ai.intensity.trim() ? ai.intensity.trim() : deterministic.intensity,
+      label: typeof ai.label === 'string' && ai.label.trim() ? ai.label.trim() : deterministic.label,
+      reasons: Array.isArray(ai.reasons) && ai.reasons.length ? ai.reasons : deterministic.reasons,
+      reportSections: aiPlan ? ai.reportSections : deterministic.reportSections,
+      tone: ['danger', 'warning', 'caution', 'ready'].includes(ai.tone) ? ai.tone : deterministic.tone,
+    }),
     summary: typeof ai.summary === 'string' && ai.summary.trim() ? ai.summary.trim() : deterministic.summary,
     explanation: typeof ai.explanation === 'string' ? ai.explanation.trim() : '',
-    // Safety, status, score, confidence, actions, and warnings always remain deterministic.
-    status: deterministic.status,
-    score: deterministic.score,
+    engineVersion: ai._source ? `${deterministic.engineVersion}+${ai._source}` : deterministic.engineVersion,
+    score,
+    status: safetyLocked ? deterministic.status : getRecommendationStatus({ label: ai.label, score }),
     confidence: deterministic.confidence,
-    primaryAction: deterministic.primaryAction,
-    actions: deterministic.actions,
-    warnings: deterministic.warnings,
+    primaryAction: safetyLocked
+      ? deterministic.primaryAction
+      : { instruction: typeof ai.action === 'string' && ai.action.trim() ? ai.action.trim() : deterministic.primaryAction?.instruction, timing: 'now' },
+    actions: safetyLocked || !aiFocus.length ? deterministic.actions : aiFocus,
+    warnings,
     adjustments: deterministic.adjustments,
-  }
+  })
 }
 
 export function createQuickDeterministicRecommendation(transcript = '') {

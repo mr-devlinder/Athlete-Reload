@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
+import { m } from 'motion/react'
 import { AppIcon } from './AppIcon'
 import { normalizeRecoveryExercise } from '../domain/recovery'
+import { buildVettedRoutine, getVettedSubstitute } from '../domain/recovery/routineBuilder'
 import '../styles/recovery-rework.css'
 
 const equipmentOptions = [
@@ -11,40 +13,16 @@ const equipmentOptions = [
   'Pool', 'Compression equipment',
 ]
 const planTypeOptions = [
-  { id: 'last-checkout', label: 'Based on Last Checkout', description: 'Respond to the session you just completed.' },
-  { id: 'full-body', label: 'Full Body Recovery', description: 'Balanced mobility and recovery across major areas.' },
-  { id: 'flexibility', label: 'Flexibility Improving', description: 'Comfortable, progressive range-of-motion work.' },
-  { id: 'targeted', label: 'Targeted Recovery', description: 'Prioritize the body areas you select.' },
-  { id: 'quick', label: 'Quick Recovery', description: 'A focused 5-10 minute reset.' },
-  { id: 'competition', label: 'Competition Recovery', description: 'Prioritize turnaround before competition.' },
-  { id: 'recovery-day', label: 'Recovery Day', description: 'A complete low-load recovery-day plan.' },
-  { id: 'mobility', label: 'Mobility Only', description: 'Movement-focused guidance without extra conditioning.' },
+  { id: 'session', label: 'Session recovery', description: 'Respond to your latest workout, practice, and checkout.' },
+  { id: 'competition', label: 'Competition recovery', description: 'Prioritize recovery after a match, race, meet, or game.' },
+  { id: 'quick', label: 'Quick reset', description: 'A focused 5–10 minute reset when time is limited.' },
+  { id: 'full-body', label: 'Full body mobility', description: 'Comfortable movement across the major body areas.' },
+  { id: 'flexibility', label: 'Flexibility', description: 'Comfortable, unforced range-of-motion work.' },
+  { id: 'targeted', label: 'Targeted area', description: 'Prioritize selected areas without treating pain.' },
+  { id: 'recovery-day', label: 'Recovery day', description: 'Longer low-load movement, mobility, and downshift work.' },
+  { id: 'pre-event', label: 'Pre-event mobility', description: 'Gentle dynamic movement appropriate before what comes next.' },
 ]
 const targetAreaOptions = ['Shoulders / arms', 'Back / trunk', 'Hips', 'Quads / hamstrings', 'Knees', 'Calves / ankles / feet']
-
-const fallbackRoutine = [
-  { area: 'Spine', reps: 8, instruction: 'Start on hands and knees with hands under shoulders and knees under hips. Exhale as you round your back toward the ceiling, then inhale as you gently lower your chest and tailbone without forcing your neck. Returning to a neutral, level back completes one repetition.', name: 'Cat-cow', side: 'Both sides', type: 'Mobility' },
-  { area: 'Upper back', reps: 8, instruction: 'Lie on one side with hips and knees bent, arms straight in front, and palms together. Keep both knees stacked while you sweep the top arm across your chest and rotate your upper back until the shoulder approaches the floor. Bring the hand back to the starting palm to complete one repetition, then finish the set before changing sides.', name: 'Open-book thoracic rotation', side: 'Each side', type: 'Mobility' },
-  { area: 'Shoulders', reps: 10, instruction: 'Stand tall with ribs over hips and arms relaxed. Lift both shoulders toward your ears, circle them back and down, and keep your neck still. Reaching the relaxed starting position completes one circle; reverse direction after half the repetitions.', name: 'Shoulder circles', side: 'Both sides', type: 'Mobility' },
-  { area: 'Chest', durationSeconds: 30, instruction: 'Stand beside a doorway and place one forearm on the frame with the elbow slightly below shoulder height. Keep your shoulder down and turn your chest away until you feel a mild stretch across the chest, without twisting your low back. Step out when time ends, then repeat with the opposite arm.', name: 'Doorway chest stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Hips', reps: 10, instruction: 'Sit with both knees bent, feet wider than hip width, and hands behind you for support. Keep both sitting bones grounded as you lower both knees together toward one side, return through center, and lower them toward the other side. Returning to center after both directions completes one repetition.', name: '90/90 hip switches', side: 'Both sides', type: 'Mobility' },
-  { area: 'Adductors', reps: 8, instruction: 'Start on hands and knees, extend one leg straight to the side, and keep that foot flat with toes forward. Keep your back level as you send your hips toward the bent-leg heel until the inner thigh gently stretches, then move forward to the start. Returning over your hands completes one repetition; finish the set before switching legs.', name: 'Adductor rock-back', side: 'Each side', type: 'Mobility' },
-  { area: 'Hip flexors', durationSeconds: 30, instruction: 'Kneel on one knee with the other foot flat in front, using padding or a wall for balance. Tuck your pelvis slightly and shift your whole body forward while keeping ribs stacked over hips and the low back neutral. Ease back when time ends, then change the kneeling leg.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Hamstrings', durationSeconds: 30, instruction: 'Lie on your back with one knee bent and foot on the floor. Lift the other leg, hold behind the thigh, and slowly straighten that knee until the back of the thigh feels a mild stretch while your hips stay level. Bend the knee to release when time ends, then switch legs.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Stretch' },
-  { area: 'Calves', durationSeconds: 30, instruction: 'Face a wall with both hands supported, one foot forward, and the other foot behind you pointing straight ahead. Keep the back knee straight and heel planted as you shift your body toward the wall until the back calf gently stretches. Step forward to release when time ends, then switch legs.', name: 'Standing calf stretch', side: 'Each side', type: 'Stretch' },
-]
-
-const fallbackRoutines = {
-  flexibility: [
-    { area: 'Hamstrings', durationSeconds: 40, instruction: 'Lie on your back with one knee bent and foot on the floor. Lift the other leg, hold behind the thigh, and slowly straighten that knee until the back of the thigh feels a mild stretch while your hips stay level. Bend the knee to release when time ends, then switch legs.', name: 'Supine hamstring stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Hip flexors', durationSeconds: 40, instruction: 'Kneel on one knee with the other foot flat in front, using padding or a wall for balance. Tuck your pelvis slightly and shift your whole body forward while keeping ribs stacked and your low back neutral. Ease back when time ends, then change the kneeling leg.', name: 'Half-kneeling hip-flexor stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Adductors', durationSeconds: 40, instruction: 'Sit tall with the soles of your feet together and let your knees fall outward. Hold your ankles, keep your back long, and hinge forward from the hips until both inner thighs gently stretch; do not press down on your knees. Return upright when time ends.', name: 'Seated adductor stretch', side: 'Both sides', type: 'Flexibility' },
-    { area: 'Glutes', durationSeconds: 40, instruction: 'Lie on your back with both knees bent and cross one ankle over the opposite thigh above the knee. Keep your head and hips down as you draw the supporting thigh toward your chest until the crossed-side glute gently stretches. Lower the legs to release when time ends, then switch sides.', name: 'Figure-four stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Calves', durationSeconds: 40, instruction: 'Face a wall with both hands supported, one foot forward, and the other foot behind you pointing straight ahead. Keep the back knee straight and heel planted as you shift toward the wall until the back calf gently stretches. Step forward to release when time ends, then switch legs.', name: 'Standing calf stretch', side: 'Each side', type: 'Flexibility' },
-    { area: 'Chest', durationSeconds: 35, instruction: 'Stand beside a doorway and place one forearm on the frame with the elbow slightly below shoulder height. Keep your shoulder down and turn your chest away until you feel a mild chest stretch without twisting your low back. Step out when time ends, then repeat with the opposite arm.', name: 'Doorway chest stretch', side: 'Each side', type: 'Flexibility' },
-  ],
-  mobility: fallbackRoutine.filter((exercise) => exercise.type === 'Mobility'),
-}
 
 export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, recentCompletion, savedRoutines = [], schedule = [] }) {
   const latestCheckout = useMemo(
@@ -62,7 +40,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const routineVariationRef = useRef(0)
   const recoverySaveStartedRef = useRef(false)
   const [timeAvailable, setTimeAvailable] = useState('15 minutes')
-  const [planType, setPlanType] = useState('last-checkout')
+  const [planType, setPlanType] = useState('session')
   const [targetedAreas, setTargetedAreas] = useState([])
   const [routineStarted, setRoutineStarted] = useState(false)
   const [routineIndex, setRoutineIndex] = useState(0)
@@ -72,6 +50,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [routineFeedback, setRoutineFeedback] = useState(null)
   const [hurtReport, setHurtReport] = useState(null)
   const [excludedExercises, setExcludedExercises] = useState([])
+  const [preferredSubstitutes, setPreferredSubstitutes] = useState([])
   const [routineComplete, setRoutineComplete] = useState(false)
   const [feedback, setFeedback] = useState({ completion: '', feeling: '', tightness: '', pain: '' })
   const [isSavingPlan, setIsSavingPlan] = useState(false)
@@ -79,16 +58,20 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [savedRoutinesOpen, setSavedRoutinesOpen] = useState(false)
 
   const plan = generatedPlan?.planType === planType ? generatedPlan : null
-  const fallbackForGoal = getFallbackRoutine(plan?.planType, routineVariationRef.current)
-  const routine = buildRoutine(
-    plan?.routine?.exercises?.length ? plan.routine.exercises : fallbackForGoal,
-    getTimeAvailableMinutes(timeAvailable),
-    excludedExercises,
-    fallbackForGoal,
-  )
+  const routineResult = buildVettedRoutine({
+    selections: [...preferredSubstitutes, ...(plan?.routine?.exercises ?? [])],
+    mode: plan?.planType ?? planType,
+    availableMinutes: getTimeAvailableMinutes(timeAvailable),
+    availableEquipment: equipment,
+    excludedIds: excludedExercises,
+    targetBodyParts: planType === 'targeted' ? targetedAreas : [],
+    variationSeed: routineVariationRef.current,
+  })
+  const routine = routineResult.exercises.map(normalizeRecoveryExercise)
   const currentExercise = routine[routineIndex]
+  const currentSubstitute = getVettedSubstitute(currentExercise, excludedExercises)
   const isPainAware = Boolean(plan?.routine?.painAware || plan?.painAware)
-  const isRoutineOnlyPlan = ['flexibility', 'mobility', 'targeted', 'full-body', 'quick'].includes(plan?.planType)
+  const isRoutineOnlyPlan = ['flexibility', 'targeted', 'full-body', 'quick', 'recovery-day', 'pre-event'].includes(plan?.planType)
 
   useEffect(() => {
     if (!routineStarted || routinePaused || !currentExercise?.durationSeconds || secondsLeft <= 0) return undefined
@@ -192,7 +175,11 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
       setRoutineStarted(false)
       setRoutineComplete(true)
     } else {
-      setExcludedExercises((current) => [...new Set([...current, getExerciseFamily(exerciseName)])])
+      if (action === 'substitute') {
+        const substitute = getVettedSubstitute(currentExercise, excludedExercises)
+        if (substitute) setPreferredSubstitutes((current) => [substitute, ...current.filter((item) => item.id !== substitute.id)])
+      }
+      setExcludedExercises((current) => [...new Set([...current, currentExercise?.id])])
       setRoutineIndex((current) => Math.max(0, Math.min(current, routine.length - 2)))
       setRoutineStarted(false)
       setRoutinePaused(false)
@@ -207,6 +194,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     setRoutineComplete(false)
     setCompletedRoutineExercises(new Set())
     setExcludedExercises([])
+    setPreferredSubstitutes([])
     setRoutineIndex(0)
     setRoutineStarted(false)
     setEquipmentTouched(true)
@@ -282,7 +270,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
         </div>
       </section>
 
-      {planType === 'last-checkout' && latestCheckout && <section className="recovery-latest recovery-checkout-context glass-panel">
+      {['session', 'competition'].includes(planType) && latestCheckout && <section className="recovery-latest recovery-checkout-context glass-panel">
           <div className="recovery-section-heading">
             <div>
               <p className="eyebrow">Latest checkout</p>
@@ -304,18 +292,21 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               <p>Choose the outcome you need. The plan adapts to your session, sport, pain, nutrition, recovery history, and what is next.</p>
             </div>
             <div className="recovery-type-grid" role="radiogroup" aria-label="Recovery plan type">
-              {planTypeOptions.map((option) => (
-                <button
+              {planTypeOptions.map((option, index) => (
+                <m.button
                   aria-checked={planType === option.id}
                   className={planType === option.id ? 'selected' : ''}
                   key={option.id}
                   onClick={() => selectPlanType(option.id)}
                   role="radio"
                   type="button"
+                  whileHover={{ y: -5, scale: 1.015 }}
+                  whileTap={{ scale: .98 }}
                 >
+                  <span className="recovery-mode-visual"><b>{String(index + 1).padStart(2, '0')}</b><i /></span>
                   <strong>{option.label}</strong>
                   <span>{option.description}</span>
-                </button>
+                </m.button>
               ))}
             </div>
             {planType === 'targeted' && (
@@ -365,7 +356,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                   document.body,
                 )}
               </div>
-              <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'last-checkout' && !latestCheckout) || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
+              <button className="primary-button" disabled={generationStatus === 'loading' || (['session', 'competition'].includes(planType) && !latestCheckout) || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
                 <AppIcon name="spark" size={18} />
                 {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
               </button>
@@ -374,7 +365,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 Load saved routines
               </button>
             </div>
-            {planType === 'last-checkout' && !latestCheckout && <p className="recovery-context-note">No checkout is available yet. Choose another plan type to build a standalone routine.</p>}
+            {['session', 'competition'].includes(planType) && !latestCheckout && <p className="recovery-context-note">No checkout is available yet. Choose another option to build a standalone routine.</p>}
             {generationStatus === 'error' && <p className="recovery-error">The recovery plan could not be generated. Check your connection and try again.</p>}
             {recentCompletion?.completedAt && (
               <p className="recovery-context-note">Last recovery completed {formatCompletionRecency(recentCompletion.completedAt)}. This is considered when pacing the next plan.</p>
@@ -412,7 +403,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <p className="eyebrow">Personalized routine</p>
                 <h2>{plan.routine?.title ?? 'Cooldown and mobility'}</h2>
               </div>
-              <span>{plan.routine?.durationMinutes ?? getTimeAvailableMinutes(timeAvailable)} min</span>
+              <span>About {Math.max(1, Math.ceil(routineResult.estimatedSeconds / 60))} min</span>
             </div>
             {plan.routine?.goal && <p className="routine-goal"><strong>Routine goal:</strong> {plan.routine.goal}</p>}
             <p className="routine-intro">{plan.routine?.summary ?? 'Use this as an optional way to relax and maintain comfortable mobility, not as a guaranteed repair.'}</p>
@@ -446,7 +437,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <p>Take a moment to record how your body feels before saving this recovery plan.</p>
               </div>
             ) : (
-            <div className="routine-player">
+            <m.div className="routine-player" initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .45 }}>
               <div className="routine-player-header">
                 <span>Exercise {routineIndex + 1} of {routine.length}</span>
                 <strong>{currentExercise?.type ?? 'Mobility'}</strong>
@@ -459,12 +450,11 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <span><small>Body area</small><strong>{formatExerciseBodyArea(currentExercise)}</strong></span>
                 <span><small>Duration or repetitions</small><strong>{formatExerciseDose(currentExercise)}</strong></span>
               </div>
-              <div className="routine-instruction"><p><strong>Setup</strong>{currentExercise?.setup}</p><p><strong>Movement</strong>{currentExercise?.movement}</p><p><strong>Complete when</strong>{currentExercise?.completionCue}</p></div>
-              <div className="routine-current-cues">
-                <p><strong>You should feel</strong>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p>
-                <p><strong>Stop if</strong>{currentExercise?.stopConditions}</p>
-                <p><strong>Equipment</strong>{currentExercise?.equipment}</p>
-                <p><strong>Purpose</strong>{currentExercise?.purpose}</p>
+              <div className="routine-guidance">
+                <details open><summary>How to do it</summary><div><p><strong>Setup</strong>{currentExercise?.setup}</p><p><strong>Movement</strong>{currentExercise?.movement}</p><p><strong>Complete when</strong>{currentExercise?.completionCue}</p></div></details>
+                <details><summary>What you should feel</summary><p>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p></details>
+                <details><summary>What to avoid</summary><p>{currentExercise?.stopConditions}</p></details>
+                <details><summary>Why this is here</summary><p>{currentExercise?.purpose} {currentExercise?.equipment ? `Equipment: ${currentExercise.equipment}.` : ''}</p></details>
               </div>
               {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
               <div className="routine-player-actions">
@@ -482,7 +472,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               </div>
               {routineFeedback === 'pain' && <div className="routine-feedback"><strong>Stop the movement.</strong><p>Tell us what changed so a gentler substitute can be used.</p><div className="feedback-actions"><button onClick={() => setRoutineFeedback('substitute')} type="button">Use a gentler substitute</button><button onClick={() => setRoutineFeedback('end')} type="button">End this routine section</button></div></div>}
               {routineFeedback === 'substitute' && <div className="routine-feedback"><strong>Skip this movement for now.</strong><p>Do not test the painful movement again right now. Continue only with comfortable, pain-free options.</p></div>}
-            </div>
+            </m.div>
             )}
             {routineComplete && <div className="routine-feedback-form">
               <strong>How did recovery feel?</strong>
@@ -511,7 +501,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
             <label className="compact-field">Pain level<select value={hurtReport.severity} onChange={(event) => setHurtReport((current) => ({ ...current, severity: event.target.value }))}><option value="">Choose</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}/10</option>)}</select></label>
             <label className="compact-field">Was this a previously reported issue?<select value={hurtReport.sameIssue} onChange={(event) => setHurtReport((current) => ({ ...current, sameIssue: event.target.value }))}><option value="">Choose</option><option>Yes</option><option>No</option><option>Not sure</option></select></label>
             <p className="recovery-error">Do not push through sharp, worsening, unstable, numb, or tingling symptoms.</p>
-            <div className="routine-hurt-actions"><button className="secondary-button" onClick={() => handleHurtReport('skip')} type="button">Skip this movement</button><button className="remove-button" onClick={() => handleHurtReport('end')} type="button">End routine</button></div>
+            <div className="routine-hurt-actions">{currentSubstitute && <button className="primary-button" onClick={() => handleHurtReport('substitute')} type="button">Use vetted substitute</button>}<button className="secondary-button" onClick={() => handleHurtReport('skip')} type="button">Skip this movement</button><button className="remove-button" onClick={() => handleHurtReport('end')} type="button">End routine</button></div>
           </section>
         </div>,
         document.body,
@@ -520,13 +510,6 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   )
 }
 
-
-function getFallbackRoutine(planType, variation = 0) {
-  const routine = fallbackRoutines[planType] ?? fallbackRoutine
-  if (routine.length < 2) return routine
-  const offset = Math.abs(Number(variation) || 0) % routine.length
-  return [...routine.slice(offset), ...routine.slice(0, offset)]
-}
 
 function getDateValue(item) {
   return new Date(item?.createdAt ?? `${item?.date ?? '1970-01-01'}T12:00:00`).getTime()
@@ -550,132 +533,17 @@ function formatCompletionRecency(value) {
   return `${Math.round(hours / 24)}d ago`
 }
 
-function buildRoutine(routine, availableMinutes, excludedExercises = [], fallback = fallbackRoutine) {
-  const excluded = new Set(excludedExercises)
-  const expandAvailableExercises = (exercises) => exercises
-    .flatMap(expandUnilateralExercise)
-    .filter((exercise) => !excluded.has(getExerciseFamily(exercise.name)))
-  const individualSteps = expandAvailableExercises(routine).map(normalizeRecoveryExercise)
-  const alternatives = expandAvailableExercises(fallback).map(normalizeRecoveryExercise)
-    .filter((exercise) => !individualSteps.some((item) => getExerciseFamily(item.name) === getExerciseFamily(exercise.name)))
-  return constrainRoutine(individualSteps, availableMinutes, alternatives)
-}
-
-function expandUnilateralExercise(exercise) {
-  const name = String(exercise?.name ?? '')
-  const side = String(exercise?.side ?? '')
-  const instruction = String(exercise?.instruction ?? '')
-  const alreadySideSpecific = /\b(left|right)( side)?\b/i.test(side) || /\s-\s(left|right)$/i.test(name)
-  const explicitlyEachSide = /each side|left and right|right and left|one side at a time/i.test(side)
-  const switchesSides = /switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(instruction)
-  const knownUnilateralMovement = /single[- ]?(?:leg|arm)|half[- ]kneeling|figure[- ]four|open[- ]book|side[- ]lying|one[- ](?:arm|leg)|calf stretch|hamstring stretch|hip[- ]flexor stretch|doorway chest stretch|adductor rock[- ]back/i.test(name)
-
-  if (alreadySideSpecific || (!explicitlyEachSide && !switchesSides && !knownUnilateralMovement)) return [exercise]
-
-  return ['Left', 'Right'].map((currentSide) => ({
-    ...exercise,
-    name: `${getExerciseDisplayName(name)} - ${currentSide}`,
-    side: `${currentSide} side`,
-    instruction: makeInstructionSideSpecific(instruction, name, currentSide),
-  }))
-}
-
-function getExerciseDisplayName(name) {
-  return String(name).replace(/\s*[-–]\s*(left|right)$/i, '').trim()
-}
-
-function makeInstructionSideSpecific(instruction, name, side) {
-  const retained = String(instruction)
-    .split(/(?<=[.!?])\s+/)
-    .filter((sentence) => !/switch (?:sides|legs|arms)|change (?:sides|legs|arms)|repeat (?:on|with) (?:the )?(?:other|opposite)/i.test(sentence))
-    .join(' ')
-    .trim()
-  const loweredName = String(name).toLowerCase()
-  const setup = /calf stretch/.test(loweredName)
-    ? `Place your ${side.toLowerCase()} leg behind you as the stretching leg.`
-    : /hamstring stretch/.test(loweredName)
-      ? `Use your ${side.toLowerCase()} leg as the leg being stretched.`
-      : /hip[- ]flexor/.test(loweredName)
-        ? `Kneel on your ${side.toLowerCase()} knee to stretch the front of that hip.`
-        : /doorway chest/.test(loweredName)
-          ? `Place your ${side.toLowerCase()} forearm on the doorway.`
-          : `Set up with your ${side.toLowerCase()} side as the working or stretching side.`
-
-  return `${setup} ${retained} This timer is for the ${side.toLowerCase()} side only.`.trim()
-}
-
-function getExerciseFamily(name = '') {
-  return String(name).replace(/\s*-\s*(left|right)$/i, '').trim().toLowerCase()
-}
-
 function formatExerciseBodyArea(exercise) {
-  const area = String(exercise?.area ?? 'Comfortable range').trim()
-  const rawSide = String(exercise?.side ?? '').trim()
-  const side = rawSide.replace(/\s+side$/i, '')
-
-  if (!side || /^(both|both sides|full body|each side)$/i.test(rawSide)) return area
-  if (area.toLowerCase().includes(side.toLowerCase())) return area
-  const sidedArea = area.replace(/^(hips|shoulders|hamstrings|quadriceps|calves|ankles|feet)$/i, (match) => ({
-    ankles: 'ankle', calves: 'calf', feet: 'foot', hamstrings: 'hamstring', hips: 'hip', quadriceps: 'quadriceps', shoulders: 'shoulder',
-  })[match.toLowerCase()] ?? match)
-  return `${side} ${sidedArea}`
+  return [exercise?.side, exercise?.bodyRegion ?? exercise?.area].filter(Boolean).join(' · ')
 }
 
 function formatExerciseDose(exercise) {
-  const dose = exercise?.durationSeconds ? `${exercise.durationSeconds} seconds` : `${exercise?.reps ?? 6} controlled reps`
+  const dose = exercise?.doseModel === 'timer' || exercise?.durationSeconds
+    ? `${exercise.durationSeconds} seconds`
+    : `${exercise?.reps ?? 6} controlled reps`
   const sets = Number(exercise?.sets ?? 1)
   const rest = Number(exercise?.restSeconds ?? 0)
   return `${sets > 1 ? `${sets} sets × ` : ''}${dose}${rest > 0 ? ` · ${rest}s rest` : ''}`
-}
-
-function constrainRoutine(routine, availableMinutes, alternatives = []) {
-  const targetSeconds = availableMinutes * 60
-  let totalSeconds = 0
-  const constrained = []
-
-  for (const exercise of [...routine, ...alternatives]) {
-    const duration = Number(exercise.durationSeconds ?? 45)
-    const remaining = targetSeconds - totalSeconds
-
-    if (remaining <= 0) break
-
-    if (duration <= remaining) {
-      constrained.push(exercise)
-      totalSeconds += duration
-      continue
-    }
-
-    if (remaining >= 20 && exercise.durationSeconds) {
-      constrained.push({ ...exercise, durationSeconds: remaining })
-      totalSeconds += remaining
-    }
-  }
-
-  // AI routines normally supply a complete sequence. This only fills a short
-  // fallback with familiar movements so the selected time remains honest.
-  let fallbackIndex = 0
-  while (totalSeconds < targetSeconds && alternatives.length > 0) {
-    const exercise = alternatives[fallbackIndex % alternatives.length]
-    const remaining = targetSeconds - totalSeconds
-    const duration = Number(exercise.durationSeconds ?? 45)
-    const fillDuration = Math.min(duration, remaining)
-
-    if (fillDuration < 20) {
-    const last = constrained[constrained.length - 1]
-      if (last?.durationSeconds) last.durationSeconds += fillDuration
-      break
-    }
-
-    constrained.push({
-      ...exercise,
-      durationSeconds: fillDuration,
-      name: fallbackIndex < alternatives.length ? exercise.name : `${exercise.name} - Repeat`,
-    })
-    totalSeconds += fillDuration
-    fallbackIndex += 1
-  }
-
-  return constrained.length > 0 ? constrained : alternatives.slice(0, 1)
 }
 
 function formatSeconds(value) {

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
 import { BodyPainMap } from './BodyPainMap'
 import { Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
 import { getCheckoutForEvent, hasEventStarted, isAllDayCheckInOpen, isAllDayEvent } from '../utils/events'
+import '../styles/checkin-progressive.css'
+import { getCheckInFlowState } from '../domain/wellness/progressiveFlow'
+import { useEffect } from 'react'
 
 export function CheckInView({
   checkIn,
@@ -33,6 +35,14 @@ export function CheckInView({
   const canPostCheckIn = selectedEvent && hasEventStarted(selectedEvent) && !selectedCheckout
   const hasAllDayWellnessEvent = todayEvents.some(isAllDayEvent)
   const hasScheduledEventToday = todayEvents.length > 0
+  const painConcern = checkIn.painConcern ?? (Object.values(checkIn.painMap ?? {}).some((value) => Number(value) > 0) ? true : null)
+  const symptomConcern = checkIn.symptomConcern ?? (Number(checkIn.illnessSymptoms) > 0 ? true : null)
+  const flowState = getCheckInFlowState({ ...checkIn, painConcern, symptomConcern }, { requireSleep: isFirstEventToday })
+
+  useEffect(() => {
+    if (checkIn.painConcern == null) onUpdate('painConcern', Object.values(checkIn.painMap ?? {}).some((value) => Number(value) > 0))
+    if (checkIn.symptomConcern == null) onUpdate('symptomConcern', Number(checkIn.illnessSymptoms) > 0)
+  }, [checkIn.illnessSymptoms, checkIn.painConcern, checkIn.painMap, checkIn.symptomConcern, onUpdate, selectedEventId])
 
   if (!selectedEvent) {
     return (
@@ -83,120 +93,30 @@ export function CheckInView({
   }
 
   return (
-    <div className="check-in-grid check-in-grid-single" data-tour="check-in-page">
-      <div className="form-panel">
-        <div className="checkin-tour-intro" data-tour="check-in-intro">
-          <SectionHeading eyebrow={todayLabel} title="Check-in." />
-          <p className="page-header-description">Capture how ready your body feels before the selected event.</p>
+    <div className="checkin-experience" data-tour="check-in-page">
+      <header className="checkin-context-header" data-tour="check-in-intro">
+        <div><span>Pre-event check-in</span><h1>{selectedEventLabel}</h1><p>{selectedEvent?.time ? formatEventTime(selectedEvent.time) : 'Today'} · {selectedEvent?.type ?? 'Training'} · about 30 seconds</p></div>
+        {eventOptions.length > 1 && <EventPicker checkouts={checkouts} eventOptions={eventOptions} selectedEventId={selectedEventId} todayIso={todayIso} onSelectEvent={onSelectEvent} />}
+      </header>
 
-          {eventOptions.length > 0 && (
-            <EventPicker
-              checkouts={checkouts}
-              eventOptions={eventOptions}
-              selectedEventId={selectedEventId}
-              todayIso={todayIso}
-              onSelectEvent={onSelectEvent}
-            />
-          )}
+      <div className="checkin-layout">
+        <main className="checkin-questionnaire">
+          <section className="question-block" aria-labelledby="wellness-heading">
+            <div className="question-block-heading"><span>01</span><div><h2 id="wellness-heading">How do you feel right now?</h2><p>Choose quickly. Your first response is usually the most useful.</p></div></div>
+            <div className="wellness-question-list">
+              <RatingQuestion highLabel="Very high" label="Energy" lowLabel="Very low" value={checkIn.energy} onChange={(value) => onUpdate('energy', value)} />
+              <RatingQuestion highLabel="Very fatigued" label="Fatigue" lowLabel="Fresh" value={checkIn.fatigue} onChange={(value) => onUpdate('fatigue', value)} />
+              <RatingQuestion highLabel="Very sore" label="Soreness" lowLabel="None" value={checkIn.soreness} onChange={(value) => onUpdate('soreness', value)} />
+              {isFirstEventToday && <RatingQuestion highLabel="Excellent" label="Sleep quality" lowLabel="Poor" value={checkIn.sleepQuality} onChange={(value) => onUpdate('sleepQuality', value)} />}
+            </div>
+            {isFirstEventToday && <label className="sleep-duration-row"><span><strong>Sleep duration</strong><small>Only asked on your first check-in today</small></span><span><input aria-label="Sleep duration" max="14" min="0" placeholder="7.5" step="0.25" type="number" value={checkIn.sleep ?? ''} onChange={(event) => onUpdate('sleep', event.target.value === '' ? null : event.target.value)} /><em>hours</em></span></label>}
+          </section>
 
-        </div>
-
-        <div className="quick-checkin-tools">
-          {isQuickMode && <p>Quick check-in keeps the highest-value readiness signals. Add details whenever something needs attention.</p>}
-          <VoiceDraftButton onQuickSave={onQuickSave} onApply={(draft) => Object.entries(draft).forEach(([field, value]) => { if (value !== null && field !== 'notes') onUpdate(field, value) })} />
-        </div>
-
-        <Slider
-          description="How much energy you have available right now."
-          label="Energy"
-          max={5}
-          value={checkIn.energy}
-          unit="/5"
-          onChange={(value) => onUpdate('energy', value)}
-        />
-        {!isQuickMode && <Slider
-          description="Overall muscle discomfort or tenderness, even before activity."
-          label="Muscle soreness"
-          min={0}
-          max={5}
-          value={checkIn.soreness}
-          unit="/5"
-          onChange={(value) => onUpdate('soreness', value)}
-        />}
-        <Slider
-          description="How worn down your whole body feels."
-          label="General fatigue"
-          min={0}
-          max={5}
-          value={checkIn.fatigue}
-          unit="/5"
-          onChange={(value) => onUpdate('fatigue', value)}
-        />
-        {!isQuickMode && <Slider
-          description="Whether your legs feel unusually heavy or slow."
-          label="Leg heaviness"
-          min={0}
-          max={5}
-          value={checkIn.legHeaviness ?? 0}
-          unit="/5"
-          onChange={(value) => onUpdate('legHeaviness', value)}
-        />}
-        {isFirstEventToday && (
-          <>
-            <Slider
-              description="Total hours you slept last night."
-              label="Sleep"
-              min={3}
-              max={10}
-              maxLabel="10h+"
-              value={checkIn.sleep}
-              unit="h"
-              onChange={(value) => onUpdate('sleep', value)}
-            />
-            <Slider
-              description="How restful and restorative your sleep felt."
-              label="Sleep quality"
-              min={0}
-              max={5}
-              value={checkIn.sleepQuality ?? 5}
-              unit="/5"
-              onChange={(value) => onUpdate('sleepQuality', value)}
-            />
-          </>
-        )}
-        <div className="select-row">
-          <Slider
-            description="How much pressure or worry you feel today."
-            label="Stress"
-            min={0}
-            max={5}
-            value={checkIn.stress ?? 0}
-            unit="/5"
-            onChange={(value) => onUpdate('stress', value)}
-          />
-          <DailyFuelContext dailyWellness={dailyWellness} eventPreparationContext={eventPreparationContext} />
-        </div>
-        <div className="select-row">
-          <Slider
-            description="Any symptoms that may affect training today."
-            label="Illness symptoms"
-            min={0}
-            max={5}
-            value={checkIn.illnessSymptoms ?? 0}
-            formatValue={formatIllnessValue}
-            onChange={(value) => onUpdate('illnessSymptoms', value)}
-          />
-        </div>
-        <Slider
-          description="How hard you expect this event to feel from your perspective."
-          label="Expected difficulty"
-          max={10}
-          min={1}
-          value={checkIn.expectedDifficulty ?? 5}
-          unit="/10"
-          onChange={(value) => onUpdate('expectedDifficulty', value)}
-        />
-          <BodyPainMap
+          <section className="question-block safety-question">
+            <div className="question-block-heading"><span>02</span><div><h2>Any pain or injury concern today?</h2><p>No skips the entire pain flow.</p></div></div>
+            <BinaryChoice value={painConcern} onChange={(value) => { onUpdate('painConcern', value); if (!value) { onUpdate('painMap', Object.fromEntries(Object.keys(checkIn.painMap ?? {}).map((key) => [key, 0]))); onUpdate('painDetails', {}) } }} />
+          </section>
+          {painConcern && <div className="progressive-branch pain-branch"><BodyPainMap
           affectedMovement={checkIn.affectedMovement}
           hurtsWhen={checkIn.hurtsWhen}
           injuryType={checkIn.injuryType}
@@ -206,15 +126,35 @@ export function CheckInView({
           value={checkIn.painMap}
           onDetailsChange={(value) => onUpdate('painDetails', value)}
           onChange={(value) => onUpdate('painMap', value)}
-        />
+        /></div>}
 
-        <button className="primary-button" disabled={isSaving} onClick={() => onSave()} type="button">
-          {isSaving ? 'Generating recommendation...' : 'Save check-in'}
-        </button>
+          <section className="question-block safety-question">
+            <div className="question-block-heading"><span>03</span><div><h2>Feeling sick or noticing unusual symptoms?</h2><p>Tell us only when something is different from normal.</p></div></div>
+            <BinaryChoice value={symptomConcern} onChange={(value) => { onUpdate('symptomConcern', value); onUpdate('illnessSymptoms', value ? null : 0) }} />
+            {symptomConcern && <div className="symptom-impact"><Slider description="How much is this affecting you right now?" label="Symptom impact" min={1} max={5} value={checkIn.illnessSymptoms ?? 1} formatValue={formatIllnessValue} onChange={(value) => onUpdate('illnessSymptoms', value)} /></div>}
+          </section>
+
+          <details className="optional-question-block"><summary><span>Optional context</span><small>Stress and leg heaviness</small></summary><div className="wellness-question-list"><RatingQuestion highLabel="High" label="Stress" lowLabel="Low" value={checkIn.stress} onChange={(value) => onUpdate('stress', value)} /><RatingQuestion highLabel="Very heavy" label="Leg heaviness" lowLabel="Normal" value={checkIn.legHeaviness} onChange={(value) => onUpdate('legHeaviness', value)} /></div></details>
+        </main>
+
+        <aside className="checkin-context-rail">
+          <DailyFuelContext dailyWellness={dailyWellness} eventPreparationContext={eventPreparationContext} />
+          <div className="checkin-voice"><span>Prefer to speak?</span><p>Describe how you feel, then review what was captured.</p><VoiceDraftButton onQuickSave={onQuickSave} onApply={(draft) => Object.entries(draft).forEach(([field, value]) => { if (value !== null && field !== 'notes') onUpdate(field, value) })} /></div>
+          {isQuickMode && <p className="checkin-mode-note">Quick mode keeps only the signals that can change today’s recommendation.</p>}
+        </aside>
       </div>
 
+      <footer className="questionnaire-submit-bar"><div><strong>{flowState.complete ? 'Ready to save' : `${flowState.missing.length} answer${flowState.missing.length === 1 ? '' : 's'} remaining`}</strong><span>{flowState.complete ? 'Your recommendation will use this event and today’s context.' : 'Complete the required questions above.'}</span></div><button className="primary-button" disabled={isSaving || !flowState.complete} onClick={() => onSave()} type="button">{isSaving ? 'Saving…' : 'Save check-in'}</button></footer>
     </div>
   )
+}
+
+function RatingQuestion({ highLabel, label, lowLabel, onChange, value }) {
+  return <div aria-label={label} className="wellness-rating" role="group"><div className="wellness-rating-label"><strong>{label}</strong><span>{lowLabel} → {highLabel}</span></div><div>{[1, 2, 3, 4, 5].map((rating) => <button aria-label={`${label}: ${rating} of 5`} aria-pressed={Number(value) === rating} key={rating} onClick={() => onChange(rating)} type="button"><b>{rating}</b><small>{rating === 1 ? lowLabel : rating === 5 ? highLabel : ''}</small></button>)}</div></div>
+}
+
+function BinaryChoice({ onChange, value }) {
+  return <div className="binary-choice"><button aria-pressed={value === false} onClick={() => onChange(false)} type="button"><strong>No</strong><span>Nothing to report</span></button><button aria-pressed={value === true} onClick={() => onChange(true)} type="button"><strong>Yes</strong><span>Add details</span></button></div>
 }
 
 function formatIllnessValue(value) {
@@ -224,151 +164,14 @@ function formatIllnessValue(value) {
 }
 
 function EventPicker({ checkouts, eventOptions, onSelectEvent, selectedEventId, todayIso }) {
-  const [centerIndex, setCenterIndex] = useState(0)
-  const dragStartRef = useRef(null)
-  const completedEventIds = useMemo(
-    () => new Set(checkouts.map((checkout) => checkout.eventId).filter(Boolean)),
-    [checkouts],
-  )
-  const selectedIndex = useMemo(() => {
-    const selected = eventOptions.findIndex((event) => event.id === selectedEventId)
-
-    if (selected >= 0) return selected
-
-    const today = eventOptions.findIndex((event) => event.date === todayIso)
-    if (today >= 0) return today
-
-    const future = eventOptions.findIndex((event) => event.date > todayIso)
-
-    return future >= 0 ? future : 0
-  }, [eventOptions, selectedEventId, todayIso])
-  const activeTodayEventId = useMemo(
-    () => eventOptions.find((event) => event.date === todayIso && !completedEventIds.has(event.id) && isInsideCheckInWindow(event))?.id ?? null,
-    [completedEventIds, eventOptions, todayIso],
-  )
-  const visibleEvents = useMemo(() => {
-    const start = Math.max(0, centerIndex - 2)
-    const end = Math.min(eventOptions.length, centerIndex + 3)
-
-    return eventOptions.slice(start, end).map((event, index) => ({
-      event,
-      index: start + index,
-    }))
-  }, [centerIndex, eventOptions])
-
-  useEffect(() => {
-    setCenterIndex(selectedIndex)
-  }, [selectedIndex])
-
   if (eventOptions.length === 0) return null
-
-  function moveCenter(direction) {
-    setCenterIndex((current) =>
-      Math.max(0, Math.min(eventOptions.length - 1, current + direction)),
-    )
-  }
-
-  function handlePointerDown(event) {
-    dragStartRef.current = event.clientX
-  }
-
-  function handlePointerUp(event) {
-    const start = dragStartRef.current
-
-    dragStartRef.current = null
-
-    if (start === null) return
-
-    const distance = event.clientX - start
-
-    if (Math.abs(distance) < 34) return
-
-    moveCenter(distance < 0 ? 1 : -1)
-  }
-
-  return (
-    <div className="event-picker">
-      <p className="eyebrow">Choose event</p>
-      <div className="event-carousel">
-        <button
-          aria-label="Previous event"
-          className="event-picker-arrow"
-          disabled={centerIndex === 0}
-          onClick={() => moveCenter(-1)}
-          type="button"
-        >
-          <span aria-hidden="true">{'<'}</span>
-        </button>
-        <div
-          className="event-picker-window"
-          onPointerCancel={() => {
-            dragStartRef.current = null
-          }}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-        >
-          <div
-            className="event-picker-track"
-            style={{ '--center-offset': `${visibleEvents.findIndex(({ index }) => index === centerIndex)}` }}
-          >
-        {visibleEvents.map(({ event, index }) => {
+  const completedEventIds = new Set(checkouts.map((checkout) => checkout.eventId).filter(Boolean))
+  return <label className="checkin-event-select"><span>Switch event</span><select aria-label="Switch check-in event" value={selectedEventId} onChange={(event) => onSelectEvent(event.target.value)}>{eventOptions.map((event) => {
           const isToday = event.date === todayIso
-          const isSelected = event.id === selectedEventId
           const isCompleted = completedEventIds.has(event.id)
-          const isLockedByCheckout = isToday && !isCompleted && event.id !== activeTodayEventId
           const isOutsideCheckInWindow = isToday && !isCompleted && !isInsideCheckInWindow(event)
-          const isDisabled = !isToday || isLockedByCheckout || isOutsideCheckInWindow || isCompleted
-
-          return (
-            <button
-              className={[
-                isSelected ? 'selected' : '',
-                index === centerIndex ? 'centered' : '',
-                isDisabled ? 'disabled' : '',
-                isLockedByCheckout ? 'locked' : '',
-                isOutsideCheckInWindow ? 'locked' : '',
-                Math.abs(index - centerIndex) >= 2 ? 'edge' : '',
-              ].filter(Boolean).join(' ')}
-              disabled={isDisabled}
-              key={event.id}
-              onClick={() => onSelectEvent(event.id)}
-              type="button"
-            >
-              <span className="event-picker-date-row">
-                <strong>{formatEventDateShort(event.date)}</strong>
-                {event.time && <em>{formatEventTime(event.time)}</em>}
-              </span>
-              <span className="event-picker-title">{event.title || event.type}</span>
-              <span className="event-picker-meta">{event.association || 'Personal'}</span>
-              {isLockedByCheckout && <span className="event-picker-lock">Checkout required</span>}
-              {isOutsideCheckInWindow && !isLockedByCheckout && <span className="event-picker-lock">Available 3 hours before</span>}
-            </button>
-          )
-        })}
-          </div>
-        </div>
-        <button
-          aria-label="Next event"
-          className="event-picker-arrow"
-          disabled={centerIndex === eventOptions.length - 1}
-          onClick={() => moveCenter(1)}
-          type="button"
-        >
-          <span aria-hidden="true">{'>'}</span>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function formatEventDateShort(date) {
-  const parsed = new Date(`${date}T12:00:00`)
-
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    weekday: 'short',
-  }).format(parsed)
+          return <option disabled={!isToday || isOutsideCheckInWindow || isCompleted} key={event.id} value={event.id}>{event.title || event.type} · {formatEventTime(event.time)}</option>
+        })}</select></label>
 }
 
 function formatEventTime(value) {

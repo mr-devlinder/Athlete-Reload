@@ -25,13 +25,13 @@ export function RecommendationCard({ onFeedback, recommendation, recommendationS
   const sections = indexSections(recommendation.reportSections)
 
   return (
-    <aside className={`recommendation recommendation-report checkin-report ${recommendation.tone} ${readinessBand}`}>
+    <m.aside className={`recommendation recommendation-report checkin-report ${recommendation.tone} ${readinessBand}`} initial={{ opacity: 0, scale: .97, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }}>
       <ReportSource session={session} status={recommendationStatus} />
-      <header className="checkin-report-hero">
-        <div className={`score-ring ${readinessBand}`} style={{ '--score': `${recommendation.score}%` }}>
+      <header className="checkin-report-hero recommendation-visual-hero">
+        <div className={`score-ring recommendation-score-orbit ${readinessBand}`} style={{ '--score': `${recommendation.score}%` }}>
           <span>{recommendation.score}</span><small>{scoreLabel}</small>
         </div>
-        <div><p className="report-kicker">Your event preparation</p><h2>{recommendation.label}</h2><p>{recommendation.summary}</p></div>
+        <div><p className="report-kicker">Your event preparation</p><h2>{recommendation.label}</h2><p>{recommendation.summary}</p><div className="recommendation-signal-line"><i /><span>Built from today&apos;s athlete context</span></div></div>
       </header>
       <RecommendationOverview recommendation={recommendation} />
       <details className="recommendation-details">
@@ -44,7 +44,7 @@ export function RecommendationCard({ onFeedback, recommendation, recommendationS
       </details>
       {onFeedback && <div className="recommendation-feedback" aria-label="Recommendation feedback"><span>{recommendation.feedback ? 'Feedback saved' : 'Was this useful?'}</span>{['helpful', 'neutral', 'not_helpful'].map((value) => <button aria-pressed={recommendation.feedback === value} key={value} onClick={() => onFeedback(value)} type="button">{{ helpful: 'Helpful', neutral: 'Neutral', not_helpful: 'Not helpful' }[value]}</button>)}</div>}
       <ContextDisclosure recommendation={recommendation} />
-    </aside>
+    </m.aside>
   )
 }
 
@@ -52,12 +52,11 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
   const sections = indexSections(recommendation.reportSections)
 
   return (
-    <aside className={`recommendation recommendation-report checkout-report ${recommendation.tone}`}>
+    <m.aside className={`recommendation recommendation-report checkout-report ${recommendation.tone}`} initial={{ opacity: 0, scale: .97, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }}>
       <ReportSource session={session} status={recommendationStatus} />
-      <header className="checkout-report-hero">
-        <p className="report-kicker">Checkout complete</p>
-        <h2>{recommendation.label}</h2>
-        <p>{recommendation.summary}</p>
+      <header className="checkout-report-hero checkout-visual-hero">
+        <div className="recovery-wave" aria-hidden="true"><i /><i /><i /><i /><i /></div>
+        <div><p className="report-kicker">Checkout complete</p><h2>{recommendation.label}</h2><p>{recommendation.summary}</p></div>
       </header>
       <RecommendationOverview recommendation={recommendation} />
       <details className="recommendation-details">
@@ -67,7 +66,7 @@ export function RecoveryPlanCard({ recommendation, recommendationStatus = 'local
         </div>
       </details>
       <ContextDisclosure recommendation={recommendation} />
-    </aside>
+    </m.aside>
   )
 }
 
@@ -76,11 +75,10 @@ function RecommendationOverview({ recommendation }) {
   const actions = normalizeOverviewItems(recommendation.actions, 'instruction')
   const warnings = normalizeOverviewItems(recommendation.warnings, 'message')
   const primaryAction = recommendation.primaryAction?.instruction ?? recommendation.action
-  return <section className="recommendation-overview">
-    <div><span>What</span><strong>{recommendation.label}</strong></div>
-    {reasons.length > 0 && <div><span>Why</span><ul>{reasons.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
-    <div><span>Do</span><strong>{primaryAction}</strong>{actions.length > 1 && <ul>{actions.slice(1, 3).map((item) => <li key={item}>{item}</li>)}</ul>}</div>
-    {warnings.length > 0 && <div className="watch"><span>Watch</span><ul>{warnings.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></div>}
+  return <section className="recommendation-overview recommendation-action-board">
+    <m.div className="action-tile primary" whileHover={{ y: -3 }}><span><AppIcon name="spark" size={17} />Do this now</span><strong>{primaryAction}</strong>{actions.length > 1 && <ul>{actions.slice(1, 3).map((item) => <li key={item}>{item}</li>)}</ul>}</m.div>
+    {reasons.length > 0 && <m.div className="action-tile" whileHover={{ y: -3 }}><span><AppIcon name="performance" size={17} />Why it fits</span><ul>{reasons.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></m.div>}
+    {warnings.length > 0 && <m.div className="action-tile watch" whileHover={{ y: -3 }}><span><AppIcon name="alert" size={17} />Watch</span><ul>{warnings.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></m.div>}
   </section>
 }
 
@@ -155,3 +153,5 @@ function getReadinessBand(score) {
 }
 import { AppIcon } from './AppIcon'
 import { getPerformanceQuote } from '../data/performanceQuotes'
+import { m } from 'motion/react'
+import '../styles/recommendation-experience.css'

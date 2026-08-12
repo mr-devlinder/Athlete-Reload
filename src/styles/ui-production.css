@@ -81,31 +81,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .home-view { display: grid; gap: 22px; }
 .home-hero,.recovery-hero,.nutrition-dashboard-heading,.schedule-view > .schedule-header,.history-view > .schedule-header,.settings-hero { min-height: 0; padding: 0 0 10px; border: 0; background: transparent; }
 .home-hero::after,.recovery-hero::after,.nutrition-dashboard-heading::after,.schedule-view > .schedule-header::after,.history-view > .schedule-header::after,.settings-hero::after { display: none; }
-.dashboard-summary { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 14px; }
-.dashboard-metric,.stat-card { min-height: 124px; padding: 22px; border: 0; border-radius: var(--ui-radius-card); background: #fff; box-shadow: var(--ui-shadow-subtle); }
-.dashboard-metric:first-child { background: #111; color: #fff; }
-.dashboard-metric:first-child > span,.dashboard-metric:first-child em,.dashboard-metric:first-child p { color: rgba(255,255,255,.58); }
-.dashboard-metric strong,.stat-card strong { font-size: clamp(2rem,3vw,3.1rem); font-weight: 690; letter-spacing: -.055em; }
-.home-dashboard-grid { display: grid; grid-template-columns: repeat(12,minmax(0,1fr)); grid-auto-flow: row; grid-auto-rows: auto; gap: 14px; align-items: stretch; }
-.home-dashboard-grid > .home-panel { grid-row: auto; grid-row-end: auto; }
-.home-dashboard-grid > * { grid-column: span 6; }
-.home-dashboard-grid > :nth-child(1) { grid-column: span 7; }
-.home-dashboard-grid > :nth-child(2) { grid-column: span 5; }
-.home-dashboard-grid > :nth-child(3) { grid-column: span 8; }
-.home-dashboard-grid > :nth-child(4) { grid-column: span 4; }
-.home-dashboard-grid > :nth-child(5) { grid-column: span 7; }
-.home-dashboard-grid > :nth-child(6) { grid-column: span 5; }
-.home-dashboard-grid > :nth-child(7) { grid-column: 1/-1; }
 .home-panel,.insight-card { min-height: 220px; padding: 24px; border: 0; border-radius: var(--ui-radius-card); background: #fff; box-shadow: var(--ui-shadow-subtle); }
 .home-panel:hover,.insight-card:hover { transform: none; box-shadow: var(--ui-shadow-subtle); }
 .home-quote-panel { min-height: 150px; color: #fff; background: #1b1b1b; }
 .panel-heading,.settings-panel-heading,.recovery-section-heading,.nutrition-section-title { padding-bottom: 14px; border-bottom: 0; }
 .today-event-list > article,.pain-issue-row,.pain-timeline-list > article { border-color: var(--ui-line); }
 
-.nutrition-calorie-card,.nutrition-macro-card,.nutrition-meal-card,.nutrition-water-strip,.recovery-builder-panel,.recovery-plan-panel,.recovery-routine-panel,.recovery-latest,.calendar-shell,.settings-panel,.form-panel,.history-week,.history-archive-group,.report-section { border: 0; border-radius: var(--ui-radius-card); background: #fff; box-shadow: var(--ui-shadow-subtle); }
-.nutrition-calorie-card,.recovery-builder-panel,.recovery-plan-panel,.recovery-routine-panel,.settings-panel,.form-panel { padding: clamp(22px,3vw,34px); }
+.nutrition-meal-card,.nutrition-water-strip,.recovery-builder-panel,.recovery-plan-panel,.recovery-routine-panel,.recovery-latest,.calendar-shell,.settings-panel,.form-panel,.history-week,.history-archive-group,.report-section { border: 0; border-radius: var(--ui-radius-card); background: #fff; box-shadow: var(--ui-shadow-subtle); }
+.recovery-builder-panel,.recovery-plan-panel,.recovery-routine-panel,.settings-panel,.form-panel { padding: clamp(22px,3vw,34px); }
 .nutrition-summary-grid,.nutrition-meal-grid,.trend-grid { gap: 14px; }
-.nutrition-macro-card,.nutrition-meal-card { padding: 20px; }
+.nutrition-meal-card { padding: 20px; }
 .nutrition-meal-card:hover { transform: none; box-shadow: var(--ui-shadow-subtle); }
 .nutrition-water-strip { padding: 20px 24px; }
 .nutrition-progress { height: 6px; border-radius: 999px; background: #e8e8e3; }.nutrition-progress span { border-radius: inherit; }
@@ -127,7 +112,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 @media (max-width: 1080px) {
   .dashboard-main { margin-left: 218px; }.liquid-navigation { width: 218px; padding-inline: 12px; }.top-bar { left: 218px; }.workspace.page-workspace { padding: 32px 24px; }
-  .home-dashboard-grid > :nth-child(n) { grid-column: span 6; }.home-dashboard-grid > :nth-child(7) { grid-column: 1/-1; }
 }
 
 @media (max-width: 760px) {
@@ -145,8 +129,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .liquid-navigation .sidebar-brand,.sidebar-account { display: none; }.sidebar-primary { display: flex; flex-direction: row; gap: 3px; }
   .liquid-navigation .sidebar-primary > button { justify-content: center; flex: 1; width: auto; min-height: 52px; padding: 0; border-radius: 16px; color: rgba(255,255,255,.5); }.liquid-navigation .sidebar-primary > button span { display: none; }.liquid-navigation .sidebar-primary > button.active { background: #fff; color: #111; }.liquid-navigation .sidebar-primary > button.active .app-icon { color: #e43d30; }
   .page-content { padding-top: 66px; padding-bottom: calc(86px + env(safe-area-inset-bottom)); }.workspace.page-workspace { width: 100%; min-height: calc(100dvh - 66px); padding: 24px 14px 36px; }
-  .section-heading h2,.schedule-header .section-heading h2 { font-size: clamp(1.9rem,9vw,2.7rem); }.home-view { gap: 14px; }.dashboard-summary { grid-template-columns: 1fr 1fr; gap: 10px; }.dashboard-metric:first-child { grid-column: 1/-1; }
-  .home-dashboard-grid { grid-template-columns: 1fr; gap: 10px; }.home-dashboard-grid > :nth-child(n) { grid-column: 1; }.home-panel,.insight-card { min-height: 0; padding: 19px; }
+  .section-heading h2,.schedule-header .section-heading h2 { font-size: clamp(1.9rem,9vw,2.7rem); }.home-view { gap: 14px; }.home-panel,.insight-card { min-height: 0; padding: 19px; }
   .settings-layout { grid-template-columns: 1fr; }.settings-sidebar { position: static; display: flex; gap: 4px; overflow-x: auto; }.settings-sidebar button { flex: none; padding-inline: 13px; }.nutrition-summary-grid { grid-template-columns: 1fr 1fr; }
 }
 
@@ -159,7 +142,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 }
 
 /* View-specific production composition */
-.home-view,.nutrition-view,.recovery-view,.schedule-view,.history-view,.settings-page,.check-in-grid { width: 100%; }
+.home-view,.nutrition-view,.recovery-view,.schedule-view,.history-view,.settings-page { width: 100%; }
 .home-view,.schedule-view,.history-view { padding: 0; border-radius: 0; background: transparent; }
 .nutrition-view,.recovery-view,.schedule-view,.history-view,.settings-page { display: grid; gap: 18px; }
 .home-hero,.nutrition-dashboard-heading,.recovery-hero,.schedule-view > .schedule-header,.history-view > .schedule-header,.settings-hero,.checkin-tour-intro {
@@ -191,10 +174,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .checkout-alert { min-height: 84px; padding: 18px 20px; border: 0; border-radius: 13px; background: #fff; box-shadow: var(--ui-shadow-subtle); text-align: left; }
 .checkout-alert:hover { transform: none; box-shadow: 0 18px 44px rgba(17,17,17,.08); }
 .checkout-alert em { color: #e43d30; font-style: normal; font-weight: 650; }
-.dashboard-summary { max-width: none; margin: 2px 0 0; }
-.dashboard-metric { display: flex; align-items: flex-start; justify-content: space-between; flex-direction: column; }
-.dashboard-metric:first-child { position: relative; overflow: hidden; }
-.dashboard-metric:first-child::after { position: absolute; right: -48px; bottom: -74px; width: 170px; height: 170px; border: 1px solid rgba(255,255,255,.18); border-radius: 50%; content: ''; }
 .home-panel { display: flex; flex-direction: column; }
 .today-flow-panel,.weekly-signals-panel { min-height: 360px; }
 .next-event-panel { color: #fff; background: #262624; }
@@ -207,8 +186,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .home-quote-panel { justify-content: center; min-height: 180px; padding: clamp(28px,4vw,48px); }
 
 /* Check-in */
-.check-in-grid-single { display: block; max-width: 1050px; margin: 0 auto; }
-.check-in-grid .form-panel,.saved-checkin { padding: clamp(20px,3.5vw,38px); border: 0; border-radius: 18px; background: #fff; box-shadow: var(--ui-shadow-subtle); }
+.saved-checkin { padding: clamp(20px,3.5vw,38px); border: 0; border-radius: 18px; background: #fff; box-shadow: var(--ui-shadow-subtle); }
 .checkin-tour-intro { margin: calc(clamp(20px,3.5vw,38px) * -1) calc(clamp(20px,3.5vw,38px) * -1) 28px; border-radius: 18px 18px 0 0; box-shadow: none; }
 .event-picker { margin-bottom: 22px; padding: 20px; border-radius: 13px; background: #f1f1ed; }
 .event-picker-window { border-radius: 10px; }
@@ -216,18 +194,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .event-picker-card.active,.event-picker-card.selected { border-color: #111; background: #111; color: #fff; }
 .daily-fuel-context { padding: 18px 20px; border: 0; border-radius: 12px; background: #eef4f7; }
 .select-row { gap: 16px; }
-.check-in-grid input,.check-in-grid select,.check-in-grid textarea { border-color: var(--ui-line); background: #f8f8f5; }
 .quick-checkin-tools { padding: 16px 0 4px; }
 
 /* Nutrition */
 .nutrition-view { grid-template-columns: repeat(12,minmax(0,1fr)); }
 .nutrition-dashboard-heading { grid-column: 1/-1; }
-.nutrition-calorie-card { grid-column: span 4; display: flex; justify-content: center; flex-direction: column; min-height: 250px; padding: 30px; background: #111; color: #fff; }
-.nutrition-calorie-card > span,.nutrition-calorie-card p,.nutrition-calorie-card small { color: rgba(255,255,255,.58); }
-.nutrition-calorie-card strong { font-size: clamp(3.7rem,7vw,6.4rem); line-height: .82; }
-.nutrition-macro-card { grid-column: span 8; display: grid; grid-template-columns: repeat(3,1fr); min-height: 250px; padding: 12px; }
-.nutrition-macro { display: flex; flex-direction: column; min-height: 210px; padding: 22px; border-radius: 11px; background: #f4f4f1; }
-.nutrition-macro .nutrition-progress { margin-top: auto; }
 .nutrition-water-strip,.nutrition-meals-section,.nutrition-target-note { grid-column: 1/-1; }
 .nutrition-water-strip { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
 .nutrition-water-strip > div:first-child strong { font-size: 1.5rem; letter-spacing: -.03em; }
