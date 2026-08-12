@@ -183,8 +183,8 @@ export function AthleteProfileModal({ profile, onClose, onSave }) {
               </select>
             </label>
             <label className="select-field">
-              Biological sex for physiological estimates (optional)
-              <select value={draft.biologicalSex ?? ''} onChange={(event) => setDraft((current) => ({ ...current, biologicalSex: event.target.value }))}>
+              Physiology used for energy estimates (optional)
+              <select value={draft.physiologySex ?? draft.biologicalSex ?? ''} onChange={(event) => setDraft((current) => ({ ...current, physiologySex: event.target.value }))}>
                 <option value="">Prefer not to say</option>
                 <option value="female">Female</option>
                 <option value="male">Male</option>

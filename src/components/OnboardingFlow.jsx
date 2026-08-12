@@ -17,7 +17,7 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
     dominantSide: 'Right',
     unitSystem: 'imperial',
     genderIdentity: '',
-    biologicalSex: '',
+    physiologySex: '',
     dateOfBirth: '',
     heightCm: null,
     weightKg: null,
@@ -197,9 +197,9 @@ export function OnboardingFlow({ associations = [], initialDisplayName = '', onC
           <p className="onboarding-copy">These optional details help estimate nutrition and hydration targets. They are guidance, not a prescription, and can be changed from your profile.</p>
           <ProfileMeasurements profile={profile} onChange={updateProfile} />
           <label className="select-field">
-            Biological sex for physiological estimates (optional)
+            Physiology used for energy estimates (optional)
             <small className="field-description">Used only where physiology changes a calculation. It is not inferred from gender identity.</small>
-            <select value={profile.biologicalSex} onChange={(event) => updateProfile('biologicalSex', event.target.value)}>
+            <select value={profile.physiologySex} onChange={(event) => updateProfile('physiologySex', event.target.value)}>
               <option value="">Prefer not to say</option>
               <option value="female">Female</option>
               <option value="male">Male</option>

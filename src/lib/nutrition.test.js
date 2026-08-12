@@ -20,10 +20,12 @@ describe('nutrition progress formatting', () => {
     expect(getNutritionProgressParts(84, 120, false)).toEqual({ current: '84', target: null })
   })
 
-  it('uses biological sex only for physiological estimates', () => {
+  it('uses optional physiology sex rather than identity or a legacy proxy', () => {
     const shared = { age: 20, heightCm: 175, weightKg: 70, trainingStyle: 'Mostly individual', genderIdentity: 'Female' }
     expect(getNutritionTargets({ ...shared, biologicalSex: 'male' }).calories)
-      .toBeGreaterThan(getNutritionTargets({ ...shared, biologicalSex: 'female' }).calories)
+      .toBe(getNutritionTargets({ ...shared, biologicalSex: 'female' }).calories)
+    expect(getNutritionTargets({ ...shared, physiologySex: 'male' }).calories)
+      .toBeGreaterThan(getNutritionTargets({ ...shared, physiologySex: 'female' }).calories)
   })
 
   it('returns hydration as an honest range', () => {

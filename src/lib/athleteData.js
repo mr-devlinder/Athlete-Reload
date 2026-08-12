@@ -325,7 +325,7 @@ function fromAthleteProfileRow(row) {
   return {
     age: calculateAge(row.date_of_birth) ?? row.age_years ?? null,
     ageVerifiedAt: row.age_verified_at ?? null,
-    biologicalSex: row.biological_sex ?? '',
+    physiologySex: row.biological_sex ?? '',
     dateOfBirth: row.date_of_birth ?? '',
     displayName: row.display_name ?? '',
     dominantSide: row.dominant_side ?? 'Right',
@@ -347,6 +347,7 @@ function toAthleteProfileRow(profile) {
   return {
     age_years: calculateAge(profile.dateOfBirth) ?? (profile.age ? Number(profile.age) : null),
     age_verified_at: profile.dateOfBirth ? (profile.ageVerifiedAt ?? new Date().toISOString()) : null,
+    biological_sex: profile.physiologySex ?? profile.biologicalSex ?? '',
     date_of_birth: profile.dateOfBirth || null,
     display_name: profile.displayName ?? '',
     dominant_side: profile.dominantSide ?? 'Right',
@@ -782,7 +783,7 @@ export async function loadAthleteProfile({ signal } = {}) {
   return {
     ...profile,
     athleteId: athlete.id,
-    biologicalSex: physiology?.biological_sex ?? '',
+    physiologySex: physiology?.biological_sex ?? '',
     menstrualContextEnabled: Boolean(physiology?.menstrual_context_enabled),
     menstrualSymptoms: physiology?.menstrual_symptoms ?? {},
   }
@@ -802,7 +803,7 @@ export async function upsertAthleteProfile(profile, { skipPhysiology = false } =
     return {
       ...savedProfile,
       athleteId: profile.athleteId,
-      biologicalSex: profile.biologicalSex ?? '',
+      physiologySex: profile.physiologySex ?? profile.biologicalSex ?? '',
       menstrualContextEnabled: Boolean(profile.menstrualContextEnabled),
       menstrualSymptoms: profile.menstrualSymptoms ?? {},
     }
@@ -811,13 +812,13 @@ export async function upsertAthleteProfile(profile, { skipPhysiology = false } =
   if (athleteError) throw athleteError
   const { error: physiologyError } = await supabase.from('athlete_physiology_profiles').upsert({
     athlete_id: athlete.id,
-    biological_sex: profile.biologicalSex ?? '',
+    biological_sex: profile.physiologySex ?? profile.biologicalSex ?? '',
     menstrual_context_enabled: Boolean(profile.menstrualContextEnabled),
     menstrual_symptoms: profile.menstrualSymptoms ?? {},
     updated_at: new Date().toISOString(),
   }, { onConflict: 'athlete_id' })
   if (physiologyError) throw physiologyError
-  return { ...savedProfile, athleteId: athlete.id, biologicalSex: profile.biologicalSex ?? '' }
+  return { ...savedProfile, athleteId: athlete.id, physiologySex: profile.physiologySex ?? profile.biologicalSex ?? '' }
 }
 
 export async function upsertPrivacyPreferences(preferences) {
@@ -983,8 +984,13 @@ export async function updateScheduleEvent(id, event) {
 }
 
 export async function deleteScheduleEvent(id) {
-  const { error } = await supabase.from('schedule_events').delete().eq('id', id)
+  const { error } = await supabase.rpc('delete_schedule_event_complete', { p_event_id: id })
 
+  if (error) throw error
+}
+
+export async function deleteHistoryEntryComplete(kind, id) {
+  const { error } = await supabase.rpc('delete_history_entry_complete', { p_kind: kind, p_entry_id: id })
   if (error) throw error
 }
 
@@ -1011,6 +1017,19 @@ export async function updateCheckIn(id, checkIn, recommendation) {
   if (error) throw error
 
   return fromCheckInRow(data)
+}
+
+export async function saveCheckInWithPainReports(checkIn, recommendation, reports, id = null) {
+  const { data, error } = await supabase.rpc('save_checkin_with_pain_reports', {
+    p_check_in: toCheckInRow(checkIn, recommendation),
+    p_pain_reports: reports.map(toPainReportRow),
+    p_check_in_id: id,
+  })
+  if (error) throw error
+  return {
+    record: fromCheckInRow(data.record),
+    painReports: (data.painReports ?? []).map(fromPainReportRow),
+  }
 }
 
 export async function deleteCheckInsForEvent(eventId) {
@@ -1140,6 +1159,19 @@ export async function updateTrainingCheckout(id, event, checkout) {
   if (error) throw error
 
   return fromCheckoutRow(data)
+}
+
+export async function saveCheckoutWithPainReports(event, checkout, reports, id = null) {
+  const { data, error } = await supabase.rpc('save_checkout_with_pain_reports', {
+    p_checkout: toCheckoutRow(event, checkout),
+    p_pain_reports: reports.map(toPainReportRow),
+    p_checkout_id: id,
+  })
+  if (error) throw error
+  return {
+    record: fromCheckoutRow(data.record),
+    painReports: (data.painReports ?? []).map(fromPainReportRow),
+  }
 }
 
 function insertTrainingCheckout(event, checkout, includeRecommendation) {

@@ -598,11 +598,9 @@ export function getRecommendation(checkIn) {
   const adjustment = breakdown.reduce((total, item) => total + item.value, 0)
   const rawScore = Math.max(6, Math.min(98, 100 + adjustment))
   const redFlag = hasRedFlag(checkIn)
-  const score = !redFlag && pain > 0 && pain <= 2
-    ? Math.max(rawScore, 64)
-    : !redFlag && pain >= 3 && pain <= 4
-      ? Math.max(rawScore, 56)
-      : rawScore
+  // Pain may only preserve or lower readiness. Floors here previously allowed
+  // pain to raise an otherwise poor score.
+  const score = rawScore
   const status = redFlag
     ? { label: 'Stop and Check In', intensity: 'No training' }
     : getStatus(score)

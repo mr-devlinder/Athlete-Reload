@@ -53,25 +53,17 @@ import {
   createRecoveryResponse,
   createRecoveryRoutineCompletion,
   createSavedRecoveryRoutine,
-  createCheckIn,
   createPainReports,
   createScheduleEvent,
   createShareAuditLog,
-  createTrainingCheckout,
   deleteAssociation,
-  deleteCheckIn,
-  deleteCheckInsForEvent,
-  deletePainReportsForSource,
-  deletePainReportsForSourceId,
+  deleteHistoryEntryComplete,
   deleteRecoveryRoutineCompletion,
   deleteScheduleEvent,
   deleteShareAuditLog,
-  deleteTrainingCheckout,
-  deleteTrainingCheckoutsForEvent,
   deleteTournamentWithGames,
   recordLegalConsent,
   updateAssociation,
-  updateCheckIn,
   updatePainIssue,
   updateSavedRecoveryRoutine,
   upsertPrivacyPreferences,
@@ -83,6 +75,8 @@ import {
   updateTrainingCheckout,
   updateScheduleEvent,
   saveTournamentWithGames,
+  saveCheckInWithPainReports,
+  saveCheckoutWithPainReports,
 } from './lib/athleteData'
 import { generateAiRecommendation } from './lib/aiRecommendations'
 import { buildAthleteContext, buildFallbackRecommendation } from './lib/recommendationContext'
@@ -100,6 +94,7 @@ import { getRecommendation } from './utils/readiness'
 import { getAthleteInsights } from './domain/insights'
 import { getPersonalBaseline, getRollingBaselineRecords } from './utils/baselines'
 import { getHydrationTarget, getNutritionTargets, getNutritionTotals } from './lib/nutrition'
+import { getHydrationResult } from './domain/nutrition/hydration'
 import { canPersistGuestState, clearUserStorage, loadSavedState, saveState } from './utils/storage'
 import { getEventDisplayName, isAllDayCheckInOpen, isAllDayEvent, isEventActionable, isRestDayEvent } from './utils/events'
 import { getCheckInPreparationContext } from './utils/eventFuelContext'
@@ -109,7 +104,6 @@ import { shouldShowStartupLoader } from './lib/startupFlow'
 import './App.css'
 import './styles/tokens.css'
 import './styles/primitives.css'
-import './styles/ui-system.css'
 import './styles/ui-production.css'
 import './styles/shell-rework.css'
 
@@ -240,13 +234,18 @@ function getDefaultLoadForEvent(type) {
   return 'Medium'
 }
 
-function getHydrationStatus(hydrationMl = 0) {
-  const progress = Number(hydrationMl) / 3000
-
-  if (progress >= 0.9) return 'Good'
-  if (progress >= 0.5) return 'Okay'
-
-  return 'Poor'
+function getHydrationStatus(hydrationMl, profile = {}, schedule = [], date) {
+  const result = getHydrationResult({
+    profile,
+    schedule,
+    date,
+    currentLoggedMl: hydrationMl,
+    hasLogs: Number(hydrationMl) > 0,
+  })
+  if (result.status === 'on_track') return 'Good'
+  if (result.status === 'building') return 'Okay'
+  if (result.status === 'below_context') return 'Poor'
+  return 'Unknown'
 }
 
 function getMealNutritionBreakdown(entries = []) {
@@ -800,14 +799,14 @@ function App() {
       eventId: selectedCheckInEvent?.id ?? null,
       eventTime: selectedCheckInEvent?.time ?? '',
       eventTitle: selectedCheckInEvent?.title ?? 'Open training day',
-      hydration: getHydrationStatus(dailyWellness?.hydrationMl),
+      hydration: getHydrationStatus(dailyWellness?.hydrationMl, athleteProfile, schedule, todayIso),
       hydrationMl: Math.max(0, Number(dailyWellness?.hydrationMl ?? 0)),
       notes: '',
       plannedIntensity: selectedCheckInEvent?.load ?? 'Open',
       session: getSessionFromEvent(selectedCheckInEvent) || getSessionFromSchedule(todayEvents),
       yesterdayLoad: getYesterdayLoadFromSchedule(schedule),
     }),
-    [checkIn, dailyWellness?.hydrationMl, schedule, selectedCheckInEvent, todayEvents, todayIso],
+    [athleteProfile, checkIn, dailyWellness?.hydrationMl, schedule, selectedCheckInEvent, todayEvents, todayIso],
   )
   const nutritionContext = useMemo(() => {
     const entries = dailyWellness?.nutritionEntries ?? []
@@ -1175,7 +1174,7 @@ function App() {
 
       setCheckIn((current) => ({
         ...current,
-        hydration: getHydrationStatus(hydrationMl),
+        hydration: getHydrationStatus(hydrationMl, athleteProfile, schedule, todayIso),
         hydrationMl,
       }))
       return
@@ -1262,6 +1261,34 @@ function App() {
       ? mergeAiExplanation(deterministicRecommendation, savedCheckIn.quickRecommendation)
       : deterministicRecommendation
     let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
+    let deterministicSave = null
+
+    if (supabase) {
+      try {
+        deterministicSave = await saveCheckInWithPainReports(savedCheckIn, deterministicRecommendation, getPainReportsWithResolutions(
+          savedCheckIn.painMap,
+          {
+            date: savedCheckIn.eventDate ?? todayIso,
+            notes: savedCheckIn.notes,
+            sourceId: previousEntry?.id ?? null,
+            sourceType: 'check_in',
+            triggerMovement: savedCheckIn.hurtsWhen,
+          },
+          painReports.filter((report) => report.sourceId !== previousEntry?.id),
+        ), isEditingToday ? previousEntry?.id : null)
+        setHistory((current) => [deterministicSave.record, ...current.filter((entry) => entry.id !== deterministicSave.record.id && entry.eventId !== deterministicSave.record.eventId)])
+        setPainReports((current) => [...deterministicSave.painReports, ...current.filter((report) => report.sourceId !== deterministicSave.record.id && report.sourceId !== previousEntry?.id)])
+        setSubmittedRecommendation(deterministicRecommendation)
+        setSubmittedRecommendationStatus('local')
+        setSubmittedRecommendationContext({ scoreLabel: 'readiness', session: savedCheckIn.session, title: 'Check-in report' })
+        setIsSavingCheckIn(false)
+      } catch (error) {
+        console.error(error)
+        setDataStatus('error')
+        setIsSavingCheckIn(false)
+        return
+      }
+    }
 
     if (!savedCheckIn.quickRecommendation) {
       try {
@@ -1320,15 +1347,8 @@ function App() {
 
     if (supabase) {
       let savedEntry = null
-      const previousPainReports = painReports.filter((report) => report.sourceId === previousEntry?.id)
       try {
-        savedEntry = isEditingToday && previousEntry?.id
-          ? await updateCheckIn(previousEntry.id, savedCheckIn, finalRecommendation)
-          : await createCheckIn(savedCheckIn, finalRecommendation)
-        if (isEditingToday && previousEntry?.id) {
-          await deletePainReportsForSource('check_in', previousEntry.id)
-        }
-        const savedPainReports = await createPainReports(getPainReportsWithResolutions(
+        const result = await saveCheckInWithPainReports(savedCheckIn, finalRecommendation, getPainReportsWithResolutions(
           savedCheckIn.painMap,
           {
             date: savedCheckIn.eventDate ?? todayIso,
@@ -1338,7 +1358,9 @@ function App() {
             triggerMovement: savedCheckIn.hurtsWhen,
           },
           painReports.filter((report) => report.sourceId !== previousEntry?.id),
-        ))
+        ), deterministicSave?.record.id ?? (isEditingToday ? previousEntry?.id : null))
+        savedEntry = result.record
+        const savedPainReports = result.painReports
         setHistory((current) => [
           savedEntry,
           ...current.filter((entry) =>
@@ -1372,19 +1394,6 @@ function App() {
         }
       } catch (error) {
         console.error(error)
-        if (savedEntry) {
-          try {
-            await deletePainReportsForSource('check_in', savedEntry.id)
-            if (previousEntry?.id) {
-              await updateCheckIn(previousEntry.id, previousEntry, previousEntry.recommendation)
-              await createPainReports(previousPainReports)
-            } else {
-              await deleteCheckIn(savedEntry.id)
-            }
-          } catch (rollbackError) {
-            console.error('Check-in rollback failed', rollbackError)
-          }
-        }
         setDataStatus('error')
         setIsSavingCheckIn(false)
         return
@@ -1585,12 +1594,14 @@ function App() {
   }
 
   async function removeScheduleItem(id) {
+    const removedEvent = schedule.find((item) => item.id === id)
     const relatedCheckIns = history.filter((entry) => entry.eventId === id)
     const relatedCheckouts = checkouts.filter((checkout) => checkout.eventId === id)
     const relatedSourceIds = new Set([
       ...relatedCheckIns.map((entry) => entry.id),
       ...relatedCheckouts.map((checkout) => checkout.id),
     ].filter(Boolean))
+    const removedPainReports = painReports.filter((report) => relatedSourceIds.has(report.sourceId))
 
     setSchedule((current) => current.filter((item) => item.id !== id))
     setHistory((current) => current.filter((entry) => entry.eventId !== id))
@@ -1614,20 +1625,14 @@ function App() {
     }
 
     try {
-      await Promise.all([
-        ...relatedCheckIns
-          .filter((entry) => entry.id)
-          .map((entry) => deletePainReportsForSource('check_in', entry.id)),
-        ...relatedCheckouts
-          .filter((checkout) => checkout.id)
-          .map((checkout) => deletePainReportsForSourceId(checkout.id)),
-      ])
-      await deleteCheckInsForEvent(id)
-      await deleteTrainingCheckoutsForEvent(id)
       await deleteScheduleEvent(id)
       setDataStatus('synced')
     } catch (error) {
       console.error(error)
+      setSchedule((current) => [...current, removedEvent].filter(Boolean))
+      setHistory((current) => [...relatedCheckIns, ...current])
+      setCheckouts((current) => [...relatedCheckouts, ...current])
+      setPainReports((current) => [...removedPainReports, ...current])
       setDataStatus('error')
     }
   }
@@ -1765,30 +1770,34 @@ function App() {
     }
 
     if (kind === 'checkout') {
+      const removedPainReports = painReports.filter((report) => report.sourceId === entry.id)
       setCheckouts((current) => current.filter((item) => item.id !== entry.id))
       setPainReports((current) => current.filter((report) => report.sourceId !== entry.id))
 
       if (isSupabaseSession) {
         try {
-          await deletePainReportsForSourceId(entry.id)
-          await deleteTrainingCheckout(entry.id)
+          await deleteHistoryEntryComplete('checkout', entry.id)
         } catch (error) {
           console.error(error)
+          setCheckouts((current) => [entry, ...current.filter((item) => item.id !== entry.id)])
+          setPainReports((current) => [...removedPainReports, ...current.filter((report) => report.sourceId !== entry.id)])
           setDataStatus('error')
         }
       }
       return
     }
 
+    const removedPainReports = painReports.filter((report) => report.sourceId === entry.id)
     setHistory((current) => current.filter((item) => item.id !== entry.id))
     setPainReports((current) => current.filter((report) => report.sourceId !== entry.id))
 
     if (isSupabaseSession) {
       try {
-        await deletePainReportsForSource('check_in', entry.id)
-        await deleteCheckIn(entry.id)
+        await deleteHistoryEntryComplete('check_in', entry.id)
       } catch (error) {
         console.error(error)
+        setHistory((current) => [entry, ...current.filter((item) => item.id !== entry.id)])
+        setPainReports((current) => [...removedPainReports, ...current.filter((report) => report.sourceId !== entry.id)])
         setDataStatus('error')
       }
     }
@@ -1881,6 +1890,26 @@ function App() {
       ? mergeAiExplanation(deterministicRecommendation, existingCheckout.recommendation)
       : deterministicRecommendation
     let finalRecommendationStatus = existingCheckout?.recommendation?._source === 'gemini' ? 'ai' : 'local'
+    let deterministicSave = null
+
+    if (isSupabaseSession) {
+      deterministicSave = await saveCheckoutWithPainReports(event, { ...checkout, recommendation: deterministicRecommendation }, getPainReportsFromMap(
+        checkout.painMap,
+        {
+          date: event.date,
+          notes: '',
+          sourceId: existingCheckout?.id ?? null,
+          sourceType: 'checkout',
+          triggerMovement: checkout.painChange,
+        },
+      ), existingCheckout?.id ?? null)
+      setCheckouts((current) => [deterministicSave.record, ...current.filter((item) => item.id !== deterministicSave.record.id)])
+      setPainReports((current) => [...deterministicSave.painReports, ...current.filter((report) => report.sourceId !== deterministicSave.record.id && report.sourceId !== existingCheckout?.id)])
+      setCheckoutEvent(null)
+      setSubmittedRecommendation(deterministicRecommendation)
+      setSubmittedRecommendationStatus('local')
+      setSubmittedRecommendationContext({ scoreLabel: 'recovery', session: event.type, title: 'Checkout report' })
+    }
 
     if (supabase) {
       try {
@@ -1936,47 +1965,23 @@ function App() {
 
     if (isSupabaseSession) {
       let savedCheckout
-
-      try {
-        savedCheckout = existingCheckout
-          ? await updateTrainingCheckout(existingCheckout.id, event, checkoutWithRecommendation)
-          : await createTrainingCheckout(event, checkoutWithRecommendation)
-      } catch (error) {
-        console.error(error)
-        setDataStatus('error')
-        throw error
-      }
-
       let savedPainReports = []
-      const previousPainReports = painReports.filter((report) => report.sourceId === existingCheckout?.id)
-      try {
-        if (existingCheckout?.id) {
-          await deletePainReportsForSource('checkout', existingCheckout.id)
-        }
 
-        savedPainReports = await createPainReports(getPainReportsFromMap(
+      try {
+        const result = await saveCheckoutWithPainReports(event, checkoutWithRecommendation, getPainReportsFromMap(
           checkout.painMap,
           {
             date: event.date,
             notes: '',
-            sourceId: savedCheckout.id,
+            sourceId: existingCheckout?.id ?? null,
             sourceType: 'checkout',
             triggerMovement: checkout.painChange,
           },
-        ))
+        ), deterministicSave?.record.id ?? existingCheckout?.id ?? null)
+        savedCheckout = result.record
+        savedPainReports = result.painReports
       } catch (error) {
         console.error(error)
-        try {
-          await deletePainReportsForSource('checkout', savedCheckout.id)
-          if (existingCheckout?.id) {
-            await updateTrainingCheckout(existingCheckout.id, event, existingCheckout)
-            await createPainReports(previousPainReports)
-          } else {
-            await deleteTrainingCheckout(savedCheckout.id)
-          }
-        } catch (rollbackError) {
-          console.error('Checkout rollback failed', rollbackError)
-        }
         setDataStatus('error')
         throw error
       }
@@ -2470,7 +2475,7 @@ function App() {
           : {
               ...getFreshCheckInDefaults(),
               ...getSharedSleepContext(history, todayIso),
-              hydration: getHydrationStatus(dailyWellness.hydrationMl),
+              hydration: getHydrationStatus(dailyWellness.hydrationMl, athleteProfile, schedule, todayIso),
               hydrationMl: dailyWellness.hydrationMl,
             },
       )
@@ -2485,7 +2490,7 @@ function App() {
     setIsEditingToday(false)
     setCheckIn({
       ...getFreshCheckInDefaults(),
-      hydration: getHydrationStatus(dailyWellness.hydrationMl),
+      hydration: getHydrationStatus(dailyWellness.hydrationMl, athleteProfile, schedule, todayIso),
       hydrationMl: dailyWellness.hydrationMl,
     })
     setActiveView('Check-in')
@@ -2517,7 +2522,7 @@ function App() {
         : {
             ...getFreshCheckInDefaults(),
             ...getSharedSleepContext(history, todayIso),
-            hydration: getHydrationStatus(dailyWellness.hydrationMl),
+            hydration: getHydrationStatus(dailyWellness.hydrationMl, athleteProfile, schedule, todayIso),
             hydrationMl: dailyWellness.hydrationMl,
           },
     )
@@ -2935,7 +2940,7 @@ function App() {
               <section className="page-content">
                 <section className="workspace page-workspace">
           <AppErrorBoundary feature={`view-${activeView.toLowerCase()}`} key={activeView}>
-          <Suspense fallback={null}>
+          <Suspense fallback={<div className="page-skeleton" role="status">Loading {activeView.toLowerCase()}…</div>}>
             {dataStatus === 'error' && (
               <div className="data-status error" role="alert">
                 <span>Your latest information could not be refreshed. The screen may be showing the last saved version.</span>

@@ -14,3 +14,9 @@
 :where(button,a,input,select,textarea,summary):focus-visible { outline: 3px solid color-mix(in srgb,var(--ar-color-accent) 72%,white); outline-offset: 3px; }
 @media (max-width: 480px) { .ui-sheet { padding: 20px 16px; } }
 @media (prefers-reduced-motion: reduce) { *,*::before,*::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+.page-skeleton {
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted, #66707d);
+}

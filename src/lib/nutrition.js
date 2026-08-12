@@ -1,18 +1,5 @@
-const activityMultipliers = {
-  'Mostly individual': 1.52,
-  'Mostly team training': 1.66,
-  'Team and individual': 1.72,
-}
-
-const goalAdjustments = {
-  'Gain weight': 250,
-  'Gain muscle': 200,
-  'Lose weight': -250,
-  'Improve conditioning': 80,
-  'Improve speed': 100,
-  'Improve strength': 150,
-  'Sport performance': 150,
-}
+import { calculateDailyEnergyContext } from '../domain/nutrition/dailyEnergy'
+import { getHydrationResult } from '../domain/nutrition/hydration'
 
 export const mealOptions = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Custom']
 
@@ -38,23 +25,15 @@ export function getNutritionTargets(profile = {}, schedule = [], date = getLocal
     return { calories: null, carbohydrates: null, fats: null, protein: null, isEstimate: true, reason: 'Add age, height, and weight in your profile to estimate daily targets.' }
   }
 
-  const normalizedSex = String(profile.biologicalSex ?? '').toLowerCase()
-  const sexOffset = normalizedSex === 'male' ? 5 : normalizedSex === 'female' ? -161 : -78
-  const baseline = (10 * weightKg) + (6.25 * heightCm) - (5 * age) + sexOffset
-  const activity = activityMultipliers[profile.trainingStyle] ?? 1.6
-  const dayEvents = schedule.filter((event) => event.date === date)
-  const plannedMinutes = dayEvents.reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
-  const trainingAdjustment = Math.min(650, Math.round(plannedMinutes * 4.5))
-  const selectedGoals = (profile.goals ?? []).map((goal, index) => ({ name: goal.name ?? goal, priority: goal.priority === 'primary' ? 2 : 1, index })).filter((goal) => goalAdjustments[goal.name] !== undefined)
-  const calorieGoal = selectedGoals.sort((first, second) => second.priority - first.priority || first.index - second.index)[0]?.name
-  const goalAdjustment = goalAdjustments[calorieGoal] ?? 0
-  const calories = Math.max(1400, Math.round((baseline * activity) + trainingAdjustment + goalAdjustment))
+  const energy = calculateDailyEnergyContext(profile, schedule, date)
+  const calories = energy.midpointKcal
+  const selectedGoals = (profile.goals ?? []).map((goal) => ({ name: goal.name ?? goal }))
   const proteinGoal = selectedGoals.some((goal) => ['Gain muscle', 'Improve strength'].includes(goal.name))
   const protein = Math.round(weightKg * (proteinGoal ? 1.8 : 1.5))
   const fats = Math.round((calories * 0.28) / 9)
   const carbohydrates = Math.round(Math.max(0, (calories - (protein * 4) - (fats * 9)) / 4))
 
-  return { calories, carbohydrates, fats, protein, isEstimate: true, reason: 'Estimated from the profile, goals, planned activity, and selected training style.' }
+  return { calories, calorieRange: energy.rangeKcal, carbohydrates, fats, protein, isEstimate: true, reason: energy.safety.message ?? energy.reason }
 }
 
 export function getNutritionTotals(entries = []) {
@@ -78,26 +57,22 @@ export function getLocalDate() {
 }
 
 export function getHydrationTarget(profile = {}, schedule = [], date = getLocalDate()) {
-  profile = profile ?? {}
-  const weightKg = Number(profile.weightKg)
-  const baseline = weightKg ? Math.round(weightKg * 35) : 2366
-  const eventMinutes = schedule.filter((event) => event.date === date).reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
-  return Math.max(1893, Math.min(5323, baseline + Math.round(eventMinutes * 7.4)))
+  const result = getHydrationResult({ profile, schedule, date })
+  return Math.round((result.baselineRangeMl.low + result.baselineRangeMl.high + result.eventAdjustmentRangeMl.low + result.eventAdjustmentRangeMl.high) / 2)
 }
 
 export function getHydrationGuidance(profile = {}, schedule = [], date = getLocalDate()) {
-  const midpointMl = getHydrationTarget(profile, schedule, date)
-  const dayEvents = schedule.filter((event) => event.date === date)
-  const eventMinutes = dayEvents.reduce((total, event) => total + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0)
-  const environmentUncertainty = dayEvents.some((event) => /outdoor|hot|humid/i.test(`${event.environment ?? ''} ${event.note ?? ''}`)) ? 0.18 : 0.12
-  const spread = Math.max(250, Math.round(midpointMl * environmentUncertainty))
+  const result = getHydrationResult({ profile, schedule, date })
+  const minimumMl = result.baselineRangeMl.low + result.eventAdjustmentRangeMl.low
+  const maximumMl = result.baselineRangeMl.high + result.eventAdjustmentRangeMl.high
   return {
-    minimumMl: Math.max(1500, midpointMl - spread),
-    maximumMl: Math.min(6000, midpointMl + spread),
-    midpointMl,
-    sessionMinutes: eventMinutes,
+    ...result,
+    minimumMl,
+    maximumMl,
+    midpointMl: Math.round((minimumMl + maximumMl) / 2),
+    sessionMinutes: schedule.filter((event) => event.date === date).reduce((sum, event) => sum + Number(event.expectedDuration ?? event.plannedMinutes ?? 0), 0),
     isEstimate: true,
-    practicalCue: eventMinutes >= 60
+    practicalCue: result.eventAdjustmentRangeMl.high > 0
       ? 'Start hydrated and drink regularly during the session; increase toward the top of the range in heat or with heavy sweating.'
       : 'Drink regularly across the day and use thirst and urine color as practical checks.',
   }

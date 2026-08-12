@@ -1,10 +1,10 @@
-export const RECOMMENDATION_SCHEMA_VERSION = 2
-export const RECOMMENDATION_ENGINE_VERSION = 'deterministic-2.0.0'
+export const RECOMMENDATION_SCHEMA_VERSION = 3
+export const RECOMMENDATION_ENGINE_VERSION = 'deterministic-3.0.0'
 
-export const recommendationStatuses = ['ready', 'adjust', 'limit', 'stop_and_check']
+export const recommendationStatuses = ['ready', 'adjust', 'limit', 'stop_and_seek_help']
 
 export function getRecommendationStatus({ label, redFlag = false, score = 0 } = {}) {
-  if (redFlag || label === 'Stop and Check In') return 'stop_and_check'
+  if (redFlag || label === 'Stop and Check In') return 'stop_and_seek_help'
   if (score < 45) return 'limit'
   if (score < 80) return 'adjust'
   return 'ready'
@@ -88,7 +88,7 @@ export function createQuickDeterministicRecommendation(transcript = '') {
     label,
     tone,
     score,
-    status: stop ? 'stop_and_check' : limit ? 'limit' : 'adjust',
+    status: stop ? 'stop_and_seek_help' : limit ? 'limit' : 'adjust',
     summary: 'This quick entry has limited structured information, so it cannot support a full readiness decision.',
     focus: stop ? ['Tell a qualified adult now', 'Do not resume until the concern is checked'] : ['Complete the detailed check-in', 'Use only information you can report confidently'],
     avoid: stop ? ['Continuing the event', 'Testing the concerning symptom'] : limit ? ['Movements that reproduce or worsen symptoms'] : [],

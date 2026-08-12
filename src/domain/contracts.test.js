@@ -11,7 +11,7 @@ describe('recommendation contracts', () => {
       warnings: [],
       actions: [],
     })
-    expect(merged.status).toBe('stop_and_check')
+    expect(merged.status).toBe('stop_and_seek_help')
     expect(merged.score).toBe(20)
     expect(merged.warnings).toEqual(deterministic.warnings)
     expect(merged.summary).toBe('A clearer explanation.')

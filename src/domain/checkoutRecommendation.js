@@ -45,7 +45,7 @@ export function getCheckoutRecommendation(checkout = {}, event = {}, nextEvent =
     avoid: warnings,
     reasons,
     warnings,
-    status: stop ? 'stop_and_check' : score < 55 ? 'limit' : score < 80 ? 'adjust' : 'ready',
+    status: stop ? 'stop_and_seek_help' : score < 55 ? 'limit' : score < 80 ? 'adjust' : 'ready',
     reportSections: [
       { id: 'session-summary', title: 'What happened', summary: `${Number(checkout.actualMinutes) || 0} minutes at ${Number(checkout.difficulty) || 0}/10 effort produced ${sessionLoad} session-load units.`, items: [] },
       { id: 'recovery-status', title: 'What matters now', summary: label, items: reasons },

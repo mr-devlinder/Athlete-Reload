@@ -20,15 +20,7 @@ export function useModalAccessibility(isOpen, onClose) {
     const opener = document.activeElement
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-    const dialogs = [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')]
-    const dialog = dialogRef.current ?? dialogs.at(-1)
-    dialog?.classList.add('dialog-shell')
-    if (dialog?.parentElement?.classList.contains('modal-backdrop')) {
-      dialog.parentElement.classList.add('dialog-backdrop')
-    }
-    if (dialog && !dialog.hasAttribute('aria-label') && !dialog.hasAttribute('aria-labelledby')) {
-      dialog.setAttribute('aria-label', 'Dialog')
-    }
+    const dialog = dialogRef.current
     const getFocusable = () => dialog
       ? [...dialog.querySelectorAll(focusableSelector)].filter((item) => !item.closest('[hidden]'))
       : []
