@@ -3,13 +3,13 @@ import { useId } from 'react'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
 import { IconButton } from './UIPrimitives'
 
-export function DialogShell({ children, className = '', description, eyebrow, onClose, title, titleId, tone = 'default' }) {
+export function DialogShell({ backdropClassName = '', children, className = '', description, eyebrow, onClose, showClose = true, title, titleId, tone = 'default' }) {
   const generatedId = useId()
   const headingId = titleId ?? `dialog-${generatedId}`
   const dialogRef = useModalAccessibility(true, onClose)
 
   return createPortal(
-    <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
+    <div className={`dialog-backdrop ${backdropClassName}`.trim()} onMouseDown={(event) => event.target === event.currentTarget && onClose?.()}>
       <section
         aria-labelledby={title ? headingId : undefined}
         aria-label={title ? undefined : 'Dialog'}
@@ -26,7 +26,7 @@ export function DialogShell({ children, className = '', description, eyebrow, on
               {title && <h2 id={headingId}>{title}</h2>}
               {description && <p>{description}</p>}
             </div>
-            {onClose && <IconButton className="dialog-shell__close" icon="close" label="Close dialog" onClick={onClose} type="button" />}
+            {onClose && showClose && <IconButton className="dialog-shell__close" icon="close" label="Close dialog" onClick={onClose} type="button" />}
           </header>
         )}
         <div className="dialog-shell__body">{children}</div>

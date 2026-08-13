@@ -5,6 +5,7 @@ import { m } from 'motion/react'
 import { AppIcon } from './AppIcon'
 import { normalizeRecoveryExercise } from '../domain/recovery'
 import { buildVettedRoutine, getVettedSubstitute } from '../domain/recovery/routineBuilder'
+import { recordRoutinePainEvent } from '../lib/athleteData'
 import '../styles/recovery-rework.css'
 
 const equipmentOptions = [
@@ -15,12 +16,12 @@ const equipmentOptions = [
 const planTypeOptions = [
   { id: 'session', label: 'Session recovery', description: 'Respond to your latest workout, practice, and checkout.' },
   { id: 'competition', label: 'Competition recovery', description: 'Prioritize recovery after a match, race, meet, or game.' },
-  { id: 'quick', label: 'Quick reset', description: 'A focused 5–10 minute reset when time is limited.' },
-  { id: 'full-body', label: 'Full body mobility', description: 'Comfortable movement across the major body areas.' },
-  { id: 'flexibility', label: 'Flexibility', description: 'Comfortable, unforced range-of-motion work.' },
-  { id: 'targeted', label: 'Targeted area', description: 'Prioritize selected areas without treating pain.' },
-  { id: 'recovery-day', label: 'Recovery day', description: 'Longer low-load movement, mobility, and downshift work.' },
-  { id: 'pre-event', label: 'Pre-event mobility', description: 'Gentle dynamic movement appropriate before what comes next.' },
+  { id: 'quick', label: 'Quick athletic reset', description: 'Joint prep and activation in a focused 5–10 minute block.' },
+  { id: 'full-body', label: 'Full body mobility', description: 'Organized trunk, hip, shoulder, and ankle movement.' },
+  { id: 'flexibility', label: 'Range session', description: 'Controlled flexibility work without forcing end range.' },
+  { id: 'targeted', label: 'Targeted area', description: 'Build around selected areas and reported restrictions.' },
+  { id: 'recovery-day', label: 'Recovery training', description: 'A longer mobility, control, and flexibility session.' },
+  { id: 'pre-event', label: 'Pre-event prep', description: 'Dynamic mobility and activation for what comes next.' },
 ]
 const targetAreaOptions = ['Shoulders / arms', 'Back / trunk', 'Hips', 'Quads / hamstrings', 'Knees', 'Calves / ankles / feet']
 
@@ -30,6 +31,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     [checkouts],
   )
   const latestEvent = schedule.find((event) => event.id === latestCheckout?.eventId)
+  const nextRecoveryEvent = getNextRecoveryEvent(schedule, latestEvent)
   const [equipment, setEquipment] = useState([])
   const [equipmentOpen, setEquipmentOpen] = useState(false)
   const [equipmentTouched, setEquipmentTouched] = useState(false)
@@ -39,6 +41,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const equipmentMenuRef = useRef(null)
   const routineVariationRef = useRef(0)
   const recoverySaveStartedRef = useRef(false)
+  const automaticPlanRequestedRef = useRef(false)
   const [timeAvailable, setTimeAvailable] = useState('15 minutes')
   const [planType, setPlanType] = useState('session')
   const [targetedAreas, setTargetedAreas] = useState([])
@@ -47,6 +50,9 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [secondsLeft, setSecondsLeft] = useState(0)
   const [routinePaused, setRoutinePaused] = useState(false)
   const [completedRoutineExercises, setCompletedRoutineExercises] = useState(() => new Set())
+  const [skippedRoutineExercises, setSkippedRoutineExercises] = useState(() => new Set())
+  const [routineHurtEvents, setRoutineHurtEvents] = useState([])
+  const [routineStartedAt, setRoutineStartedAt] = useState(null)
   const [routineFeedback, setRoutineFeedback] = useState(null)
   const [hurtReport, setHurtReport] = useState(null)
   const [excludedExercises, setExcludedExercises] = useState([])
@@ -56,6 +62,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   const [isSavingPlan, setIsSavingPlan] = useState(false)
   const [savePlanMessage, setSavePlanMessage] = useState('')
   const [savedRoutinesOpen, setSavedRoutinesOpen] = useState(false)
+  const [activeSection, setActiveSection] = useState(() => new URLSearchParams(window.location.search).get('view') === 'mobility' ? 'mobility' : 'plan')
 
   const plan = generatedPlan?.planType === planType ? generatedPlan : null
   const routineResult = buildVettedRoutine({
@@ -131,7 +138,20 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     }
   }, [equipmentOpen])
 
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', activeSection)
+    window.history.replaceState(window.history.state, '', url)
+  }, [activeSection])
+
+  useEffect(() => {
+    if (activeSection !== 'plan' || !latestCheckout || generatedPlan || generationStatus !== 'idle' || automaticPlanRequestedRef.current) return
+    automaticPlanRequestedRef.current = true
+    handleGenerate('session')
+  }, [activeSection, generatedPlan, generationStatus, latestCheckout])
+
   function startExercise() {
+    setRoutineStartedAt((current) => current ?? new Date().toISOString())
     setRoutineStarted(true)
     setRoutinePaused(false)
     setSecondsLeft(Number(currentExercise?.durationSeconds ?? 0))
@@ -139,7 +159,10 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
 
   function advanceExercise(completion = 'complete') {
     if (completion === 'complete' && currentExercise) {
-      setCompletedRoutineExercises((current) => new Set([...current, `${currentExercise.name}-${currentExercise.side ?? ''}`]))
+      setCompletedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
+    }
+    if (completion !== 'complete' && currentExercise) {
+      setSkippedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
     }
 
     if (routineIndex >= routine.length - 1) {
@@ -167,8 +190,17 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
       ...hurtReport,
       checkoutId: latestCheckout?.id ?? null,
       exercise: exerciseName,
+      movementId: currentExercise?.id,
+      bodyRegion: currentExercise?.area ?? '',
+      side: currentExercise?.side ?? 'not_applicable',
+      response: hurtReport?.severity === 'mild' ? 'mild_discomfort' : 'meaningful_pain',
+      actionTaken: action,
+      occurredAt: new Date().toISOString(),
     }
     await onReportRoutinePain?.(report)
+    await recordRoutinePainEvent(report).catch((error) => console.error('Unable to save routine pain event', error))
+    setRoutineHurtEvents((current) => [...current, report])
+    if (currentExercise?.id) setSkippedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
     setHurtReport(null)
 
     if (action === 'end') {
@@ -187,18 +219,27 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
     }
   }
 
-  function handleGenerate() {
+  function handleGenerate(requestedType = planType) {
     recoverySaveStartedRef.current = false
     routineVariationRef.current += 1
     setRoutineFeedback(null)
     setRoutineComplete(false)
     setCompletedRoutineExercises(new Set())
+    setSkippedRoutineExercises(new Set())
+    setRoutineHurtEvents([])
+    setRoutineStartedAt(null)
     setExcludedExercises([])
     setPreferredSubstitutes([])
     setRoutineIndex(0)
     setRoutineStarted(false)
     setEquipmentTouched(true)
-    onGeneratePlan({ equipment, planType, targetedAreas, timeAvailable })
+    setPlanType(requestedType)
+    onGeneratePlan({ equipment, planType: requestedType, targetedAreas, timeAvailable })
+  }
+
+  function selectSection(section) {
+    setActiveSection(section)
+    setPlanType(section === 'plan' ? 'session' : 'full-body')
   }
 
   function selectPlanType(nextType) {
@@ -225,6 +266,27 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
         routineProgress: {
           completed: completedRoutineExercises.size,
           total: routine.length,
+        },
+        routineSession: {
+          routineType: plan.planType ?? planType,
+          generatedAt: plan.generatedAt ?? new Date().toISOString(),
+          startedAt: routineStartedAt,
+          finishedAt: new Date().toISOString(),
+          plannedDurationSeconds: routineResult.estimatedSeconds,
+          actualDurationSeconds: routineStartedAt ? Math.max(0, Math.round((Date.now() - new Date(routineStartedAt).getTime()) / 1000)) : null,
+          movementIds: routine.map((exercise) => exercise.id),
+          movementOrder: routine.map((exercise) => exercise.id),
+          plannedPrescription: routine.map((exercise) => ({ instanceId: getRoutineExerciseKey(exercise), movementId: exercise.id, ...(exercise.durationSeconds ? { seconds: exercise.durationSeconds, side: exercise.side } : { reps: exercise.reps, side: exercise.side }) })),
+          completedPrescription: routine.filter((exercise) => completedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => ({ instanceId: getRoutineExerciseKey(exercise), movementId: exercise.id, ...(exercise.durationSeconds ? { seconds: exercise.durationSeconds, side: exercise.side } : { reps: exercise.reps, side: exercise.side }) })),
+          movementsCompleted: routine.filter((exercise) => completedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => exercise.id),
+          movementsSkipped: routine.filter((exercise) => skippedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => exercise.id),
+          completionPercentage: routine.length ? Math.round(completedRoutineExercises.size / routine.length * 10000) / 100 : 0,
+          hurtEvents: routineHurtEvents,
+          modifications: preferredSubstitutes.map((exercise) => ({ type: 'substitute', movementId: exercise.id })),
+          associatedEventId: latestEvent?.id ?? null,
+          equipment,
+          statedGoal: plan.routine?.goal ?? planType,
+          status: routineHurtEvents.some((event) => event.actionTaken === 'end') ? 'ended_for_pain' : completedRoutineExercises.size >= routine.length ? 'completed' : 'partial',
         },
         ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
       })
@@ -265,12 +327,17 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
       <section className="recovery-hero">
         <div>
           <p className="eyebrow">Recovery</p>
-          <h1>Give your body a chance to reload.</h1>
-          <p className="page-header-description">Turn the latest checkout into a practical recovery plan that fits the session you actually completed.</p>
+          <h1>What matters after the work.</h1>
+          <div className="recovery-context-line"><span><small>From</small>{latestEvent?.title ?? latestCheckout?.eventTitle ?? 'Complete checkout to begin'}</span><i aria-hidden="true">→</i><span><small>Next</small>{nextRecoveryEvent?.title ?? 'No upcoming event'}</span></div>
         </div>
       </section>
 
-      {['session', 'competition'].includes(planType) && latestCheckout && <section className="recovery-latest recovery-checkout-context glass-panel">
+      <div className="recovery-view-toggle" role="tablist" aria-label="Recovery view">
+        <button aria-controls="recovery-plan-panel" aria-selected={activeSection === 'plan'} className={activeSection === 'plan' ? 'active' : ''} id="recovery-plan-tab" onClick={() => selectSection('plan')} role="tab" tabIndex={activeSection === 'plan' ? 0 : -1} type="button">Recovery</button>
+        <button aria-controls="mobility-panel" aria-selected={activeSection === 'mobility'} className={activeSection === 'mobility' ? 'active' : ''} id="mobility-tab" onClick={() => selectSection('mobility')} role="tab" tabIndex={activeSection === 'mobility' ? 0 : -1} type="button">Mobility</button>
+      </div>
+
+      {activeSection === 'plan' && latestCheckout && <section aria-labelledby="recovery-plan-tab" className="recovery-latest recovery-checkout-context glass-panel" id="recovery-plan-panel" role="tabpanel">
           <div className="recovery-section-heading">
             <div>
               <p className="eyebrow">Latest checkout</p>
@@ -285,14 +352,20 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
           </div>
       </section>}
 
-      <section className="recovery-builder-panel glass-panel">
+      {activeSection === 'plan' && <section aria-labelledby="recovery-plan-tab" className="recovery-plan-launch glass-panel" id={latestCheckout ? undefined : 'recovery-plan-panel'} role={latestCheckout ? undefined : 'tabpanel'}>
+        <div><p className="eyebrow">Living recovery plan</p><h2>{latestCheckout ? 'Update priorities from your latest session' : 'Recovery starts with a completed event'}</h2><p>{latestCheckout ? 'Fueling, hydration, mobility, pain, time since the event, and what comes next shape this plan.' : 'Complete Checkout after an event so recovery can respond to what actually happened.'}</p></div>
+        <button className="primary-button" disabled={!latestCheckout || generationStatus === 'loading'} onClick={() => handleGenerate('session')} type="button">{generationStatus === 'loading' ? 'Updating plan...' : plan ? 'Refresh recovery plan' : 'Build recovery plan'}</button>
+      </section>}
+      {activeSection === 'plan' && generationStatus === 'error' && <p className="recovery-plan-error">AI could not build the recovery plan. Your checkout is safe; retry when the connection is available.</p>}
+
+      {activeSection === 'mobility' && <section aria-labelledby="mobility-tab" className="recovery-builder-panel glass-panel" id="mobility-panel" role="tabpanel">
           <div className="recovery-generator">
             <div>
               <strong>Build your recovery plan</strong>
               <p>Choose the outcome you need. The plan adapts to your session, sport, pain, nutrition, recovery history, and what is next.</p>
             </div>
             <div className="recovery-type-grid" role="radiogroup" aria-label="Recovery plan type">
-              {planTypeOptions.map((option, index) => (
+              {planTypeOptions.filter((option) => !['session', 'competition'].includes(option.id)).map((option, index) => (
                 <m.button
                   aria-checked={planType === option.id}
                   className={planType === option.id ? 'selected' : ''}
@@ -356,7 +429,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                   document.body,
                 )}
               </div>
-              <button className="primary-button" disabled={generationStatus === 'loading' || (['session', 'competition'].includes(planType) && !latestCheckout) || (planType === 'targeted' && targetedAreas.length === 0)} onClick={handleGenerate} type="button">
+              <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'targeted' && targetedAreas.length === 0)} onClick={() => handleGenerate()} type="button">
                 <AppIcon name="spark" size={18} />
                 {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
               </button>
@@ -384,18 +457,11 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
               </div> : <p className="recovery-context-note">Favorite a routine from Recovery history to load it here.</p>}
             </div>
           )}
-      </section>
+      </section>}
 
       {plan && (
         <>
-          {!isRoutineOnlyPlan && plan.reportSections?.length > 0 && <section className="recovery-plan-panel glass-panel">
-            <div className="recovery-section-heading"><div><p className="eyebrow">Personalized recovery report</p><h2>What matters most now</h2></div></div>
-            <div className="report-section-grid recovery-report-grid">{plan.reportSections.map((section) => <article className={`report-section${section.id === 'recovery-priorities' ? ' priority' : ''}`} key={section.id}>
-              <strong>{section.title}</strong>
-              {section.summary && <p>{section.summary}</p>}
-              {section.items?.length > 0 && <ol>{section.items.map((item) => <li key={item}>{item}</li>)}</ol>}
-            </article>)}</div>
-          </section>}
+          {!isRoutineOnlyPlan && plan.reportSections?.length > 0 && <RecoveryPlanExperience plan={plan} />}
 
           <section className="recovery-routine-panel recovery-plan-panel glass-panel">
             <div className="recovery-section-heading">
@@ -411,23 +477,10 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
             {!routineComplete && (
               <details className="routine-preview">
                 <summary>View routine plan ({routine.length} exercises)</summary>
-                <ol className="routine-plan-list">
-                  {routine.map((exercise, index) => (
-                    <li className="routine-plan-step" key={`${exercise.name}-${exercise.side}-${index}`}>
-                      <strong>{exercise.name}</strong>
-                      <span className="routine-step-meta">{formatExerciseBodyArea(exercise)} · {formatExerciseDose(exercise)}</span>
-                      <p><strong>Setup:</strong> {exercise.setup}</p>
-                      <p><strong>Movement:</strong> {exercise.movement}</p>
-                      <p><strong>Complete when:</strong> {exercise.completionCue}</p>
-                      <div className="routine-step-cues">
-                        <span><b>You should feel:</b> {exercise.feel ?? 'Mild, comfortable tension or controlled movement.'}</span>
-                        <span><b>Stop if:</b> {exercise.stopConditions}</span>
-                        <span><b>Equipment:</b> {exercise.equipment}</span>
-                      </div>
-                      <em>{exercise.purpose}</em>
-                    </li>
-                  ))}
-                </ol>
+                <ol className="routine-plan-list">{routine.map((exercise, index) => <li className="routine-plan-step" key={exercise.instanceId ?? `${exercise.name}-${exercise.side}-${index}`}>
+                  <span className="routine-step-number">{String(index + 1).padStart(2, '0')}</span>
+                  <div><strong>{exercise.name}</strong><span className="routine-step-meta">{getExercisePhaseLabel(exercise)} · {formatExerciseBodyArea(exercise)} · {formatExerciseDose(exercise)}</span>{exercise.rationale && <p>{exercise.rationale}</p>}</div>
+                </li>)}</ol>
               </details>
             )}
             {routineComplete ? (
@@ -454,7 +507,7 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
                 <details open><summary>How to do it</summary><div><p><strong>Setup</strong>{currentExercise?.setup}</p><p><strong>Movement</strong>{currentExercise?.movement}</p><p><strong>Complete when</strong>{currentExercise?.completionCue}</p></div></details>
                 <details><summary>What you should feel</summary><p>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p></details>
                 <details><summary>What to avoid</summary><p>{currentExercise?.stopConditions}</p></details>
-                <details><summary>Why this is here</summary><p>{currentExercise?.purpose} {currentExercise?.equipment ? `Equipment: ${currentExercise.equipment}.` : ''}</p></details>
+                <details><summary>Why this is here</summary><p>{currentExercise?.rationale || currentExercise?.purpose} {currentExercise?.equipment ? `Equipment: ${currentExercise.equipment}.` : ''}</p></details>
               </div>
               {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
               <div className="routine-player-actions">
@@ -510,6 +563,46 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
   )
 }
 
+function RecoveryPlanExperience({ plan }) {
+  const sections = Object.fromEntries((plan.reportSections ?? []).map((section) => [section.id, section]))
+  const priorities = sections['recovery-priorities']?.items?.slice(0, 3) ?? []
+  const nextHours = [sections['nutrition-guidance'], sections['hydration-guidance'], sections['active-recovery-rest']].filter(Boolean)
+  const tonight = sections['sleep-rest-guidance']
+  const nextEvent = sections['next-event-impact']
+  const pain = sections['pain-guidance']
+  const status = sections['recovery-status']
+
+  return <section className="recovery-plan-experience" aria-labelledby="recovery-plan-heading">
+    <header className="recovery-status-deck">
+      <div><p className="eyebrow">AI recovery plan</p><h2 id="recovery-plan-heading">{plan.label ?? 'Recovery priorities'}</h2><p>{status?.summary ?? plan.summary}</p></div>
+      <span className={`recovery-priority-badge ${plan.tone ?? ''}`}>{plan.nextEventWarning ? 'Short turnaround' : plan.tone === 'danger' || plan.tone === 'warning' ? 'High priority' : 'Active plan'}</span>
+    </header>
+
+    <section className="recovery-now-block">
+      <div className="recovery-window-heading"><span>Right now</span><small>Highest value first</small></div>
+      <div className="recovery-action-list">{priorities.length ? priorities.map((item, index) => <RecoveryAction item={item} index={index} key={`${item}-${index}`} />) : <RecoveryAction item={plan.action ?? 'Begin with the highest-priority recovery action above.'} index={0} />}</div>
+    </section>
+
+    {pain && <section className="recovery-pain-priority"><span>Pain-specific</span><strong>{pain.summary}</strong>{pain.items?.map((item) => <p key={item}>{item}</p>)}</section>}
+
+    <div className="recovery-window-grid">
+      <RecoveryWindow eyebrow="Next few hours" sections={nextHours} fallback="Follow the immediate priorities, then reassess how your body responds." />
+      <RecoveryWindow eyebrow="Tonight" sections={tonight ? [tonight] : []} fallback="Protect normal food, fluids, and a full sleep opportunity." />
+      <RecoveryWindow eyebrow="Tomorrow / next event" sections={nextEvent ? [nextEvent] : []} fallback="Use the next check-in to reassess soreness, fatigue, and pain before training." />
+    </div>
+  </section>
+}
+
+function RecoveryAction({ item, index }) {
+  const [lead, ...rest] = String(item).split(/[:—]/)
+  const hasLead = rest.length > 0 && lead.length < 42
+  return <article><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{hasLead ? lead.trim() : index === 0 ? 'Start here' : 'Then'}</strong><p>{hasLead ? rest.join('—').trim() : item}</p></div></article>
+}
+
+function RecoveryWindow({ eyebrow, sections, fallback }) {
+  return <section className="recovery-window-card"><span>{eyebrow}</span>{sections.length ? sections.map((section) => <div key={section.id}><strong>{section.title}</strong>{section.summary && <p>{section.summary}</p>}{section.items?.slice(0, 2).map((item) => <small key={item}>{item}</small>)}</div>) : <p>{fallback}</p>}</section>
+}
+
 
 function getDateValue(item) {
   return new Date(item?.createdAt ?? `${item?.date ?? '1970-01-01'}T12:00:00`).getTime()
@@ -535,6 +628,23 @@ function formatCompletionRecency(value) {
 
 function formatExerciseBodyArea(exercise) {
   return [exercise?.side, exercise?.bodyRegion ?? exercise?.area].filter(Boolean).join(' · ')
+}
+
+function getRoutineExerciseKey(exercise) { return exercise?.instanceId ?? `${exercise?.id}-${exercise?.side ?? 'both'}-${exercise?.sequenceIndex ?? 0}` }
+
+function getExercisePhaseLabel(exercise) {
+  if (['activation', 'control', 'isometric'].includes(exercise?.movementType)) return 'Activation & control'
+  if (['flexibility', 'self-massage'].includes(exercise?.movementType)) return 'Range work'
+  return 'Mobility'
+}
+
+function getNextRecoveryEvent(schedule, latestEvent) {
+  const after = latestEvent ? getEventDateValue(latestEvent) : Date.now()
+  return schedule.filter((event) => getEventDateValue(event) > after).sort((first, second) => getEventDateValue(first) - getEventDateValue(second))[0] ?? null
+}
+
+function getEventDateValue(event) {
+  return new Date(`${event?.date ?? '1970-01-01'}T${event?.time && /^\d{1,2}:\d{2}$/.test(event.time) ? event.time : '23:59'}:00`).getTime()
 }
 
 function formatExerciseDose(exercise) {

@@ -34,12 +34,15 @@ const todayIso = toIsoDate(today)
 
 const emptyEvent = {
   allDay: false,
+  activityKind: 'training',
   association: 'Personal',
   availability: 'Required',
   date: todayIso,
   expectedDuration: 60,
+  expectedIntensity: 'moderate',
   environment: 'Outdoor',
   eventSubtype: '',
+  importance: 'normal',
   load: 'Medium',
   location: '',
   note: '',
@@ -213,8 +216,10 @@ export function ScheduleView({
           allDay: isAllDay,
           association: isOtherActivity ? 'None' : current.association === 'None' ? 'Personal' : current.association,
           availability: isAllDay ? 'Recovery' : current.availability,
+          activityKind: getActivityKindForType(value),
           customActivityName: isOtherActivity ? current.customActivityName ?? '' : '',
           expectedDuration: isAllDay ? null : current.expectedDuration ?? 60,
+          expectedIntensity: isAllDay ? 'low' : current.expectedIntensity ?? intensityFromLoad(getDefaultLoadForEvent(value)),
           load: getDefaultLoadForEvent(value),
           time: isAllDay ? '' : current.time,
           title: value,
@@ -243,10 +248,13 @@ export function ScheduleView({
       customActivityName: isOtherActivity ? draftEvent.customActivityName.trim() : '',
       environment: getEnvironmentForSurface(draftEvent.surface),
       expectedDuration: isAllDay ? null : Number(draftEvent.expectedDuration ?? 60),
+      expectedIntensity: isAllDay ? 'low' : draftEvent.expectedIntensity ?? intensityFromLoad(draftEvent.load),
+      importance: isAllDay ? 'normal' : draftEvent.importance ?? importanceFromAvailability(draftEvent.availability),
       load: draftEvent.load ?? getDefaultLoadForEvent(draftEvent.type),
       plannedMinutes: isAllDay ? undefined : Number(draftEvent.expectedDuration ?? 60),
       time: isAllDay ? '' : draftEvent.time,
       title: displayName,
+      activityKind: isAllDay ? 'recovery' : draftEvent.activityKind ?? getActivityKindForType(draftEvent.type),
     }
 
     try {
@@ -269,6 +277,29 @@ export function ScheduleView({
       setSaveError(cause && cause !== 'create_failed'
         ? `The event could not be saved: ${cause}`
         : 'The event could not be saved. Check your connection and try again.')
+    } finally {
+      setIsSavingEvent(false)
+    }
+  }
+
+  async function duplicateDraft() {
+    setSaveError('')
+    setIsSavingEvent(true)
+    try {
+      const duplicate = {
+        ...draftEvent,
+        id: `event-${Date.now()}`,
+        recurrenceRule: {},
+        repeat: 'Does not repeat',
+        repeatCount: 1,
+        templateSourceId: null,
+        title: isOtherActivityEvent(draftEvent) ? draftEvent.customActivityName.trim() : draftEvent.type,
+      }
+      if (!(await onAdd(duplicate))) throw new Error('duplicate_failed')
+      closeModal()
+    } catch (error) {
+      console.error(error)
+      setSaveError('Could not duplicate this event. Your original event was not changed.')
     } finally {
       setIsSavingEvent(false)
     }
@@ -552,7 +583,7 @@ export function ScheduleView({
               <article className={`schedule-list-row semantic-event semantic-${getEventSemanticType(event)}`} key={event.id} style={getEventColorStyle(event)}>
                 <div><strong>{formatDisplayDate(event.date)}</strong><span>{event.allDay ? 'All day' : event.time ? formatTimeLabel(event.time) : 'Time not set'}</span></div>
                 <div><strong>{getEventDisplayName(event)}</strong><span>{event.association || 'Personal'}{event.opponent ? ` · vs ${event.opponent}` : ''}</span></div>
-                <em>{event.availability ?? 'Required'}</em>
+                <em>{formatImportance(event.importance ?? importanceFromAvailability(event.availability))}</em>
                 <button className="secondary-button compact-action" onClick={() => openEditModal(event)} type="button">Edit</button>
               </article>
             ))}
@@ -569,6 +600,7 @@ export function ScheduleView({
           mode={modalMode}
           isOnboardingEventCreation={isOnboardingEventCreation && modalMode === 'create'}
           onClose={closeModal}
+          onDuplicate={duplicateDraft}
           onSave={saveDraft}
           onUpdate={updateDraft}
         />,
@@ -791,7 +823,7 @@ function isTournamentSummaryVisible(tournament) {
   return today >= visibleFrom && today <= visibleUntil
 }
 
-function EventModal({ associations, athleteProfile, draftEvent, error, isOnboardingEventCreation, isSaving, mode, onClose, onSave, onUpdate }) {
+function EventModal({ associations, athleteProfile, draftEvent, error, isOnboardingEventCreation, isSaving, mode, onClose, onDuplicate, onSave, onUpdate }) {
   const [cityQuery, setCityQuery] = useState(draftEvent.location ?? '')
   const [cityResults, setCityResults] = useState([])
   const [isCityMenuOpen, setIsCityMenuOpen] = useState(false)
@@ -937,8 +969,8 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
               ))}
             </select>
           </label>
-          {!isAllDay && <Select label="Event importance" value={draftEvent.availability ?? 'Required'} options={['Required max effort', 'Required', 'Optional', 'Recovery']} onChange={(value) => onUpdate('availability', value)} />}
-          {!isAllDay && <Select label="Expected intensity" value={draftEvent.load ?? 'Medium'} options={['Low', 'Medium', 'High']} onChange={(value) => onUpdate('load', value)} />}
+          {!isAllDay && <Select label="Event importance" value={draftEvent.importance ?? importanceFromAvailability(draftEvent.availability)} options={['normal', 'important', 'priority']} onChange={(value) => onUpdate('importance', value)} />}
+          {!isAllDay && formSchema.kind !== 'competition' && <Select label="Expected intensity" value={draftEvent.expectedIntensity ?? intensityFromLoad(draftEvent.load)} options={['low', 'moderate', 'high', 'maximal']} onChange={(value) => { onUpdate('expectedIntensity', value); onUpdate('load', loadFromIntensity(value)) }} />}
           {formSchema.showOpponent && (
             <>
               {formSchema.showVenue && <label className="compact-field">
@@ -1029,9 +1061,12 @@ function EventModal({ associations, athleteProfile, draftEvent, error, isOnboard
 
         {isAllDay && <p className="field-description">{isRestDay ? 'Rest Day' : 'Recovery Day'} is all day and will not request an event check-in or checkout. It provides schedule context but does not confirm recovery status.</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
-        <button className="primary-button" disabled={isSaving || (!isAllDay && (!cityIsValid || !draftEvent.time)) || (isOtherActivity && !draftEvent.customActivityName?.trim())} onClick={onSave} type="button">
-          {isSaving ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create event'}
-        </button>
+        <div className="event-modal-actions">
+          {mode === 'edit' && <button className="secondary-button" disabled={isSaving} onClick={onDuplicate} type="button">Duplicate event</button>}
+          <button className="primary-button" disabled={isSaving || (!isAllDay && (!cityIsValid || !draftEvent.time)) || (isOtherActivity && !draftEvent.customActivityName?.trim())} onClick={onSave} type="button">
+            {isSaving ? 'Saving...' : mode === 'edit' ? 'Save changes' : 'Create event'}
+          </button>
+        </div>
       </section>
     </div>
   )
@@ -1269,8 +1304,46 @@ function createRecurringEvents(event) {
       ...event,
       date: toIsoDate(nextDate),
       id: index === 0 ? event.id : `event-${Date.now()}-${index}`,
+      recurrenceRule: event.repeat === 'Does not repeat' ? {} : {
+        count,
+        frequency: event.repeat.toLowerCase(),
+        seriesId: event.recurrenceRule?.seriesId ?? event.id,
+      },
       load: isOtherActivityEvent(event) ? event.load : getDefaultLoadForEvent(event.type),
       title: getEventDisplayName(event),
     }
   })
+}
+
+function getActivityKindForType(value) {
+  const text = String(value ?? '').toLowerCase()
+  if (/game|match|meet|race|competition|tournament|bout/.test(text)) return 'competition'
+  if (/gym|strength|lift|weight/.test(text)) return 'strength'
+  if (/conditioning|interval|tempo|hill/.test(text)) return 'conditioning'
+  if (/rest|recovery|mobility|flexibility/.test(text)) return 'recovery'
+  if (/practice|training|session|skill|team/.test(text)) return 'training'
+  return 'other'
+}
+
+function intensityFromLoad(value) {
+  if (String(value).toLowerCase() === 'high') return 'high'
+  if (String(value).toLowerCase() === 'low') return 'low'
+  return 'moderate'
+}
+
+function loadFromIntensity(value) {
+  if (value === 'maximal' || value === 'high') return 'High'
+  if (value === 'low') return 'Low'
+  return 'Medium'
+}
+
+function importanceFromAvailability(value) {
+  if (value === 'Required max effort') return 'priority'
+  if (value === 'Required') return 'important'
+  return 'normal'
+}
+
+function formatImportance(value) {
+  if (value === 'priority') return 'Priority competition'
+  return value === 'important' ? 'Important' : 'Normal'
 }

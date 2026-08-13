@@ -291,7 +291,7 @@ Readiness explanation calibration (the deterministic engine has already chosen t
 const checkoutCalibrationGuidance = `
 Post-event recovery explanation calibration (the deterministic engine has already chosen the score):
 - Higher is better and means the athlete handled the completed event well with a more favorable immediate recovery outlook. It is not a workload score and not a medical clearance score.
-- Post-event fatigue and soreness use 1 low to 5 high. Difficulty uses 0 easy to 10 maximal. Never treat high fatigue, high soreness, worsening/new pain, changed movement, cramping, concerning symptoms, or stopping early as favorable.
+- Post-event fatigue and soreness use 0 none/low to 5 severe/high. Difficulty uses 0 easy to 10 maximal. Never treat high fatigue, high soreness, worsening/new pain, changed movement, cramping, concerning symptoms, or stopping early as favorable.
 - Treat 0-100 as continuous. Place the score precisely according to participation, workload response, fatigue/soreness severity, pain and movement changes, symptoms, performance response, and recovery window; do not use a fixed deduction table or default number.
 - 90-100 requires a completed event with a normal or better body response, low fatigue/soreness, no concerning symptoms, and no meaningful recovery complication.
 - 80-89 indicates a generally good response with ordinary manageable fatigue or one minor recovery need.
@@ -318,6 +318,7 @@ function buildPrompt(payload: unknown) {
   return `
 You are Athlete Reload's training readiness assistant for student athletes.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+${unitPreferenceDirective(payload)}
 
 The supplied deterministicRecommendation is a safety baseline, not the final recommendation. You own the personalized readiness score, event-specific label, action plan, focus items, and report sections. Use the full athlete and event context so materially different check-ins produce materially different plans. The server will keep your score within a safe range of the deterministic baseline and will preserve any hard stop or limit.
 Deterministic safety baseline:
@@ -360,6 +361,9 @@ ${readinessCalibrationGuidance}
 - Use the athlete profile's sport, position, training style, and dominant side when they are provided. The same pain can affect participation differently by sport and event: shoulder symptoms matter more for volleyball serving or hitting than for a lower-body gym session, while a knee issue matters more for jumping, cutting, and running.
 - Do not assume an athlete must stop all activity because one body area hurts. Explain which movements or demands of this specific event are affected and what can remain controlled if there are no red flags.
 - Use the exact injuryType, painType, and hurtsWhen values in the athlete data. Treat concussion concern, suspected bone stress, numbness, tingling, shooting pain, instability, breathing pain, head/neck symptoms, worsening swelling, and meaningful pain at rest as higher-risk patterns. Low-level tightness, dull ache, overuse soreness, bruises, blisters, cuts/scrapes, or cramps should usually get specific modifications instead of automatic no-training advice.
+- This response powers a compact event-decision modal. Lead with a decisive, event-specific label and one immediately usable primary action. The first three reasons must be the strongest plain-language signals from this check-in, event demand, and athlete context; do not use generic filler.
+- Prioritize at most three visible planning areas after the decision: current pain/safety when present, warm-up or load control, and the most relevant of hydration, fuel, fatigue, or performance. Keep deeper context in the remaining report sections for the full saved plan.
+- Evaluate every supplied current check-in field before deciding: energy, fatigue, soreness, stress, sleep duration, sleep quality, leg heaviness when asked, illness impact, pain map and pain detail fields, plus event preparation, baseline, recent load, and schedule context. A default healthy value is still evidence, but it must not erase a meaningful adverse signal elsewhere.
 
 JSON shape:
 {
@@ -368,7 +372,7 @@ JSON shape:
   "tone": "ready" | "caution" | "warning" | "danger",
   "intensity": short training intensity phrase,
   "summary": one short sentence explaining the decision,
-  "action": one specific paragraph telling the athlete what to do today,
+  "action": one specific concise instruction telling the athlete what to do immediately before or during this event,
   "avoid": array of 0 to 4 specific things to avoid,
   "focus": array of 2 to 4 specific things to focus on,
   "preparation": array of 3 to 5 ordered warm-up or preparation instructions,
@@ -389,6 +393,7 @@ function buildCompactPostCheckoutPrompt(payload: unknown) {
   return `
 You are Athlete Reload's post-event recovery assistant for a student athlete.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+${unitPreferenceDirective(payload)}
 The supplied deterministicRecommendation is authoritative. Copy its score, status, label, tone, reasons, actions, warnings, and safety limits exactly. Your role is limited to concise explanation and organization.
 Authoritative deterministic recommendation:
 ${JSON.stringify((payload as any)?.deterministicRecommendation ?? null)}
@@ -435,6 +440,7 @@ function buildQuickCheckInPrompt(payload: any) {
   return `
 You are Athlete Reload's quick check-in assistant for a student athlete.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+${unitPreferenceDirective(payload)}
 Use only the athlete's edited words below. Do not invent missing measurements or pretend the athlete answered the detailed check-in fields.
 Create a practical event recommendation from the information that is actually present. Clearly state what is unknown and keep the plan conservative when important details are missing.
 This is not medical advice or clearance. Direct the athlete to a parent, coach, athletic trainer, or qualified healthcare professional for red flags.
@@ -475,6 +481,13 @@ function safeJson(value: unknown) {
   }
 }
 
+function unitPreferenceDirective(payload: any) {
+  const unitSystem = payload?.athleteProfile?.unitSystem ?? payload?.athleteContext?.athlete?.unitSystem ?? 'imperial'
+  return unitSystem === 'metric'
+    ? 'Unit preference: Metric. Express hydration volumes in liters (L), converting supplied mL targets without changing the physical amount. Use metric units for every other measurement.'
+    : 'Unit preference: Imperial. Express hydration volumes in fluid ounces (fl oz), converting supplied mL targets without changing the physical amount. Use imperial units for every other measurement.'
+}
+
 function buildRecoveryPlanPrompt(payload: unknown) {
   const planType = stringOrFallback((payload as any)?.planType, 'session')
   const planTypeDirective = getRecoveryPlanTypeDirective(planType, (payload as any)?.targetedAreas)
@@ -483,6 +496,7 @@ function buildRecoveryPlanPrompt(payload: unknown) {
   return `
 You are Athlete Reload's recovery planning assistant for student athletes.
 Never use, repeat, or address the athlete by their name or display name. Write directly using "you" and "your" only.
+${unitPreferenceDirective(payload)}
 
 Return ONLY valid JSON. No markdown. No extra commentary.
 
@@ -510,10 +524,10 @@ Important behavior:
 - If participation was Did not participate, do not recommend recovery for training that did not happen. Focus on symptom monitoring, comfortable whole-body recovery, and evaluation guidance when needed.
 - A painful area must not automatically receive a deeper stretch. Sharp or worsening pain, limping, loss of movement, instability, swelling, numbness, concerning symptoms, or changed movement should remove that area from stretching and recommend telling a parent, coach, athletic trainer, or qualified healthcare professional.
 - Do not imply stretching prevents soreness or injury or that temporary looseness proves healing. Present it as optional comfortable mobility or relaxation.
-- Treat timeAvailable as the application's exact routine budget. Select a useful ordered set of vetted IDs; the application owns dosing, side expansion, equipment requirements, substitutions, and the final duration calculation.
+- Treat timeAvailable as the exact routine budget. Select a useful ordered sequence of vetted IDs and prescribe appropriate catalog-compatible doses; the application validates IDs, dose bounds, equipment, pain exclusions, substitutions, side expansion, and final duration.
 - Prefer IDs whose catalog equipment is compatible with the supplied equipment, while retaining no-equipment choices. Do not output equipment fields.
 - Select exercises only by stable ID from the supplied recoveryCatalog below. Never invent an exercise, ID, dose, instruction, contraindication, or substitute. The application owns vetted instructions, safety filtering, substitutions, side expansion, and real duration calculation.
-- Return each selected stable ID at most once. The application expands unilateral movements into left and right steps.
+- Repeated stable IDs are allowed when the repetition has a clear programming purpose. Preserve the intended sequence; do not repeat movements merely to fill time. The application expands unilateral movements unless a specific side is supplied.
 - Unless planType is targeted, flexibility, quick, or mobility, build a full-body recovery routine that includes the major regions relevant after activity. For specialized plan types, stay focused on the selected outcome while keeping adjacent joints and basic whole-body balance where useful. Keep painful or concerning areas protected rather than forcing direct stretching.
 - Do not include standalone walking, breathing, or generic ankle rolls as routine exercises. They are not acceptable filler. Only include a short cooldown movement when it is specific to the completed sport or a symptom/safety concern, and it must never replace the stretching and mobility work.
 - Use sportContext workload when present to select sport-relevant recovery priorities, but never diagnose or predict injury risk from workload. All symptom and red-flag safety rules override workload-based guidance.
@@ -522,7 +536,7 @@ Important behavior:
 - Prefer conventional, widely recognized exercise and stretch names with clear form cues. Do not treat any example list or familiar pair as a template, and do not routinely begin with the same two movements. Use niche movements sparingly and only when the athlete context makes them more useful than a familiar option.
 - Match most exercises to the active body areas and sport demands. For a mild, stable shoulder symptom without red flags, favor comfortable shoulder range, scapular control, thoracic rotation or extension, chest and lat flexibility, and optional gentle neck mobility when it feels relevant. Do not default to lower-body or ankle exercises for a shoulder-focused report.
 - For lower-body symptoms, use the specific involved region and related joints. For example, a stable calf issue can use calf and ankle mobility; a hamstring issue can use gentle hip and hamstring movement; a knee issue can use comfortable hip, quad, and ankle mobility. Do not stretch directly into sharp, worsening, unstable, numb, swollen, or movement-changing symptoms.
-- Every routine exercise object must contain exactly one field: id. Do not output names, cues, sides, timing, repetitions, or any other exercise content.
+- Every routine exercise object must contain a vetted id, dose model, side when intentionally side-specific, and a short rationale. Do not output names, instructions, contraindications, or invented exercise content.
 - Use sport and position. A volleyball shoulder routine, soccer lower-body routine, baseball pitcher routine, and lower-body gym routine should differ when the supplied data supports it.
 - If the next event is soon, shorten the routine and prioritize prompt food, fluids, sleep, and symptom monitoring. If the next day is a rest day, a slightly longer comfortable mobility routine may fit.
 - Do not use a readiness score in this response. A stored score may be 0.
@@ -545,7 +559,7 @@ JSON shape:
   "contextFactors": ["2-8 supplied factors that materially shaped this plan"],
   "reportSections": [{"id":"recovery-status","title":"Recovery Status","summary":"estimated demand and primary drivers","items":[]},{"id":"recovery-priorities","title":"Recovery Priorities","summary":"ranked, session-specific priorities without duplicates","items":["priority 1","priority 2"]},{"id":"active-recovery-rest","title":"Active Recovery or Rest","summary":"which is more useful now and why","items":[]},{"id":"nutrition-guidance","title":"Nutrition Guidance","summary":"a practical recovery goal based on supplied targets and logs","items":[]},{"id":"hydration-guidance","title":"Hydration Guidance","summary":"use supplied target ranges without claiming measured fluid loss","items":[]},{"id":"sleep-rest-guidance","title":"Sleep and Rest Guidance","summary":"specific guidance for current time and next event","items":[]},{"id":"pain-guidance","title":"Pain-Specific Guidance","summary":"only when pain is current","items":[]},{"id":"recovery-timeline","title":"Recovery Timeline","summary":"remainder of today through the next relevant checkpoint","items":[]},{"id":"next-event-impact","title":"Tomorrow or Next Event","summary":"include only when future schedule is supplied","items":[]}],
   "planType": "${planType}",
-  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"id":"one-vetted-catalog-id"}]},
+  "routine": {"title":"type-specific routine title","goal":"specific goal for ${planType}","summary":"explain how this routine fulfills the selected type","durationMinutes":10,"painAware":true,"exercises":[{"id":"one-vetted-catalog-id","model":"reps","reps":8,"sets":1,"restSeconds":0,"side":"each side","rationale":"why this belongs here"}]},
   "nextEventWarning":"short warning only when the recovery window or symptoms need attention",
   "recovery":["fallback recovery actions"],
   "preparation":["right now actions"],
@@ -813,16 +827,14 @@ const fallbackApprovedRecoveryExerciseIds = new Set([
 ])
 
 function normalizeRoutine(value: any, payload?: any) {
-  const suppliedIds = Array.isArray(payload?.recoveryCatalog)
-    ? payload.recoveryCatalog.map((item: any) => String(item?.id ?? '')).filter(Boolean)
-    : []
-  const approvedRecoveryExerciseIds = suppliedIds.length ? new Set(suppliedIds) : fallbackApprovedRecoveryExerciseIds
+  const suppliedCatalog = Array.isArray(payload?.recoveryCatalog) ? payload.recoveryCatalog : []
+  const catalogById = new Map(suppliedCatalog.map((item: any) => [String(item?.id ?? ''), item]))
+  const approvedRecoveryExerciseIds = suppliedCatalog.length ? new Set(catalogById.keys()) : fallbackApprovedRecoveryExerciseIds
   const generatedExercises = Array.isArray(value?.exercises)
-    ? [...new Set(value.exercises
-      .map((exercise: any) => String(exercise?.id ?? ''))
-      .filter((id: string) => approvedRecoveryExerciseIds.has(id)))]
-      .slice(0, approvedRecoveryExerciseIds.size)
-      .map((id) => ({ id }))
+    ? value.exercises
+      .filter((exercise: any) => approvedRecoveryExerciseIds.has(String(exercise?.id ?? '')))
+      .slice(0, 30)
+      .map((exercise: any) => normalizeRoutineSelection(exercise, catalogById.get(String(exercise?.id ?? ''))))
     : []
 
   const hasCurrentPain = Object.values(payload?.currentRecoveryContext?.painMap ?? {}).some((severity) => Number(severity) > 0)
@@ -834,6 +846,19 @@ function normalizeRoutine(value: any, payload?: any) {
     summary: stringOrFallback(value?.summary, 'Use comfortable movement as an optional way to relax and maintain mobility.'),
     title: stringOrFallback(value?.title, getRoutineTitle(payload?.planType)),
   }
+}
+
+function normalizeRoutineSelection(exercise: any, catalogItem: any) {
+  const allowedModels = Array.isArray(catalogItem?.doseModels) ? catalogItem.doseModels : []
+  const fallbackDose = allowedModels[0] ?? { model: 'reps', reps: 8, sets: 1, restSeconds: 0, tempoSecondsPerRep: 4 }
+  const requestedModel = String(exercise?.model ?? exercise?.dose?.model ?? fallbackDose.model)
+  const model = allowedModels.some((dose: any) => dose?.model === requestedModel) ? requestedModel : fallbackDose.model
+  const dose = model === 'timer'
+    ? { model, durationSeconds: clampNumber(exercise?.durationSeconds ?? exercise?.dose?.durationSeconds ?? fallbackDose.durationSeconds, 15, 90), sets: clampNumber(exercise?.sets ?? exercise?.dose?.sets ?? fallbackDose.sets, 1, 4), restSeconds: clampNumber(exercise?.restSeconds ?? exercise?.dose?.restSeconds ?? fallbackDose.restSeconds, 0, 90) }
+    : { model, reps: clampNumber(exercise?.reps ?? exercise?.dose?.reps ?? fallbackDose.reps, 3, 20), sets: clampNumber(exercise?.sets ?? exercise?.dose?.sets ?? fallbackDose.sets, 1, 4), restSeconds: clampNumber(exercise?.restSeconds ?? exercise?.dose?.restSeconds ?? fallbackDose.restSeconds, 0, 90), tempoSecondsPerRep: clampNumber(exercise?.tempoSecondsPerRep ?? exercise?.dose?.tempoSecondsPerRep ?? fallbackDose.tempoSecondsPerRep, 2, 8) }
+  const requestedSide = String(exercise?.side ?? '').toLowerCase()
+  const side = catalogItem?.laterality === 'each-side' && /^(left|right)/.test(requestedSide) ? requestedSide : ''
+  return { id: String(exercise.id), dose, rationale: stringOrFallback(exercise?.rationale, ''), ...(side ? { side } : {}) }
 }
 
 /* oxlint-disable no-unused-vars -- retained temporarily to decode older saved routine payloads during rollout */

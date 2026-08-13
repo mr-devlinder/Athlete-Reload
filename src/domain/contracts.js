@@ -83,7 +83,7 @@ export function mergeAiExplanation(deterministic, ai = {}) {
       intensity: typeof ai.intensity === 'string' && ai.intensity.trim() ? ai.intensity.trim() : deterministic.intensity,
       label: typeof ai.label === 'string' && ai.label.trim() ? ai.label.trim() : deterministic.label,
       reasons: Array.isArray(ai.reasons) && ai.reasons.length ? ai.reasons : deterministic.reasons,
-      reportSections: aiPlan ? ai.reportSections : deterministic.reportSections,
+      reportSections: aiPlan ? mergeReportSections(deterministic.reportSections, ai.reportSections) : deterministic.reportSections,
       tone: ['danger', 'warning', 'caution', 'ready'].includes(ai.tone) ? ai.tone : deterministic.tone,
     }),
     summary: typeof ai.summary === 'string' && ai.summary.trim() ? ai.summary.trim() : deterministic.summary,
@@ -99,6 +99,15 @@ export function mergeAiExplanation(deterministic, ai = {}) {
     warnings,
     adjustments: deterministic.adjustments,
   })
+}
+
+function mergeReportSections(deterministicSections = [], aiSections = []) {
+  const merged = new Map(deterministicSections.filter((section) => section?.id).map((section) => [section.id, section]))
+  aiSections.filter((section) => section?.id).forEach((section) => {
+    const locked = ['pain-guidance', 'pre-event-timeline', 'new-pain-soreness'].includes(section.id)
+    if (!locked || !merged.has(section.id)) merged.set(section.id, section)
+  })
+  return [...merged.values()]
 }
 
 export function createQuickDeterministicRecommendation(transcript = '') {

@@ -347,11 +347,15 @@ function isContactSession(session) {
 function getReasons(checkIn) {
   const pain = getPain(checkIn)
   const reasons = []
+  const baseline = checkIn.baseline
+  const hasUsableBaseline = Number(baseline?.sampleSize) >= 7
 
-  if (isKnown(checkIn.sleep) && Number(checkIn.sleep) < 7) reasons.push('low sleep')
+  if (hasUsableBaseline && isKnown(checkIn.sleep) && isKnown(baseline.values?.sleep) && Number(checkIn.sleep) <= Number(baseline.values.sleep) - 1) reasons.push('sleep below your recent normal')
+  else if (isKnown(checkIn.sleep) && Number(checkIn.sleep) < 7) reasons.push('short sleep')
   if (isKnown(checkIn.energy) && Number(checkIn.energy) <= 2) reasons.push('low energy')
   if (isKnown(checkIn.soreness) && Number(checkIn.soreness) >= 4) reasons.push('high soreness')
-  if (isKnown(checkIn.fatigue) && Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
+  if (hasUsableBaseline && isKnown(checkIn.fatigue) && isKnown(baseline.values?.fatigue) && Number(checkIn.fatigue) >= Number(baseline.values.fatigue) + 1) reasons.push('fatigue above your recent normal')
+  else if (isKnown(checkIn.fatigue) && Number(checkIn.fatigue) >= 4) reasons.push('high fatigue')
   if (isKnown(checkIn.stress) && Number(checkIn.stress) >= 4) reasons.push('high stress')
   if (isKnown(checkIn.illnessSymptoms) && Number(checkIn.illnessSymptoms) >= 3) reasons.push('illness symptoms')
   if (['Hard', 'Game'].includes(checkIn.yesterdayLoad)) {
@@ -359,7 +363,7 @@ function getReasons(checkIn) {
   }
   if (checkIn.hydration === 'Poor') reasons.push('poor hydration or nutrition')
   if (pain > 0) {
-    reasons.push(`${checkIn.location.toLowerCase()} ${checkIn.painType.toLowerCase()} symptoms`)
+    reasons.push(`${String(checkIn.location || 'reported area').toLowerCase()} ${String(checkIn.painType || 'pain').toLowerCase()} symptoms`)
   }
 
   return reasons
@@ -607,6 +611,7 @@ export function getRecommendation(checkIn) {
   const reasons = getReasons(checkIn)
   const avoid = getContextualAvoid(checkIn, redFlag)
   const focus = getContextualFocus(checkIn, status, redFlag)
+  const timeline = getPreparationTimeline(checkIn, { redFlag, pain })
 
   return createStructuredRecommendation({
     score,
@@ -632,6 +637,7 @@ export function getRecommendation(checkIn) {
       { id: 'warm-up-focus', title: 'What to do', summary: getPersonalAction(checkIn, status, redFlag), items: focus },
       ...(avoid.length ? [{ id: 'pain-guidance', title: 'What to watch', summary: 'Use these limits while you prepare and participate.', items: avoid }] : []),
       { id: 'event-preparation', title: 'Why this plan', summary: reasons.length ? `The strongest signals are ${reasons.join(', ')}.` : 'Your current check-in does not show a meaningful limitation.', items: [] },
+      { id: 'pre-event-timeline', title: 'Preparation timeline', summary: 'Use the steps that fit the time remaining before the event.', items: timeline },
     ],
     contextFactors: reasons,
     redFlag,
@@ -640,6 +646,25 @@ export function getRecommendation(checkIn) {
       .filter((key) => checkIn[key] !== undefined && checkIn[key] !== null && checkIn[key] !== '').length,
     baselineSampleSize: Number(checkIn.baselineSampleSize ?? 0),
   })
+}
+
+function getPreparationTimeline(checkIn, { pain, redFlag }) {
+  if (redFlag) return ['Now — Pause participation and tell an appropriate adult or qualified professional what you reported.']
+
+  const items = ['Now — Continue normal meals and hydration; do not try to catch up with excessive fluid.']
+  const eventDateTime = checkIn.eventDate && checkIn.eventTime
+    ? new Date(`${checkIn.eventDate}T${checkIn.eventTime}`)
+    : null
+  const hoursUntil = eventDateTime && Number.isFinite(eventDateTime.getTime())
+    ? (eventDateTime.getTime() - Date.now()) / 3_600_000
+    : null
+
+  if (hoursUntil == null || hoursUntil > 2) items.push('About 2–3 hours before — Choose a familiar carbohydrate-rich meal or snack that you tolerate well.')
+  if (hoursUntil == null || hoursUntil > .75) items.push('About 60 minutes before — Finish normal pre-session fluids and avoid last-minute overdrinking.')
+  items.push(pain > 0
+    ? `Pre-session — Recheck ${String(checkIn.location || 'the reported area').toLowerCase()} during a progressive warm-up; stop and reassess if symptoms meaningfully worsen.`
+    : 'Pre-session — Use your normal progressive warm-up and build intensity gradually.')
+  return items
 }
 
 function isKnown(value) {

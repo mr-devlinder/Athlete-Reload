@@ -1,27 +1,37 @@
 import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { m } from 'motion/react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import NumberFlow from '@number-flow/react'
+import { Area, AreaChart, CartesianGrid, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import '../styles/home-rework.css'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
-import { SectionHeading } from './SectionHeading'
+import { formatHydration } from '../utils/units'
 import { PainShareModal } from './PainShareModal'
 
 export function HomeView({
   athleteProfile,
   checkouts,
+  dailyWellness,
   history,
   painIssues = [],
   painReports = [],
+  recoveryCompletions = [],
   schedule,
   recommendation,
   onGoCheckIn,
   onOpenCheckout,
   onSavePainIssue,
   onSharePainIssue,
+  onViewRecovery,
 }) {
-  const now = new Date()
+  const [now, setNow] = useState(() => new Date())
+  const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
   const recentHistory = getEntriesSince(history, 6)
   const previousHistory = getEntriesBetween(history, 13, 7)
   const dueCheckout = schedule.find(
@@ -31,166 +41,159 @@ export function HomeView({
   )
   const checkInReminder = getCheckInReminder(schedule, history, now)
   const nextEvent = getNextEvent(schedule, now)
-  const todayPlan = getTodayPlan(schedule, history, checkouts, now)
+  const todayPlan = getTodayPlan(schedule, history, checkouts, dailyWellness, recoveryCompletions, now, unitSystem)
   const recovery = getRecoverySummary(recentHistory, previousHistory)
-  const workload = getWorkloadSummary(schedule, checkouts)
-  const weeklySignals = getWeeklySignals(history)
-  const todayCheckIn = history.find((entry) => entry.date === format(now, 'yyyy-MM-dd') && entry.checkInType !== 'post_event')
-  const dailyRecommendation = todayCheckIn?.recommendation ?? (checkInReminder ? recommendation : null)
+  const weeklySignals = getWeeklySignals(history, schedule)
+  const todayCheckIn = getRelevantCheckIn(history, dueCheckout ?? checkInReminder ?? nextEvent, now)
+  const dailyRecommendation = todayCheckIn?.recommendation ?? null
   const recommendationReasons = (dailyRecommendation?.reasons ?? [])
     .map((reason) => typeof reason === 'string' ? reason : reason.label)
     .filter(Boolean)
     .slice(0, 3)
+  const latestRecoveryPlan = recoveryCompletions[0]?.details?.plan
+  const recoveryPriorities = latestRecoveryPlan?.reportSections?.find((section) => section.id === 'recovery-priorities')?.items?.slice(0, 3) ?? []
+  const recoveryStatus = latestRecoveryPlan?.reportSections?.find((section) => section.id === 'recovery-status')
+  const activePainSummaries = getPainIssueSummaries(painReports)
+  const primaryEvent = dueCheckout ?? checkInReminder ?? nextEvent
+  const primaryAction = getPrimaryHomeAction({ dailyRecommendation, dueCheckout, checkInReminder, latestRecoveryPlan, nextEvent, onGoCheckIn, onOpenCheckout, onViewRecovery, recoveryPriorities, todayCheckIn })
+  const nextMoves = getRecommendationNextMoves(dailyRecommendation, primaryAction.detail)
+  const stateSignals = getCurrentStateSignals({ dailyRecommendation, dailyWellness, recovery, todayCheckIn, unitSystem })
+  const readinessScore = Number(dailyRecommendation?.score)
+  const hasReadinessScore = Number.isFinite(readinessScore)
   return (
     <div className="home-view" data-tour="home-page">
-      <section className="home-hero" data-tour="home-intro">
-        <SectionHeading
-          eyebrow="Today"
-          title="Your status and next action."
-        />
-        <p className="page-header-description">
-          What matters now, why it matters, and what is coming next.
-        </p>
-      </section>
-
-      <section className={`daily-command ${dailyRecommendation?.tone ?? 'neutral'}`}>
-        <div className="daily-command__status">
-          <span>Right now</span>
-          <strong>{dailyRecommendation?.label ?? (nextEvent ? 'Prepare for what is next' : 'No urgent action')}</strong>
-          {dailyRecommendation?.confidence != null && <small>{Math.round(dailyRecommendation.confidence * 100)}% confidence · decision support, not medical clearance</small>}
+      <m.section className="home-command-center" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .4 }}>
+        <div className="home-event-command">
+          <div className="command-label"><span>{getHomeModeLabel({ dueCheckout, checkInReminder, todayCheckIn, latestRecoveryPlan })}</span></div>
+          <h1>{primaryEvent ? getEventName(primaryEvent) : 'Build the next performance block'}</h1>
+          <p>{primaryEvent ? `${format(parseISO(primaryEvent.date), 'EEEE, MMM d')} · ${primaryEvent.time ? formatTimeLabel(primaryEvent.time) : 'All day'}${primaryEvent.association && primaryEvent.association !== 'Personal' ? ` · ${primaryEvent.association}` : ''}` : 'Add an event so preparation, fueling, checkout, and recovery work as one flow.'}</p>
+          <div className="event-countdown"><span>{dueCheckout ? 'Action due' : 'Starts in'}</span><strong>{dueCheckout ? 'Checkout' : primaryEvent ? getEventCountdown(primaryEvent, now) : 'Open schedule'}</strong>{primaryEvent && <small>{getEventDemandLabel(primaryEvent)}</small>}</div>
         </div>
-        <div className="daily-command__action">
-          <span>What matters</span>
-          <p>{dailyRecommendation?.primaryAction?.instruction ?? dailyRecommendation?.action ?? (nextEvent ? `Review ${getEventName(nextEvent)} and complete a check-in when it opens.` : 'Use today to recover, plan, or add your next event.')}</p>
-          {recommendationReasons.length > 0 && <details><summary>Why this guidance</summary><ul>{recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
-        </div>
-        <div className="daily-command__next">
-          <span>Next</span>
-          <strong>{dueCheckout ? `Checkout: ${getEventName(dueCheckout)}` : checkInReminder ? `Check in: ${getEventName(checkInReminder)}` : nextEvent ? getEventName(nextEvent) : 'Schedule is open'}</strong>
-          <small>{athleteProfile?.sport ? `${athleteProfile.sport}${athleteProfile.position ? ` · ${athleteProfile.position}` : ''}` : 'Add your primary activity for more specific guidance'}</small>
-        </div>
-      </section>
-
-      <div className="home-alerts">
-        {dueCheckout && (
-          <button
-            className="checkout-alert"
-            onClick={() => onOpenCheckout(dueCheckout)}
-            type="button"
-          >
-            <span>Checkout ready</span>
-            <strong>{getEventName(dueCheckout)}</strong>
-            <em>Log session</em>
-          </button>
-        )}
-
-        {checkInReminder && (
-          <button
-            className="checkout-alert checkin-alert"
-            onClick={() => onGoCheckIn(checkInReminder)}
-            type="button"
-          >
-            <span>Check-in available</span>
-            <strong>{getEventName(checkInReminder)}</strong>
-            <em>Check in</em>
-          </button>
-        )}
-      </div>
-
-      <m.section className="home-performance-stage" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .5, ease: [0.22, 1, 0.36, 1] }}>
-        <article className="readiness-visual">
-          <div className={`readiness-orbit ${getReadinessTone(recovery.readinessAverage)}`} style={{ '--readiness-value': `${Math.max(0, Math.min(100, Number(recovery.readinessAverage) || 0)) * 3.6}deg` }}><span><strong>{recovery.readinessAverage}</strong><small>readiness</small></span></div>
-          <div><span className="visual-kicker">Performance pulse</span><h2>{getReadinessHeadline(recovery.readinessAverage)}</h2><p>{formatChange(recovery.readinessChange, 'compared with your previous week')}</p></div>
-        </article>
-        <article className="day-load-visual">
-          <header><span className="visual-kicker">Today&apos;s demand</span><strong>{todayPlan.length} event{todayPlan.length === 1 ? '' : 's'}</strong></header>
-          <div className="load-bars">{todayPlan.length ? todayPlan.slice(0, 4).map((event, index) => <span key={event.id} style={{ '--bar-height': `${Math.max(24, Math.min(100, Number(event.expectedDuration ?? event.plannedMinutes ?? 45)))}%`, '--bar-delay': `${index * 90}ms` }}><i /><small>{formatTimeLabel(event.time) || 'All day'}</small></span>) : <p>Your day is open—schedule training to preview demand.</p>}</div>
-        </article>
-        <article className="next-moment-visual">
-          <span className="visual-kicker">Next moment</span><strong>{nextEvent ? getEventCountdown(nextEvent, now) : 'Open'}</strong><h3>{nextEvent ? getEventName(nextEvent) : 'No event queued'}</h3><p>{nextEvent ? `${format(parseISO(nextEvent.date), 'EEE, MMM d')}${nextEvent.time ? ` · ${formatTimeLabel(nextEvent.time)}` : ''}` : 'Use the space for recovery or planning.'}</p>
-        </article>
+        {dailyRecommendation ? <div className={`home-readiness-decision ${dailyRecommendation.tone ?? 'neutral'}`}>
+          {hasReadinessScore ? <div className="readiness-ring" style={{ '--readiness-progress': `${Math.max(0, Math.min(100, readinessScore)) * 3.6}deg` }}><div><NumberFlow value={Math.round(readinessScore)} /><small>/100</small></div></div> : <div className="readiness-ring empty"><div><strong>—</strong><small>saved</small></div></div>}
+          <div><span>{dailyRecommendation._source === 'gemini' ? 'AI event plan' : 'Event decision'}</span><strong>{dailyRecommendation.label ?? 'Check-in saved'}</strong><p>{dailyRecommendation.summary}</p>{dailyRecommendation.confidence != null && <small className="decision-confidence">{Math.round(Number(dailyRecommendation.confidence) * 100)}% context confidence · {dailyRecommendation.confidence < .5 ? 'baseline still developing' : 'personal history included'}</small>}</div>
+        </div> : <div className="home-readiness-decision awaiting-checkin">
+          <div className="readiness-ring empty"><div><strong>—</strong><small>no plan</small></div></div>
+          <div><span>Check-in required</span><strong>No event decision yet</strong><p>Complete the check-in for this event before Athlete Reload evaluates readiness or creates an event plan.</p>{checkInReminder && <button className="hero-checkin-button" onClick={() => onGoCheckIn(checkInReminder)} type="button">Complete check-in</button>}</div>
+        </div>}
       </m.section>
 
-      <section className="home-focus-grid">
-        <article className="home-panel today-flow-panel">
-          <div className="panel-heading">
-            <span>Today</span>
-            <strong>{format(now, 'EEE, MMM d')}</strong>
-          </div>
-          <h3>Today&apos;s events</h3>
-          <div className="today-event-list">
-            {todayPlan.length === 0 ? (
-              <p>No scheduled events today.</p>
-            ) : (
-              todayPlan.map((event) => (
-                <article key={event.id}>
-                  <div>
-                    <strong>{getEventName(event)}</strong>
-                    <p>{event.association || 'Personal'}{event.time ? ` at ${formatTimeLabel(event.time)}` : ''}</p>
-                  </div>
-                  {event.action === 'pre' ? (
-                    <button
-                      className={`event-status ${event.statusTone}`}
-                      onClick={() => onGoCheckIn(event)}
-                      type="button"
-                    >
-                      {event.status}
-                    </button>
-                  ) : event.action === 'post' ? (
-                    <button
-                      className={`event-status ${event.statusTone}`}
-                      onClick={() => onOpenCheckout(event)}
-                      type="button"
-                    >
-                      {event.status}
-                    </button>
-                  ) : (
-                    <span className={`event-status ${event.statusTone}`}>{event.status}</span>
-                  )}
-                </article>
-              ))
-            )}
-          </div>
+      <section className="home-priority-grid">
+        <m.article className={`right-now-command ${dailyRecommendation?.tone ?? 'neutral'}`} whileHover={{ y: -2 }}>
+          <div className="priority-index">01</div><div><span>Right now</span><h2>{primaryAction.label}</h2><p>{primaryAction.detail}</p></div>
+          {primaryAction.onClick && <button className="primary-button" onClick={primaryAction.onClick} type="button">{primaryAction.label}</button>}
+          {nextMoves.length > 0 && <div className="home-next-moves"><span>Then</span>{nextMoves.map((move, index) => <p key={`${move}-${index}`}><b>{String(index + 2).padStart(2, '0')}</b>{move}</p>)}</div>}
+          {recommendationReasons.length > 0 && <details><summary>Why this is the priority</summary><ul>{recommendationReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
+        </m.article>
+        <article className="home-current-state" aria-labelledby="current-state-title">
+          <div className="home-section-heading"><div><span>Current state</span><h2 id="current-state-title">Signals that change today</h2></div>{todayCheckIn?.recommendation?.confidence != null && <small>{todayCheckIn.recommendation.confidence < .5 ? 'Learning baseline' : 'Personal baseline'}</small>}</div>
+          {stateSignals.length ? <div className="current-state-list">{stateSignals.slice(0, 3).map((signal) => <div className={signal.tone ?? ''} key={signal.label}><span>{signal.label}</span><strong>{signal.value}</strong><p>{signal.detail}</p></div>)}</div> : <p className="home-empty-copy">Complete a check-in to reveal only the signals that affect this event.</p>}
         </article>
-
-        <aside className="home-panel home-signal-panel">
-          <div className="panel-heading"><span>Current signals</span><strong>7 days</strong></div>
-          <div className="home-signal-list">
-            <DashboardMetric label="Readiness" value={recovery.readinessAverage} detail={formatChange(recovery.readinessChange, 'vs prior week')} tone={getReadinessTone(recovery.readinessAverage)} />
-            <DashboardMetric label="Average sleep" value={`${recovery.sleepAverage}h`} detail="nightly average" />
-            <DashboardMetric label="Training time" value={`${workload.thisWeekMinutes} min`} detail={workload.weekCount ? `${workload.averageWeeklyMinutes} min weekly average` : 'building your baseline'} />
-            <DashboardMetric label="Next event" value={nextEvent ? getEventCountdown(nextEvent, now) : 'Open'} detail={nextEvent ? getEventName(nextEvent) : 'nothing scheduled'} />
-          </div>
-        </aside>
       </section>
 
-      {weeklySignals.length >= 4 && <section className="home-panel weekly-signals-panel">
-          <div className="panel-heading">
-            <span>Weekly signals</span>
-            <strong>Last 7 days</strong>
-          </div>
-          <h3>Readiness, sleep, fatigue, and soreness</h3>
-            <ResponsiveContainer height={180} width="100%">
-              <AreaChart accessibilityLayer={false} data={weeklySignals} margin={{ bottom: 2, left: -20, right: 6, top: 8 }}>
-                <CartesianGrid horizontal stroke="rgba(77, 83, 93, 0.12)" strokeDasharray="3 5" vertical={false} />
-                <XAxis axisLine={false} dataKey="date" tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false} />
-                <YAxis axisLine={false} domain={[0, 100]} hide />
-                <Tooltip content={<SignalTooltip />} cursor={{ stroke: 'rgba(32, 38, 47, 0.18)' }} />
-                <Area animationDuration={650} dataKey="readiness" fill="rgba(38, 185, 126, 0.12)" fillOpacity={1} stroke="#26b97e" strokeWidth={2.4} type="monotone" />
-                <Area animationDuration={720} dataKey="sleep" fill="transparent" stroke="#2f8cff" strokeWidth={2} type="monotone" />
-                <Area animationDuration={790} dataKey="fatigue" fill="transparent" stroke="#f3b43f" strokeDasharray="5 4" strokeWidth={2} type="monotone" />
-                <Area animationDuration={860} dataKey="soreness" fill="transparent" stroke="#ff6f61" strokeDasharray="2 4" strokeWidth={2} type="monotone" />
-              </AreaChart>
-            </ResponsiveContainer>
-          <div className="signal-legend"><span className="readiness">Readiness</span><span className="sleep">Sleep</span><span className="fatigue">Fatigue</span><span className="soreness">Soreness</span></div>
-        </section>}
+      <section className="home-day-grid">
+        <article className="home-timeline" aria-labelledby="today-timeline-title">
+          <div className="home-section-heading"><div><span>Today&apos;s flow</span><h2 id="today-timeline-title">Before → event → after</h2></div><small>{format(now, 'EEE, MMM d')}</small></div>
+          <ol>{todayPlan.length ? todayPlan.map((moment, index) => <li className={moment.kind ?? ''} key={moment.id}><i>{String(index + 1).padStart(2, '0')}</i><time>{moment.timeLabel ?? (formatTimeLabel(moment.time) || 'All day')}</time><div><strong>{moment.title ?? getEventName(moment)}</strong><span>{moment.status}</span></div>{moment.action === 'pre' ? <button onClick={() => onGoCheckIn(moment)} type="button">Check in</button> : moment.action === 'post' ? <button onClick={() => onOpenCheckout(moment)} type="button">Checkout</button> : null}</li>) : <li className="empty"><i>01</i><time>Today</time><div><strong>No activity yet</strong><span>Schedule an event or log fueling to build today&apos;s flow.</span></div></li>}</ol>
+        </article>
 
-      {painReports.length > 0 && <section className="home-attention"><PainIssuesCard issues={painIssues} painReports={painReports} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} /></section>}
+        {weeklySignals.length >= 4 ? <article className="home-trend-panel">
+          <div className="home-section-heading"><div><span>Recent trend</span><h2>Readiness around events</h2></div><small>{weeklySignals.length} records</small></div>
+          <div className="home-chart" role="img" aria-label="Readiness, sleep, fatigue, and soreness over recent check-ins with event markers">
+            <ResponsiveContainer height="100%" width="100%"><AreaChart accessibilityLayer={false} data={weeklySignals} margin={{ bottom: 2, left: -20, right: 8, top: 10 }}>
+              <defs><linearGradient id="homeReadinessFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#e43d30" stopOpacity=".24"/><stop offset="100%" stopColor="#e43d30" stopOpacity="0"/></linearGradient></defs>
+              <CartesianGrid horizontal stroke="rgba(77,83,93,.12)" strokeDasharray="3 5" vertical={false}/><XAxis axisLine={false} dataKey="date" tick={{ fill: '#737984', fontSize: 11, fontWeight: 700 }} tickLine={false}/><YAxis domain={[0,100]} hide/><Tooltip content={<SignalTooltip/>}/>
+              <Area animationDuration={750} dataKey="readiness" fill="url(#homeReadinessFill)" stroke="#e43d30" strokeWidth={3} type="monotone"/>
+              {weeklySignals.filter((point) => point.event).map((point) => <ReferenceDot fill="#111" key={`${point.date}-${point.event}`} r={4} stroke="#fff" strokeWidth={2} x={point.date} y={point.readiness}/>) }
+            </AreaChart></ResponsiveContainer>
+          </div>
+          <p className="trend-interpretation">{getTrendInterpretation(recovery, weeklySignals)}</p><div className="signal-legend"><span>Red line · readiness</span><span>Black dot · event</span></div>
+        </article> : <article className="home-trend-panel home-trend-empty"><div className="home-section-heading"><div><span>Recent trend</span><h2>Patterns need real records</h2></div></div><p>Complete four event check-ins to unlock a useful readiness trend—not a decorative chart.</p></article>}
+      </section>
+
+      <m.section className={`home-recovery-preview ${latestRecoveryPlan?.tone ?? 'neutral'}`} whileHover={{ y: -2 }}>
+        <header><div><span>Recovery plan</span><strong>{latestRecoveryPlan ? 'Living plan' : 'Waiting for checkout'}</strong></div><em>{recoveryPriorities.length ? `${recoveryPriorities.length} active priorities` : checkouts.length ? 'Ready to build' : 'Not active'}</em></header>
+        <div className="home-recovery-copy"><h3>{latestRecoveryPlan?.label ?? (checkouts.length ? 'Turn the latest checkout into clear priorities' : 'Recovery starts with what actually happened')}</h3><p>{recoveryStatus?.summary ?? latestRecoveryPlan?.summary ?? (checkouts.length ? 'Recovery can use the completed session, current body response, and next event to organize what matters now.' : 'Complete checkout after an event to unlock a recovery plan tied to the session and what comes next.')}</p></div>
+        {recoveryPriorities.length > 0 && <ol>{recoveryPriorities.map((priority, index) => { const text = normalizeRecommendationItem(priority); return <li key={`${text}-${index}`}><span>{String(index + 1).padStart(2, '0')}</span><p>{text}</p></li> })}</ol>}
+        <button className="home-recovery-action" onClick={onViewRecovery} type="button"><span>{latestRecoveryPlan ? 'Open recovery plan' : 'Go to Recovery'}</span><b aria-hidden="true">→</b></button>
+      </m.section>
+
+      {activePainSummaries.length > 0 && <section className="home-attention"><PainIssuesCard issues={painIssues} reportGroups={activePainSummaries} onSaveIssue={onSavePainIssue} onShareIssue={onSharePainIssue} /></section>}
     </div>
   )
 }
 
-function getWeeklySignals(history) {
+function getCurrentStateSignals({ dailyRecommendation, dailyWellness, recovery, todayCheckIn, unitSystem }) {
+  if (!todayCheckIn && !dailyWellness?.nutritionEntries?.length && !dailyWellness?.hydrationMl) return []
+
+  const signals = []
+  const activePain = Object.entries(todayCheckIn?.painMap ?? {}).filter(([, severity]) => Number(severity) > 0).sort((first, second) => Number(second[1]) - Number(first[1]))
+  if (activePain.length) signals.push({ label: 'Pain', value: `${formatSignalLabel(activePain[0][0])} · ${activePain[0][1]}/10`, detail: todayCheckIn?.painAffectsMovement ? 'Reported to change movement or performance; this takes priority.' : todayCheckIn?.hurtsWhen ? `Reported with ${todayCheckIn.hurtsWhen}.` : 'Included in the current event plan.', tone: todayCheckIn?.painAffectsMovement ? 'danger' : 'caution', priority: 100 })
+  if (todayCheckIn?.illness === true || String(todayCheckIn?.illness ?? '').toLowerCase() === 'yes') signals.push({ label: 'Illness', value: 'Symptoms reported', detail: 'The current recommendation should be followed before normal participation.', tone: 'danger', priority: 95 })
+  if (todayCheckIn?.sleep != null) signals.push({
+    label: 'Sleep',
+    value: `${Number(todayCheckIn.sleep).toFixed(Number(todayCheckIn.sleep) % 1 ? 1 : 0)} hours`,
+    detail: todayCheckIn.sleepQuality != null ? `${todayCheckIn.sleepQuality}/5 perceived restoration` : 'Duration logged; restoration was not recorded.',
+    tone: Number(todayCheckIn.sleep) < 7 ? 'caution' : '',
+    priority: Number(todayCheckIn.sleep) < 7 ? 80 : 35,
+  })
+  if (todayCheckIn?.fatigue != null) signals.push({
+    label: 'Fatigue',
+    value: `${todayCheckIn.fatigue}/5`,
+    detail: Number(todayCheckIn.fatigue) >= 4 ? 'Higher fatigue is shaping today’s guidance.' : 'No unusually high fatigue reported.',
+    tone: Number(todayCheckIn.fatigue) >= 4 ? 'caution' : '',
+    priority: Number(todayCheckIn.fatigue) >= 4 ? 85 : 40,
+  })
+  if (todayCheckIn?.soreness != null && Number(todayCheckIn.soreness) >= 3) signals.push({
+    label: 'Soreness',
+    value: `${todayCheckIn.soreness}/5`,
+    detail: Number(todayCheckIn.soreness) >= 4 ? 'Reassess during the warm-up.' : 'Noticeable, without a reported major limitation.',
+    tone: Number(todayCheckIn.soreness) >= 4 ? 'caution' : '',
+    priority: Number(todayCheckIn.soreness) >= 4 ? 82 : 55,
+  })
+  if (dailyWellness?.nutritionEntries?.length) signals.push({
+    label: 'Fueling',
+    value: `${dailyWellness.nutritionEntries.length} item${dailyWellness.nutritionEntries.length === 1 ? '' : 's'} logged`,
+    detail: 'Today’s food log is available to preparation and recovery context.',
+    priority: 30,
+  })
+  if (Number(dailyWellness?.hydrationMl) > 0) signals.push({
+    label: 'Hydration',
+    value: `${formatHydration(dailyWellness.hydrationMl, unitSystem)} logged`,
+    detail: 'Use thirst, conditions, and your normal routine; avoid catch-up drinking.',
+    priority: 28,
+  })
+  if (!dailyRecommendation && recovery.readinessAverage !== '—') signals.push({
+    label: 'Recent pattern',
+    value: recovery.readinessAverage,
+    detail: 'Recent readiness average; complete today’s check-in for current guidance.',
+    priority: 20,
+  })
+  if (!signals.length && dailyRecommendation) signals.push({ label: 'Current plan', value: dailyRecommendation.label ?? 'Check-in reviewed', detail: dailyRecommendation.summary, tone: dailyRecommendation.tone, priority: 10 })
+  return signals.sort((first, second) => (second.priority ?? 0) - (first.priority ?? 0)).slice(0, 3)
+}
+
+function formatSignalLabel(value) { return String(value).replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()) }
+
+function getTrendInterpretation(recovery, signals) {
+  const valid = signals.filter((point) => Number.isFinite(point.readiness) && point.readiness > 0)
+  if (valid.length < 4) return 'Add a few more check-ins before Athlete Reload interprets a trend.'
+  const eventScores = valid.filter((point) => point.event).map((point) => point.readiness)
+  const otherScores = valid.filter((point) => !point.event).map((point) => point.readiness)
+  if (eventScores.length >= 2 && otherScores.length >= 2) {
+    const eventAverage = Math.round(meanScore(eventScores))
+    const otherAverage = Math.round(meanScore(otherScores))
+    if (Math.abs(eventAverage - otherAverage) >= 6) return `Event-linked check-ins averaged ${eventAverage}, compared with ${otherAverage} on other recorded days. This is an association, not proof that events caused the difference.`
+  }
+  const recentChange = valid.at(-1).readiness - valid[0].readiness
+  if (recentChange >= 6) return `Readiness rose ${Math.round(recentChange)} points across these records. Event markers show where competition or training occurred.`
+  if (recentChange <= -6) return `Readiness fell ${Math.abs(Math.round(recentChange))} points across these records. Use sleep, fatigue, soreness, and event load to interpret why.`
+  return `Readiness stayed within ${Math.round(Math.max(...valid.map((point) => point.readiness)) - Math.min(...valid.map((point) => point.readiness)))} points across these records; more event-linked check-ins will make the pattern stronger.`
+}
+
+function meanScore(values) { return values.reduce((sum, value) => sum + Number(value), 0) / Math.max(1, values.length) }
+
+function getWeeklySignals(history, schedule) {
   const latestByDate = new Map()
 
   history.forEach((entry) => {
@@ -203,6 +206,7 @@ function getWeeklySignals(history) {
     .slice(-7)
     .map((entry) => ({
       date: format(parseISO(entry.date), 'M/d'),
+      event: schedule.find((event) => event.id === entry.eventId)?.title ?? schedule.find((event) => event.date === entry.date)?.title ?? '',
       fatigue: Number(entry.fatigue ?? 0) * 20,
       readiness: Number(entry.score ?? 0),
       sleep: Math.min(100, (Number(entry.sleep ?? 0) / 10) * 100),
@@ -216,8 +220,7 @@ function getReadinessHeadline(value) {
   return 'Protect the quality of today.'
 }
 
-function PainIssuesCard({ issues, painReports, onSaveIssue, onShareIssue }) {
-  const reportGroups = getPainIssueSummaries(painReports)
+function PainIssuesCard({ issues, reportGroups, onSaveIssue, onShareIssue }) {
   const [shareTarget, setShareTarget] = useState(null)
 
   return (
@@ -455,7 +458,7 @@ function getWeeklyMinutes(checkouts) {
   return [...grouped.entries()].map(([week, minutes]) => ({ minutes, week }))
 }
 
-function getTodayPlan(schedule, history, checkouts, now) {
+function getTodayPlan(schedule, history, checkouts, dailyWellness, recoveryCompletions, now, unitSystem) {
   const todayIso = toIsoDate(now)
   const todayEvents = schedule
     .filter((event) => event.date === todayIso)
@@ -464,23 +467,110 @@ function getTodayPlan(schedule, history, checkouts, now) {
     isEventActionable(event) && !checkouts.some((checkout) => checkout.eventId === event.id)
   )
 
-  return todayEvents
-    .map((event) => {
+  const eventMoments = todayEvents.map((event) => {
       if (isAllDayEvent(event)) return { ...event, action: null, status: `${isRestDayEvent(event) ? 'Planned rest' : 'Planned recovery'} · All day`, statusTone: 'complete' }
       const hasPre = history.some((entry) => entry.eventId === event.id)
       const hasPost = checkouts.some((checkout) => checkout.eventId === event.id)
       const eventStarted = hasEventStarted(event)
       const isActiveEvent = event.id === activeEvent?.id
 
-      if (hasPost) return { ...event, action: null, status: 'Completed', statusTone: 'complete' }
+      if (hasPost) return { ...event, action: null, kind: 'event complete', status: 'Checkout saved · recovery context updated', statusTone: 'complete' }
       if (isActiveEvent && eventStarted && hasPre) {
-        return { ...event, action: 'post', status: 'Complete Checkout', statusTone: 'warning' }
+        return { ...event, action: 'post', kind: 'event checkout-due', status: 'Event started · checkout is due', statusTone: 'warning' }
       }
-      if (hasPre || !isActiveEvent) return { ...event, action: null, status: 'Not Started', statusTone: 'ready' }
+      if (hasPre || !isActiveEvent) return { ...event, action: null, kind: 'event', status: hasPre ? 'Check-in saved · event plan ready' : `${getEventDemandLabel(event)} planned`, statusTone: 'ready' }
 
-      return { ...event, action: 'pre', status: 'Complete Check-in', statusTone: 'pending' }
+      return { ...event, action: 'pre', kind: 'event checkin-due', status: 'Check-in open · personalize the event plan', statusTone: 'pending' }
     })
+
+  const nutritionEntries = dailyWellness?.date === todayIso ? (dailyWellness.nutritionEntries ?? []) : []
+  const fuelingMoments = nutritionEntries.length ? [{
+    id: 'home-fueling',
+    kind: 'fueling',
+    sortValue: latestTimeValue(nutritionEntries.map((entry) => entry.loggedAt), 8 * 60),
+    timeLabel: getLatestTimeLabel(nutritionEntries.map((entry) => entry.loggedAt), 'Today'),
+    title: `${nutritionEntries.length} fueling item${nutritionEntries.length === 1 ? '' : 's'} logged`,
+    status: summarizeLoggedMeals(nutritionEntries),
+  }] : []
+  const hydrationMoments = Number(dailyWellness?.hydrationMl) > 0 && dailyWellness?.date === todayIso ? [{
+    id: 'home-hydration',
+    kind: 'hydration',
+    sortValue: 8 * 60 + 1,
+    timeLabel: 'Today',
+    title: `${formatHydration(dailyWellness.hydrationMl, unitSystem)} hydration logged`,
+    status: 'Available to preparation and recovery guidance',
+  }] : []
+  const recoveryMoments = (recoveryCompletions ?? []).filter((entry) => String(entry.completedAt ?? '').slice(0, 10) === todayIso).slice(0, 1).map((entry) => ({
+    id: `home-recovery-${entry.id}`,
+    kind: 'recovery',
+    sortValue: latestTimeValue([entry.completedAt], 22 * 60),
+    timeLabel: getLatestTimeLabel([entry.completedAt], 'Today'),
+    title: 'Recovery routine completed',
+    status: `${entry.details?.plan?.routine?.title ?? 'Guided movement'} added to the living plan`,
+  }))
+
+  return [...fuelingMoments, ...hydrationMoments, ...eventMoments.map((event) => ({ ...event, sortValue: getEventMinute(event) })), ...recoveryMoments]
+    .sort((first, second) => first.sortValue - second.sortValue)
 }
+
+function getRelevantCheckIn(history, event, now) {
+  const todayIso = toIsoDate(now)
+  if (event?.id) return history.filter((entry) => entry.checkInType !== 'post_event' && entry.eventId === event.id).sort((first, second) => String(second.createdAt ?? second.date).localeCompare(String(first.createdAt ?? first.date)))[0] ?? null
+  return history.filter((entry) => entry.date === todayIso && entry.checkInType !== 'post_event').sort((first, second) => String(second.createdAt ?? '').localeCompare(String(first.createdAt ?? '')))[0] ?? null
+}
+
+function getPrimaryHomeAction({ dailyRecommendation, dueCheckout, checkInReminder, latestRecoveryPlan, nextEvent, onGoCheckIn, onOpenCheckout, onViewRecovery, recoveryPriorities, todayCheckIn }) {
+  if (dueCheckout) return { label: 'Complete checkout', detail: `Capture how ${getEventName(dueCheckout)} actually felt so Recovery can respond to the session—not the schedule.`, onClick: () => onOpenCheckout(dueCheckout) }
+  if (checkInReminder) return { label: 'Complete check-in', detail: `Build a current plan for ${getEventName(checkInReminder)} from sleep, fatigue, soreness, stress, illness, and pain.`, onClick: () => onGoCheckIn(checkInReminder) }
+  if (todayCheckIn && dailyRecommendation) {
+    const action = dailyRecommendation.primaryAction
+    return {
+      label: action?.label ?? dailyRecommendation.label ?? 'Follow your event plan',
+      detail: action?.instruction ?? action?.detail ?? dailyRecommendation.action ?? dailyRecommendation.summary,
+      onClick: undefined,
+    }
+  }
+  if (latestRecoveryPlan) return { label: latestRecoveryPlan.label ?? 'Continue recovery plan', detail: normalizeRecommendationItem(recoveryPriorities[0]) ?? latestRecoveryPlan.action ?? latestRecoveryPlan.summary, onClick: onViewRecovery }
+  if (nextEvent) return { label: `Prepare for ${getEventName(nextEvent)}`, detail: `${getEventCountdown(nextEvent, new Date())} remain. Check-in opens closer to the event so guidance reflects your current state.`, onClick: undefined }
+  return { label: 'Plan what comes next', detail: 'Add the next event to connect preparation, checkout, recovery, nutrition, and trends.', onClick: undefined }
+}
+
+function getRecommendationNextMoves(recommendation, primaryDetail) {
+  if (!recommendation) return []
+  const preferredSections = ['pre-event-timeline', 'warm-up-focus', 'fueling-target', 'hydration-target', 'performance-focus', 'event-preparation']
+  const sections = Object.fromEntries((recommendation.reportSections ?? []).map((section) => [section.id, section]))
+  const structured = preferredSections.flatMap((id) => sections[id] ? [...(sections[id].items ?? []), sections[id].summary] : [])
+  const legacy = [...(recommendation.preparation ?? []), ...(recommendation.focus ?? [])]
+  const primaryKey = normalizeComparableText(primaryDetail)
+  return [...structured, ...legacy].map(normalizeRecommendationItem).filter(Boolean).filter((item, index, items) => {
+    const key = normalizeComparableText(item)
+    return key !== primaryKey && items.findIndex((candidate) => normalizeComparableText(candidate) === key) === index
+  }).slice(0, 2)
+}
+
+function getHomeModeLabel({ dueCheckout, checkInReminder, todayCheckIn, latestRecoveryPlan }) {
+  if (dueCheckout) return 'After the event'
+  if (checkInReminder) return 'Before the event'
+  if (todayCheckIn) return 'Event plan active'
+  if (latestRecoveryPlan) return 'Recovery in progress'
+  return 'Next event'
+}
+
+function getEventDemandLabel(event) {
+  const minutes = Number(event?.plannedMinutes ?? event?.expectedDuration ?? 0)
+  const load = String(event?.load ?? event?.intensity ?? '').trim()
+  return [minutes ? `${minutes} min` : '', load ? `${load.toLowerCase()} demand` : ''].filter(Boolean).join(' · ') || 'Event details'
+}
+
+function normalizeRecommendationItem(item) {
+  return typeof item === 'string' ? item.trim() : String(item?.instruction ?? item?.title ?? item?.label ?? '').trim()
+}
+
+function normalizeComparableText(value) { return String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() }
+function getEventMinute(event) { const [hours = 23, minutes = 59] = String(event?.time ?? '23:59').split(':').map(Number); return hours * 60 + minutes }
+function latestTimeValue(values, fallback) { const dates = values.map((value) => new Date(value)).filter((value) => !Number.isNaN(value.getTime())); return dates.length ? Math.max(...dates.map((value) => value.getHours() * 60 + value.getMinutes())) : fallback }
+function getLatestTimeLabel(values, fallback) { const dates = values.map((value) => new Date(value)).filter((value) => !Number.isNaN(value.getTime())); return dates.length ? format(new Date(Math.max(...dates.map(Number))), 'h:mm a') : fallback }
+function summarizeLoggedMeals(entries) { const meals = [...new Set(entries.map((entry) => entry.meal).filter(Boolean))]; return meals.length ? `${meals.join(', ')} available to today’s context` : 'Food log available to today’s context' }
 
 function getNextEvent(schedule, now) {
   return schedule
@@ -970,10 +1060,11 @@ function getEventCountdown(event, now) {
   const eventDate = parseEventDateTime(event)
   if (!eventDate) return 'Scheduled'
 
-  const minutes = Math.max(0, Math.round((eventDate.getTime() - now.getTime()) / 60000))
-  if (minutes < 60) return `${minutes}m`
-  if (minutes < 1440) return `${Math.round(minutes / 60)}h`
-  return `${Math.ceil(minutes / 1440)}d`
+  const totalSeconds = Math.max(0, Math.floor((eventDate.getTime() - now.getTime()) / 1000))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  return [hours, minutes, seconds].map((value) => String(value).padStart(2, '0')).join(':')
 }
 
 function _getSportInsight(profile, nextEvent, checkouts, painWatchlist) {

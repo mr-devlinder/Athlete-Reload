@@ -6,246 +6,229 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-type Food = Record<string, string | number | boolean | undefined | Array<{ label: string; gramWeight: number }>>
+type Food = Record<string, any>
 type QueryType = 'generic' | 'branded' | 'mixed'
 
 const preparationWords = new Set(['raw', 'cooked', 'grilled', 'roasted', 'baked', 'boiled', 'fried', 'steamed'])
-const commonFoods = new Set(['apple', 'banana', 'beef', 'bread', 'chicken', 'egg', 'fish', 'milk', 'oats', 'pasta', 'potato', 'rice', 'salmon', 'turkey', 'yogurt'])
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405)
 
   try {
-    const { query, sourceId } = await request.json()
-    if (sourceId) {
-      const food = await loadUsdaFood(String(sourceId))
-      return json({ food })
-    }
-    const normalizedQuery = normalizeText(query)
-    if (normalizedQuery.length < 2) return json({ foods: [], queryType: 'mixed' })
+    const userClient = createUserClient(request)
+    const { data: { user }, error: authError } = await userClient.auth.getUser()
+    if (authError || !user) return json({ error: 'Authentication required' }, 401)
 
-    const verified = await loadVerifiedFoods(normalizedQuery)
-    const knownBrands = new Set(verified.map((food) => normalizeText(food.brand)).filter(Boolean))
-    const initialType = classifyQuery(normalizedQuery, knownBrands)
-    const [usda, off] = await Promise.all([
-      searchUsda(normalizedQuery, initialType),
-      initialType === 'generic' ? Promise.resolve([]) : searchOpenFoodFacts(normalizedQuery),
+    const body = await request.json()
+    const barcode = normalizeBarcode(body.barcode)
+    const sourceId = String(body.sourceId ?? '').trim()
+    const query = normalizeText(body.query)
+    if (!barcode && !sourceId && query.length < 2) return json({ foods: [], queryType: 'mixed', provider: 'OpenNutrition' })
+
+    const [verified, personal] = await Promise.all([
+      loadVerifiedFoods(query || barcode || sourceId, userClient),
+      loadPersonalFoods(query || barcode || sourceId, userClient),
     ])
-    const queryType = confirmQueryType(initialType, normalizedQuery, [...usda, ...off])
-    const secondaryOff = initialType === 'generic' && queryType !== 'generic'
-      ? await searchOpenFoodFacts(normalizedQuery)
-      : off
-    const candidates = [...verified, ...usda, ...secondaryOff]
+
+    let external: Food[] = []
+    if (barcode) {
+      const food = await searchOpenNutrition(barcode, 30).then((foods) => foods.find((item) => normalizeBarcode(item.ean_13) === barcode) ?? null)
+      if (food) external = [normalizeOpenNutrition(food)]
+    } else if (sourceId) {
+      const food = await getOpenNutritionFood(sourceId)
+      if (food) external = [normalizeOpenNutrition(food)]
+    } else {
+      const foods = await searchOpenNutrition(body.query.trim(), 40)
+      external = (Array.isArray(foods) ? foods : []).map(normalizeOpenNutrition)
+    }
+
+    const queryType = classifyQuery(query, [...verified, ...personal, ...external])
+    const candidates = [...verified, ...personal, ...external]
       .filter(isPlausibleFood)
-      .filter((food) => nameMatches(food, normalizedQuery))
+      .filter((food) => barcode ? food.barcode === barcode : sourceId ? food.sourceId === sourceId : nameMatches(food, query))
     const foods = deduplicate(candidates)
-      .sort((first, second) => scoreFood(second, normalizedQuery, queryType) - scoreFood(first, normalizedQuery, queryType))
+      .sort((first, second) => scoreFood(second, query, queryType) - scoreFood(first, query, queryType))
       .slice(0, 24)
 
-    return json({ foods, queryType })
+    if (sourceId) return json({ food: foods[0] ?? external[0] ?? null, provider: 'OpenNutrition' })
+    if (barcode) return json({ food: foods[0] ?? null, foods, queryType: 'branded', provider: 'OpenNutrition' })
+    return json({ foods, queryType, provider: 'OpenNutrition', attribution: 'OpenNutrition — https://www.opennutrition.app' })
   } catch (error) {
     console.error(error)
-    return json({ error: 'Food search is unavailable right now' }, 502)
+    return json({ error: 'Food search is unavailable right now', provider: 'OpenNutrition' }, 502)
   }
 })
 
-async function loadVerifiedFoods(query: string): Promise<Food[]> {
-  const client = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
-  const { data, error } = await client.from('verified_foods').select('id, source_key, food').limit(150)
+function createUserClient(request: Request) {
+  const authorization = request.headers.get('Authorization') ?? ''
+  return createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_ANON_KEY') ?? '', {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false },
+  })
+}
+
+async function loadVerifiedFoods(query: string, client: ReturnType<typeof createClient>): Promise<Food[]> {
+  const { data, error } = await client.from('verified_foods').select('id, source_key, source_type, source_id, food').limit(200)
   if (error) throw error
   return (data ?? []).map((row: any) => ({
     ...row.food,
     catalogId: row.id,
     foodSource: 'Athlete Reload verified',
     isVerified: true,
-    sourceId: row.source_key,
+    sourceId: row.source_id ?? row.source_key,
     sourceType: 'athlete_reload',
-  })).filter((food: Food) => nameMatches(food, query))
+  })).filter((food: Food) => nameMatches(food, query) || normalizeBarcode(food.barcode) === query || food.sourceId === query)
 }
 
-async function searchUsda(query: string, queryType: QueryType): Promise<Food[]> {
-  const apiKey = Deno.env.get('USDA_FOODDATA_API_KEY')
-  if (!apiKey) return []
-  const url = new URL('https://api.nal.usda.gov/fdc/v1/foods/search')
-  url.searchParams.set('api_key', apiKey)
-  url.searchParams.set('query', query)
-  url.searchParams.set('pageSize', '50')
-  const dataTypes = queryType === 'branded'
-    ? ['Branded', 'Foundation', 'SR Legacy']
-    : ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded']
-  dataTypes.forEach((type) => url.searchParams.append('dataType', type))
-  const response = await fetch(url)
-  if (!response.ok) return []
+async function loadPersonalFoods(query: string, client: ReturnType<typeof createClient>): Promise<Food[]> {
+  const [{ data: usage, error: usageError }, { data: saved, error: savedError }] = await Promise.all([
+    client.from('user_food_usage').select('source_key, food_json, selection_count, last_selected_at').order('last_selected_at', { ascending: false }).limit(80),
+    client.from('saved_foods').select('source_key, food').order('created_at', { ascending: false }).limit(80),
+  ])
+  if (usageError) throw usageError
+  if (savedError) throw savedError
+  const recent = (usage ?? []).map((row: any) => ({ ...row.food_json, sourceKey: row.source_key, usageCount: row.selection_count, lastUsedAt: row.last_selected_at, isRecent: true }))
+  const favorites = (saved ?? []).map((row: any) => ({ ...row.food, sourceKey: row.source_key, isSaved: true }))
+  return [...favorites, ...recent].filter((food) => nameMatches(food, query) || normalizeBarcode(food.barcode) === query || food.sourceId === query)
+}
+
+function openNutritionBaseUrl() {
+  return (Deno.env.get('OPENNUTRITION_SEARCH_URL')?.trim() || 'https://search.opennutrition.app').replace(/\/$/, '')
+}
+
+async function searchOpenNutrition(query: string, limit: number): Promise<Food[]> {
+  const url = new URL(`${openNutritionBaseUrl()}/foods`)
+  url.searchParams.set('q', query)
+  url.searchParams.set('limit', String(limit))
+  url.searchParams.set('offset', '0')
+  url.searchParams.set('facets', 'false')
+  const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000) })
+  if (!response.ok) throw new Error(`OpenNutrition search returned ${response.status}`)
   const payload = await response.json()
-  return (payload.foods ?? []).map(normalizeUsda).filter((food: Food) => food.name)
+  return Array.isArray(payload?.foods) ? payload.foods : []
 }
 
-async function searchOpenFoodFacts(query: string): Promise<Food[]> {
-  const url = new URL('https://world.openfoodfacts.org/cgi/search.pl')
-  url.searchParams.set('json', '1')
-  url.searchParams.set('search_terms', query)
-  url.searchParams.set('page_size', '24')
-  url.searchParams.set('fields', 'code,product_name,product_name_en,brands,serving_size,serving_quantity,nutriments')
-  const response = await fetch(url)
-  if (!response.ok) return []
-  const payload = await response.json()
-  return (payload.products ?? []).map(normalizeOff).filter((food: Food) => food.name)
+async function getOpenNutritionFood(id: string): Promise<Food | null> {
+  if (!/^fd_[A-Za-z0-9]+$/.test(id)) return null
+  const response = await fetch(`${openNutritionBaseUrl()}/foods/${encodeURIComponent(id)}`, {
+    headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000),
+  })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`OpenNutrition details returned ${response.status}`)
+  return await response.json()
 }
 
-function classifyQuery(query: string, knownBrands: Set<string>): QueryType {
-  if (/^\d{8,14}$/.test(query)) return 'branded'
-  if ([...knownBrands].some((brand) => query.includes(brand))) return 'branded'
-  const words = query.split(' ')
-  const genericSignals = words.some((word) => commonFoods.has(word) || preparationWords.has(word))
-  const productSignals = /\b(bar|cereal|cookies?|chips?|protein|flavor|pack|zero|organic)\b/.test(query) && words.length >= 2
-  if (genericSignals && !productSignals && words.length <= 5) return 'generic'
-  if (productSignals) return 'branded'
-  return 'mixed'
+export function normalizeOpenNutrition(food: Food = {}): Food {
+  const nutrients = food.nutrition_100g ?? food.nutrition ?? {}
+  const serving = normalizeServing(food.serving)
+  const gramWeight = serving.gramWeight || 100
+  const factor = gramWeight / 100
+  const scaled = (key: string, aliases: string[] = []) => {
+    const raw = [key, ...aliases].map((name) => nutrients[name]).find((value) => Number.isFinite(Number(value)))
+    return Math.round(Number(raw ?? 0) * factor * 10) / 10
+  }
+  const source = Array.isArray(food.source) ? food.source[0] ?? {} : food.source ?? {}
+  return {
+    name: String(food.name ?? 'Unnamed food').trim(),
+    brand: String(food.brand ?? source.brand ?? '').trim(),
+    barcode: normalizeBarcode(food.ean_13),
+    foodSource: 'OpenNutrition',
+    sourceDataset: String(source.dataset ?? source.name ?? source.source ?? 'OpenNutrition public search'),
+    sourceId: String(food.id ?? ''),
+    sourceType: 'opennutrition',
+    servingSize: serving.label,
+    standardServingSize: serving.label,
+    servingWeight: gramWeight,
+    servingWeightUnit: 'g',
+    servingOptions: serving.options,
+    nutrientBasis: 'serving',
+    calories: Math.round(scaled('calories', ['energy_kcal'])),
+    protein: scaled('protein'),
+    carbohydrates: scaled('carbohydrates'),
+    fats: scaled('total_fat', ['fat']),
+    fiber: scaled('dietary_fiber', ['fiber']),
+    sugar: scaled('total_sugars', ['sugars']),
+    saturatedFat: scaled('saturated_fats'),
+    monounsaturatedFat: scaled('monounsaturated_fats'),
+    polyunsaturatedFat: scaled('polyunsaturated_fats'),
+    transFat: scaled('trans_fats'),
+    cholesterol: scaled('cholesterol'),
+    sodium: scaled('sodium'),
+    potassium: scaled('potassium'),
+    calcium: scaled('calcium'),
+    iron: scaled('iron'),
+    vitaminA: scaled('vitamin_a'),
+    vitaminC: scaled('vitamin_c'),
+    vitaminD: scaled('vitamin_d'),
+    vitaminE: scaled('vitamin_e'),
+    vitaminK: scaled('vitamin_k'),
+    labels: food.labels ?? [],
+    alternateNames: food.alternate_names ?? [],
+  }
 }
 
-function confirmQueryType(initial: QueryType, query: string, foods: Food[]): QueryType {
-  if (initial !== 'mixed') return initial
-  const matchingBrands = foods.filter((food) => food.brand && query.includes(normalizeText(food.brand))).length
-  return matchingBrands >= 2 ? 'branded' : 'mixed'
+function normalizeServing(value: Food | undefined) {
+  const metric = value?.metric ?? {}
+  const common = value?.common ?? value ?? {}
+  const gramWeight = Number(metric.quantity ?? value?.gram_weight ?? value?.gramWeight ?? value?.weight_g ?? value?.amount_g ?? 0)
+  const quantity = Number(common.amount ?? common.quantity ?? 1) || 1
+  const unit = String(common.unit ?? common.measure ?? 'serving')
+  const description = String(common.description ?? common.label ?? `${quantity} ${unit}`).trim()
+  const validWeight = Number.isFinite(gramWeight) && gramWeight > 0 ? gramWeight : 100
+  const label = description || '100 g'
+  const options = [{ label, gramWeight: validWeight }]
+  if (validWeight !== 100) options.push({ label: '100 g', gramWeight: 100 })
+  return { label, gramWeight: validWeight, options }
+}
+
+function classifyQuery(query: string, foods: Food[]): QueryType {
+  if (/^\d{13}$/.test(query)) return 'branded'
+  if (foods.some((food) => food.brand && query.includes(normalizeText(food.brand)))) return 'branded'
+  return query.split(' ').length <= 3 ? 'generic' : 'mixed'
 }
 
 function scoreFood(food: Food, query: string, queryType: QueryType) {
   const name = normalizeText(food.name)
   const brand = normalizeText(food.brand)
-  const terms = query.split(' ')
-  let score = 0
-  if (name === query) score += 120
-  else if (name.startsWith(query)) score += 90
-  else if (terms.every((term) => name.includes(term) || brand.includes(term))) score += 65
-  else score += terms.filter((term) => name.includes(term) || brand.includes(term)).length * 12
-  if (food.isVerified) score += 80
+  const terms = query.split(' ').filter(Boolean)
+  let score = name === query ? 120 : name.startsWith(query) ? 90 : terms.every((term) => `${name} ${brand}`.includes(term)) ? 65 : 0
+  if (food.isVerified) score += 100
+  if (food.isSaved) score += 55
+  if (food.isRecent) score += Math.min(45, 15 + Number(food.usageCount ?? 0) * 3)
   if (brand && query.includes(brand)) score += 35
-  if (queryType === 'generic' && food.sourceType === 'usda_generic') score += 45
-  if (queryType === 'generic' && ['usda_branded', 'open_food_facts'].includes(String(food.sourceType))) score -= 20
-  if (queryType === 'branded' && ['usda_branded', 'open_food_facts'].includes(String(food.sourceType))) score += 35
+  if (queryType === 'generic' && food.sourceType === 'opennutrition' && !brand) score += 25
   if (hasCompleteMacros(food)) score += 18
-  if (food.standardServingSize && food.servingWeight) score += 12
-  if (String(food.originalDescription ?? '').length > 105) score -= 15
+  if (food.standardServingSize && Number(food.servingWeight) > 0) score += 12
   return score
 }
 
 function deduplicate(foods: Food[]) {
   const best = new Map<string, Food>()
   for (const food of foods) {
-    const key = duplicateKey(food)
+    const key = food.barcode || `${normalizeText(food.name).replace(/\b(raw|cooked|grilled|roasted|baked|boiled|fried|steamed)\b/g, '').trim()}|${normalizeText(food.brand)}|${[...preparationWords].find((word) => normalizeText(food.name).includes(word)) ?? ''}`
     const existing = best.get(key)
-    if (!existing || Number(food.isVerified) > Number(existing.isVerified) || completeness(food) > completeness(existing)) best.set(key, food)
+    if (!existing || scoreFood(food, normalizeText(food.name), 'mixed') > scoreFood(existing, normalizeText(existing.name), 'mixed')) best.set(key, food)
   }
   return [...best.values()]
 }
 
-function duplicateKey(food: Food) {
-  const preparation = [...preparationWords].find((word) => normalizeText(food.name).includes(word)) ?? ''
-  return [normalizeText(food.name).replace(/\b(raw|cooked|grilled|roasted|baked|boiled|fried|steamed)\b/g, '').trim(), normalizeText(food.brand), preparation].join('|')
-}
-
-function normalizeUsda(food: any): Food {
-  const nutrients = new Map((food.foodNutrients ?? []).map((item: any) => [normalizeText(item.nutrientName), { value: Number(item.value ?? 0), unit: normalizeText(item.unitName) }]))
-  const find = (...names: string[]) => { for (const name of names) { const nutrient: any = nutrients.get(name); if (nutrient) return nutrient.value } return 0 }
-  const energy: any = nutrients.get('energy')
-  const energyKcal = energy?.unit.includes('kj') ? Number(energy.value / 4.184) : Number(energy?.value ?? 0)
-  const sourceServing = food.servingSize ? `${food.servingSize} ${food.servingSizeUnit ?? 'g'}` : ''
-  const servingSize = food.householdServingFullText || sourceServing || '100 g'
-  const servingGrams = sourceServing ? getServingGrams(sourceServing) : 100
-  const factor = servingGrams ? servingGrams / 100 : 1
-  const scaled = (value: number) => Math.round(value * factor * 10) / 10
-  const originalDescription = String(food.description ?? 'Unnamed food')
-  return {
-    name: cleanUsdaName(originalDescription), originalDescription, brand: food.brandOwner ?? food.brandName ?? '', barcode: food.gtinUpc ?? '', foodSource: 'USDA FoodData Central',
-    sourceId: String(food.fdcId ?? ''), sourceType: food.dataType === 'Branded' ? 'usda_branded' : 'usda_generic',
-    servingSize, standardServingSize: servingSize, servingWeight: servingGrams || 100, servingWeightUnit: 'g', nutrientBasis: 'serving', calories: Math.round(energyKcal * factor),
-    protein: scaled(find('protein')), carbohydrates: scaled(find('carbohydrate, by difference')), fats: scaled(find('total lipid (fat)')), fiber: scaled(find('fiber, total dietary')), sugar: scaled(find('sugars, total including nlea')), sodium: scaled(find('sodium, na')),
-  }
-}
-
-async function loadUsdaFood(sourceId: string): Promise<Food | null> {
-  const apiKey = Deno.env.get('USDA_FOODDATA_API_KEY')
-  if (!apiKey || !/^\d+$/.test(sourceId)) return null
-  const url = new URL(`https://api.nal.usda.gov/fdc/v1/food/${sourceId}`)
-  url.searchParams.set('api_key', apiKey)
-  const response = await fetch(url)
-  if (!response.ok) return null
-  const record = await response.json()
-  const base = normalizeUsda(record)
-  const portions = (record.foodPortions ?? [])
-    .map((portion: any) => ({
-      gramWeight: Number(portion.gramWeight),
-      label: String(portion.portionDescription || portion.modifier || '').trim(),
-    }))
-    .filter((portion: any) => portion.label && Number.isFinite(portion.gramWeight) && portion.gramWeight > 0)
-  const brandedLabel = String(record.householdServingFullText ?? '').trim()
-  const brandedWeight = record.servingSize ? getServingGrams(`${record.servingSize} ${record.servingSizeUnit ?? 'g'}`) : 0
-  if (brandedLabel && brandedWeight) portions.unshift({ label: brandedLabel, gramWeight: brandedWeight })
-  const uniquePortions = [...new Map(portions.map((portion: any) => [`${normalizeText(portion.label)}|${portion.gramWeight}`, portion])).values()]
-  const canonical: any = uniquePortions[0]
-  if (!canonical) return { ...base, servingOptions: [] }
-  const baseWeight = Number(base.servingWeight) || 100
-  const scale = canonical.gramWeight / baseWeight
-  const scaleValue = (value: unknown) => Math.round(Number(value ?? 0) * scale * 10) / 10
-  return {
-    ...base,
-    servingSize: canonical.label,
-    standardServingSize: canonical.label,
-    servingWeight: canonical.gramWeight,
-    servingOptions: uniquePortions,
-    calories: Math.round(scaleValue(base.calories)),
-    protein: scaleValue(base.protein),
-    carbohydrates: scaleValue(base.carbohydrates),
-    fats: scaleValue(base.fats),
-    fiber: scaleValue(base.fiber),
-    sugar: scaleValue(base.sugar),
-    sodium: scaleValue(base.sodium),
-  }
-}
-
-function normalizeOff(product: any): Food {
-  const n = product.nutriments ?? {}
-  const servingGrams = Number(product.serving_quantity) || 100
-  const factor = servingGrams / 100
-  const nutrient = (key: string) => Math.round(Number(n[`${key}_100g`] ?? 0) * factor * 10) / 10
-  const standardServingSize = product.serving_size ?? '100 g'
-  return {
-    name: product.product_name ?? product.product_name_en ?? '', brand: product.brands ?? '', barcode: product.code ?? '', foodSource: 'Open Food Facts',
-    sourceId: String(product.code ?? ''), sourceType: 'open_food_facts', servingSize: standardServingSize, standardServingSize,
-    servingWeight: servingGrams, servingWeightUnit: /\bml\b/i.test(standardServingSize) ? 'mL' : 'g', nutrientBasis: 'serving', servingOptions: [], calories: Math.round(Number(n['energy-kcal_100g'] ?? 0) * factor),
-    protein: nutrient('proteins'), carbohydrates: nutrient('carbohydrates'), fats: nutrient('fat'), fiber: nutrient('fiber'), sugar: nutrient('sugars'), sodium: nutrient('sodium') * 1000,
-  }
-}
-
-function cleanUsdaName(value: string) {
-  return value.toLowerCase().split(',').map((part) => part.trim()).filter(Boolean).slice(0, 4).join(', ').replace(/\b\w/g, (letter) => letter.toUpperCase())
-}
-
-function getServingGrams(serving: string) {
-  const explicit = String(serving).match(/(\d+(?:\.\d+)?)\s*g\b/i)
-  if (explicit) return Number(explicit[1])
-  const ounces = String(serving).match(/(\d+(?:\.\d+)?)\s*oz\b/i)
-  if (ounces) return Number(ounces[1]) * 28.3495
-  return 0
-}
-
 function nameMatches(food: Food, query: string) {
-  const target = `${normalizeText(food.name)} ${normalizeText(food.brand)}`
-  return query.split(' ').every((term) => target.includes(term))
+  const target = `${normalizeText(food.name)} ${normalizeText(food.brand)} ${(food.alternateNames ?? []).map(normalizeText).join(' ')}`
+  return query.split(' ').filter(Boolean).every((term) => target.includes(term))
 }
 
 function isPlausibleFood(food: Food) {
   const values = [food.calories, food.protein, food.carbohydrates, food.fats].map(Number)
-  return values.every(Number.isFinite) && values[0] >= 0 && values[0] <= 1500 && values.slice(1).every((value) => value >= 0 && value <= 100)
+  return food.name && values.every(Number.isFinite) && values[0] >= 0 && values[0] <= 1500 && values.slice(1).every((value) => value >= 0 && value <= 100)
 }
 
 function hasCompleteMacros(food: Food) {
   return [food.calories, food.protein, food.carbohydrates, food.fats].every((value) => Number.isFinite(Number(value)))
 }
 
-function completeness(food: Food) {
-  return ['calories', 'protein', 'carbohydrates', 'fats', 'fiber', 'sugar', 'sodium', 'standardServingSize', 'servingWeight'].filter((key) => food[key] != null && food[key] !== '').length
+function normalizeBarcode(value: unknown) {
+  const digits = String(value ?? '').replace(/\D/g, '')
+  return digits.length === 13 ? digits : ''
 }
 
 function normalizeText(value: unknown) {

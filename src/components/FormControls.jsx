@@ -12,7 +12,9 @@ export function Select({ description, label, value, options, onChange }) {
   )
 }
 
-export function Slider({ description, formatValue, label, min = 0, max, maxLabel, reverse = false, value, unit, onChange }) {
+import '../styles/form-controls.css'
+
+export function Slider({ description, formatValue, highLabel, label, lowLabel, min = 0, max, maxLabel, reverse = false, step = 1, value, unit, onChange }) {
   const numericMin = Number(min)
   const numericMax = Number(max)
   const parsedValue = Number(value)
@@ -30,21 +32,19 @@ export function Slider({ description, formatValue, label, min = 0, max, maxLabel
 
   return (
     <label className="slider-field">
-      {label}
+      <span className="slider-field-heading"><strong>{label}</strong><b>{formatValue ? formatValue(numericValue) : maxLabel && numericValue === numericMax ? maxLabel : `${numericValue}${unit ?? ''}`}</b></span>
       {description && <small className="field-description">{description}</small>}
       <input
         max={numericMax}
         min={numericMin}
         dir={reverse ? 'rtl' : 'ltr'}
-        step={1}
+        step={step}
         style={{ '--range-progress': `${displayedProgress}%` }}
         type="range"
         value={numericValue}
         onChange={handleChange}
       />
-      <span>
-        {formatValue ? formatValue(numericValue) : maxLabel && numericValue === numericMax ? maxLabel : `${numericValue}${unit ?? ''}`}
-      </span>
+      <span className="slider-scale"><small>{lowLabel ?? numericMin}</small><small>{highLabel ?? numericMax}</small></span>
     </label>
   )
 }

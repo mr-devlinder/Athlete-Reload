@@ -2,7 +2,26 @@
 .checkout-section-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .checkin-alert{padding:14px 16px;border-left:4px solid var(--ar-color-warning);background:#fff7e8;color:#674206}
 .recommendation-feedback{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--ar-border)}.recommendation-feedback span{margin-right:auto;font-weight:760}.recommendation-feedback button{min-height:40px;padding:8px 12px;border:1px solid var(--ar-border);border-radius:8px;background:var(--ar-color-surface)}
-@media(max-width:760px){.checkout-section-grid{grid-template-columns:1fr}}
+@media(max-width:760px){
+  .checkout-section-grid{grid-template-columns:1fr}
+  .top-bar{min-height:calc(66px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 14px 0}
+  .page-content{padding-top:calc(66px + env(safe-area-inset-top))}
+  .workspace.page-workspace{min-height:calc(100dvh - 66px - env(safe-area-inset-top))}
+  .mobile-account-menu{position:absolute;top:max(10px,env(safe-area-inset-top));bottom:auto;left:max(10px,env(safe-area-inset-left));display:flex;flex-direction:column;width:min(310px,calc(100% - 36px));height:auto;max-height:calc(100dvh - env(safe-area-inset-top) - 20px);padding:18px;border:0;border-radius:18px;background:#111;color:#fff;box-shadow:0 30px 90px rgba(0,0,0,.36)}
+  .mobile-account-menu nav{margin-top:0}
+}
 @media(max-width:430px){.workspace.page-workspace{padding-inline:14px}.top-bar-context-action{max-width:46vw}}
 @media(max-width:375px){.workspace.page-workspace{padding-inline:10px}.top-bar-context-action{max-width:42vw;padding-inline:9px}}
 @media(max-width:320px){.top-bar-context-action{max-width:39vw;font-size:.72rem}.recommendation-overview>div{padding-inline:12px}}
+
+.sign-out-confirmation-backdrop{position:fixed;inset:0;z-index:220;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));background:rgba(17,17,17,.66);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+.sign-out-confirmation.dialog-shell{width:min(430px,100%);padding:0;overflow:hidden;border:0;border-radius:20px;background:#f3f3f0;color:#171717;box-shadow:0 28px 90px rgba(0,0,0,.34)}
+.sign-out-confirmation .dialog-shell__header{display:block;padding:24px 26px 22px;background:#111;color:#fff}
+.sign-out-confirmation .dialog-shell__header .eyebrow{margin:0 0 7px;color:#e5372f;font-size:.7rem;font-weight:900;letter-spacing:.1em;text-transform:uppercase}
+.sign-out-confirmation .dialog-shell__header h2{margin:0;color:#fff;font-size:1.5rem;line-height:1.1}
+.sign-out-confirmation .dialog-shell__body{display:grid;gap:22px;padding:24px 26px 26px}
+.sign-out-confirmation .dialog-shell__body>p{margin:0;color:#666966;font-size:.92rem;line-height:1.55}
+.sign-out-confirmation-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.sign-out-confirmation-actions button{min-height:48px}
+.sign-out-confirmation-actions .primary-button{background:#e5372f;color:#fff}
+@media(max-width:480px){.sign-out-confirmation .dialog-shell__header{padding:22px 20px 20px}.sign-out-confirmation .dialog-shell__body{padding:20px}.sign-out-confirmation-actions{grid-template-columns:1fr 1fr}}

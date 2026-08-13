@@ -62,17 +62,46 @@ export function getPrimaryPainArea(painMap = {}) {
 
 export function getPainReportsFromMap(painMap = {}, source = {}) {
   return bodyPainAreas
-    .map((area) => ({
-      bodyPart: area.label,
-      date: source.date,
-      notes: source.notes ?? '',
-      severity: Number(painMap[area.id] ?? 0),
-      side: area.side,
-      sourceId: source.sourceId,
-      sourceType: source.sourceType,
-      triggerMovement: source.triggerMovement ?? '',
-    }))
+    .map((area) => {
+      const details = source.painDetails?.[area.id] ?? {}
+      return {
+        bodyPart: area.label,
+        date: source.date,
+        movementEffect: normalizeMovementEffect(details.movementEffect),
+        notes: source.notes ?? '',
+        onset: normalizePainOnset(details.onset),
+        relatedEventId: source.relatedEventId ?? null,
+        severity: Number(painMap[area.id] ?? 0),
+        side: area.side,
+        sourceId: source.sourceId,
+        sourceType: source.sourceType,
+        trend: normalizePainTrend(details.painTrend),
+        triggerMovement: details.hurtsWhen ?? source.triggerMovement ?? '',
+      }
+    })
     .filter((report) => report.severity > 0)
+}
+
+function normalizePainOnset(value) {
+  if (value === 'Today') return 'today'
+  if (value === 'In the past few days') return 'recent'
+  if (value === 'Ongoing') return 'ongoing'
+  return null
+}
+
+function normalizePainTrend(value) {
+  if (value === 'Improving') return 'improving'
+  if (value === 'Worsening') return 'worsening'
+  if (value === 'Unchanged') return 'same'
+  return null
+}
+
+function normalizeMovementEffect(value) {
+  if (value === 'No effect') return 'none'
+  if (value === 'Noticeable, but I can move') return 'noticeable'
+  if (value === 'Limits how I move') return 'limits'
+  if (value === 'I cannot perform the movement') return 'cannot_perform'
+  return null
 }
 
 export function getPainReportsWithResolutions(painMap = {}, source = {}, previousReports = []) {

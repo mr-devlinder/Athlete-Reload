@@ -1,6 +1,7 @@
 import { getActivityDemandProfile, getDemandSummary } from '../domain/activityDemands'
 import { evaluateSafety } from '../domain/safety'
 import { summarizeRecentLoad } from '../domain/workload'
+import { millilitersToFluidOunces } from '../utils/units'
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -57,6 +58,7 @@ export function buildAthleteContext({
       position: athleteProfile.position,
       sport: athleteProfile.sport,
       trainingStyle: athleteProfile.trainingStyle,
+      unitSystem: athleteProfile.unitSystem ?? 'imperial',
       weightKg,
     }),
     event: compact({
@@ -80,6 +82,7 @@ export function buildAthleteContext({
       energy: numberOrNull(checkIn?.energy),
       fatigue: numberOrNull(checkout?.postFatigue ?? checkIn?.fatigue),
       illnessSymptoms: numberOrNull(checkIn?.illnessSymptoms),
+      legHeaviness: numberOrNull(checkIn?.legHeaviness),
       pain: currentPain,
       sleepHours: numberOrNull(checkIn?.sleep),
       sleepQuality: numberOrNull(checkIn?.sleepQuality),
@@ -199,7 +202,7 @@ export function buildFallbackRecommendation(requestType, context) {
     return baseFallback(context, status, hasPain ? 'Current symptoms deserve attention before adding more load.' : 'Use the next few hours to restore normal energy and hydration.', [
       section('session-summary', 'Session Summary', `${context?.event?.durationMinutes ?? 'Recorded'} minutes at ${effort || 'recorded'} effort with ${context?.current?.participation ?? 'recorded'} participation.`),
       section('recovery-status', 'Recovery Status', status),
-      recovery.rehydrationMl && section('hydration-recovery', 'Hydration', `Gradually replace approximately ${formatRange(recovery.rehydrationMl)} mL, adjusting for thirst and your normal tolerance.`),
+      recovery.rehydrationMl && section('hydration-recovery', 'Hydration', `Gradually replace approximately ${formatHydrationRange(recovery.rehydrationMl, context?.athlete?.unitSystem)}, adjusting for thirst and your normal tolerance.`),
       section('nutrition-recovery', 'Nutrition', recovery.proteinG ? `Choose a familiar meal or snack with ${formatRange(recovery.proteinG)} g protein${recovery.carbsG ? ` and ${formatRange(recovery.carbsG)} g carbohydrate` : ''}.` : 'Choose a familiar balanced meal or snack when comfortable.'),
       hasPain && section('new-pain-soreness', 'New Pain or Soreness', 'Avoid movements that reproduce or worsen the current symptom and tell an adult or trainer if function changes.'),
       section('next-few-hours', 'Next Few Hours', 'Keep the recovery plan simple.', ['Cool down with easy event-specific movement if it feels comfortable.', 'Eat and drink gradually instead of trying to catch up at once.', 'Recheck pain, soreness, and fatigue before adding more activity.']),
@@ -209,7 +212,7 @@ export function buildFallbackRecommendation(requestType, context) {
   return baseFallback(context, hasPain ? 'Prepare with modifications' : 'Ready to prepare', hasPain ? 'Use a progressive warm-up and reassess the currently painful movement.' : 'Use the timeline below to arrive prepared for this event.', [
     section('readiness-status', 'Readiness', hasPain ? 'Current pain is the main factor changing preparation.' : 'No current pain restriction was reported.'),
     section('warm-up-focus', 'Warm-up Focus', sportWarmup(context), hasPain ? ['Build intensity gradually.', 'Reassess the painful movement before event speed.'] : ['Build from easy movement to event speed.', 'Finish with sport-specific actions.']),
-    section('hydration-target', 'Hydration Target', `Aim for ${formatRange(hydration.preEventMl)} mL ${hydration.preEventMl?.timing ?? 'before the event'}.${hydration.note ? ` ${hydration.note}` : ''}`),
+    section('hydration-target', 'Hydration Target', `Aim for ${formatHydrationRange(hydration.preEventMl, context?.athlete?.unitSystem)} ${hydration.preEventMl?.timing ?? 'before the event'}.${hydration.note ? ` ${hydration.note}` : ''}`),
     section('fueling-target', 'Fueling Target', fueling.preEventCarbsG ? `Choose a ${fueling.mealType} with approximately ${formatRange(fueling.preEventCarbsG)} g carbohydrate and ${formatRange(fueling.preEventProteinG)} g protein.` : 'Choose a familiar meal or snack that fits the time available.'),
     fueling.duringCarbsGPerHour && section('during-event-fueling', 'During-event Fueling', `For this longer event, approximately ${formatRange(fueling.duringCarbsGPerHour)} g carbohydrate per hour may be useful if tolerated.`),
     section('performance-focus', 'Performance Focus', 'Start controlled, use the warm-up as feedback, and adjust only the demands affected by current symptoms.'),
@@ -229,6 +232,12 @@ function baseFallback(context, label, summary, sections, contextFactors) {
 
 function section(id, title, summary, items = []) { return { id, title, summary, items } }
 function formatRange(value) { return value ? `${value.low}-${value.high}` : '' }
+function formatHydrationRange(value, unitSystem = 'imperial') {
+  if (!value) return ''
+  if (unitSystem === 'metric') return `${roundReadable(value.low / 1000)}-${roundReadable(value.high / 1000)} L`
+  return `${Math.round(millilitersToFluidOunces(value.low))}-${Math.round(millilitersToFluidOunces(value.high))} fl oz`
+}
+function roundReadable(value) { return Math.round(Number(value) * 100) / 100 }
 function sportWarmup(context) {
   const sport = String(context?.athlete?.sport ?? context?.event?.type ?? 'event').toLowerCase()
   if (/soccer|football|run/.test(sport)) return 'Prioritize ankles, calves, hips, progressive running, and event-speed direction changes.'
@@ -238,7 +247,7 @@ function sportWarmup(context) {
 }
 function timelineItems(context, targets) {
   const items = []
-  if (Number(context?.event?.startsInMinutes) >= 120) items.push(`2-3 hours before: ${formatRange(targets?.hydration?.preEventMl)} mL fluid and a familiar ${targets?.fueling?.mealType ?? 'meal or snack'}.`)
+  if (Number(context?.event?.startsInMinutes) >= 120) items.push(`2-3 hours before: ${formatHydrationRange(targets?.hydration?.preEventMl, context?.athlete?.unitSystem)} fluid and a familiar ${targets?.fueling?.mealType ?? 'meal or snack'}.`)
   items.push('30-60 minutes before: sip gradually, check current symptoms, and avoid last-minute catch-up eating or drinking.')
   items.push('Warm-up: progress from comfortable movement to the exact speed, range, and skill the event requires.')
   if (targets?.hydration?.duringMlPerHour || targets?.fueling?.duringCarbsGPerHour) items.push('During event: use the supplied fluid or fuel ranges as tolerated and never drink beyond losses.')

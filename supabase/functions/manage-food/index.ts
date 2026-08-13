@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
-const externalSources = new Set(['usda_generic', 'usda_branded', 'open_food_facts'])
+const externalSources = new Set(['opennutrition'])
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })

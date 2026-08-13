@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isCheckoutAtomicWritePermissionError,
   isMissingAtomicWriteRpc,
   isUnreleasedScheduleColumnError,
   withoutUnknownCheckInFields,
@@ -18,6 +19,12 @@ describe('deployed-schema compatibility', () => {
     expect(isMissingAtomicWriteRpc({ code: 'PGRST202', message: 'save_checkin_with_pain_reports was not found in the schema cache' }, 'save_checkin_with_pain_reports')).toBe(true)
     expect(isMissingAtomicWriteRpc({ code: 'PGRST202', message: 'delete_schedule_event_complete was not found in the schema cache' }, 'delete_schedule_event_complete')).toBe(true)
     expect(isMissingAtomicWriteRpc({ code: '23503', message: 'Schedule event not found' }, 'save_checkin_with_pain_reports')).toBe(false)
+  })
+
+  it('falls back only when the checkout wrapper cannot execute its base function', () => {
+    expect(isCheckoutAtomicWritePermissionError({ code: '42501', message: 'permission denied for function save_checkout_with_pain_reports_base' })).toBe(true)
+    expect(isCheckoutAtomicWritePermissionError({ code: '42501', message: 'permission denied for table training_checkouts' })).toBe(false)
+    expect(isCheckoutAtomicWritePermissionError({ code: '23503', message: 'Schedule event not found' })).toBe(false)
   })
 
   it('omits unanswered subjective fields only for legacy writes', () => {

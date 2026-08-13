@@ -6,7 +6,7 @@ import { CheckoutModal } from './components/CheckoutModal'
 import { AccountPrivacyView } from './components/AccountPrivacyView'
 import { AgeGate } from './components/AgeGate'
 import { AthleteProfileModal } from './components/AthleteProfileModal'
-import { PerformanceQuote, RecommendationCard, RecoveryPlanCard } from './components/RecommendationCard'
+import { AiDecisionModal, CheckoutAiModal } from './components/AiDecisionModal'
 import { DialogShell } from './components/DialogShell'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { LiquidNavigation } from './components/LiquidNavigation'
@@ -48,15 +48,18 @@ import {
   clearPainReports,
   clearTrainingCheckouts,
   createAssociation,
+  createEventTemplate,
   createPainIssue,
   createRecommendationRecord,
   createRecoveryResponse,
   createRecoveryRoutineCompletion,
+  upsertRecoveryPlan,
   createSavedRecoveryRoutine,
   createPainReports,
   createScheduleEvent,
   createShareAuditLog,
   deleteAssociation,
+  deleteEventTemplate,
   deleteHistoryEntryComplete,
   deleteRecoveryRoutineCompletion,
   deleteScheduleEvent,
@@ -71,7 +74,6 @@ import {
   upsertAthleteProfile,
   upsertAthleteBaselines,
   upsertAthleteInsights,
-  upsertRecommendationFeedback,
   updateTrainingCheckout,
   updateScheduleEvent,
   saveTournamentWithGames,
@@ -325,11 +327,14 @@ function applyPainMapToCheckIn(checkIn) {
 
   return normalizeCheckInScales({
     ...checkIn,
-    hurtsWhen: pain > 0 ? checkIn.hurtsWhen : 'At rest',
-    injuryType: pain > 0 ? checkIn.injuryType : 'Unknown',
-    location: pain > 0 ? primaryArea.recommendationLocation : 'Hamstring',
+    affectedMovement: pain > 0 ? checkIn.affectedMovement : null,
+    hurtsWhen: pain > 0 ? checkIn.hurtsWhen : null,
+    injuryType: pain > 0 ? checkIn.injuryType : null,
+    location: pain > 0 ? primaryArea.recommendationLocation : null,
     pain,
-    painType: pain > 0 ? checkIn.painType : 'No pain',
+    painDetails: pain > 0 ? checkIn.painDetails : {},
+    painTrend: pain > 0 ? checkIn.painTrend : null,
+    painType: pain > 0 ? checkIn.painType : null,
   })
 }
 
@@ -733,6 +738,7 @@ function App() {
   const [isSavingCheckIn, setIsSavingCheckIn] = useState(false)
   const [activeLegalModal, setActiveLegalModal] = useState(null)
   const [isMobileAccountMenuOpen, setIsMobileAccountMenuOpen] = useState(false)
+  const [isSignOutConfirmOpen, setIsSignOutConfirmOpen] = useState(false)
   const [isRestrictedDataControlsOpen, setIsRestrictedDataControlsOpen] = useState(false)
   const recommendationDialogRef = useModalAccessibility(Boolean(submittedRecommendation), () => setSubmittedRecommendation(null))
   const aiErrorDialogRef = useModalAccessibility(Boolean(checkInAiError), () => setCheckInAiError(''))
@@ -756,6 +762,7 @@ function App() {
     { ...privacyDefaults, ...savedState?.privacyPreferences, display: normalizeDisplayPreferences(savedState?.privacyPreferences?.display, savedState?.athleteProfile?.unitSystem) },
   )
   const [associations, setAssociations] = useState(savedState?.associations ?? initialAssociations)
+  const [eventTemplates, setEventTemplates] = useState(savedState?.eventTemplates ?? [])
   const [schedule, setSchedule] = useState(
     (savedState?.schedule ?? initialSchedule).map(normalizeScheduleItem),
   )
@@ -1107,6 +1114,7 @@ function App() {
       athleteProfile,
       checkIn,
       associations,
+      eventTemplates,
       checkouts,
       history,
       painReports,
@@ -1120,7 +1128,7 @@ function App() {
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, eventTemplates, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useAthleteSnapshotController({
     enabled: isSupabaseSession,
@@ -1135,12 +1143,20 @@ function App() {
   function applyRemoteSnapshot({ data, preferences, profile }) {
     setSchedule(data.schedule)
     setAssociations(data.associations)
+    setEventTemplates(data.eventTemplates ?? [])
     setHistory(data.history)
     setCheckouts(data.checkouts)
     setPainReports(data.painReports)
     setPainIssues(data.painIssues)
     setSavedRoutines(data.savedRoutines)
     setRecoveryCompletions(data.recoveryCompletions ?? [])
+    const latestLivingPlan = data.recoveryPlans?.[0]
+    if (latestLivingPlan?.plan) {
+      setGeneratedRecoveryPlan(latestLivingPlan.plan)
+      setGeneratedRecoveryCheckoutId(latestLivingPlan.sourceCheckoutId ?? null)
+      setIsGeneratedRecoveryPlanSaved(true)
+      setRecoveryPlanStatus('saved')
+    }
     setShareAuditLogs(data.shareAuditLogs)
     setTournaments(data.tournaments)
     setDailyWellness(data.wellness ?? { date: todayIso, hydrationMl: 0, nutritionEntries: [] })
@@ -1227,10 +1243,14 @@ function App() {
     if (field === 'pain' && value === 0) {
       setCheckIn((current) => ({
         ...current,
+        affectedMovement: null,
+        hurtsWhen: null,
+        injuryType: null,
+        location: null,
         pain: 0,
-        injuryType: 'Unknown',
-        painType: 'No pain',
-        hurtsWhen: 'At rest',
+        painDetails: {},
+        painTrend: null,
+        painType: null,
       }))
       return
     }
@@ -1268,12 +1288,15 @@ function App() {
 
     if (isEditingToday && previousEntry?.recommendation && areCheckInsEquivalent(scheduleDrivenCheckIn, previousEntry)) {
       setIsEditingToday(false)
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      setActiveView('Home')
       setSubmittedRecommendation(previousEntry.recommendation)
       setSubmittedRecommendationStatus('ai')
       setSubmittedRecommendationContext({
+        checkIn: previousEntry,
         scoreLabel: 'readiness',
         session: scheduleDrivenCheckIn.session,
-        title: 'Check-in report',
+        title: `Your plan for ${scheduleDrivenCheckIn.session}`,
       })
       setIsSavingCheckIn(false)
       return
@@ -1289,6 +1312,7 @@ function App() {
     const baseline = getPersonalBaseline(history, selectedCheckInEvent)
     const deterministicRecommendation = getRecommendation({
       ...savedCheckIn,
+      baseline,
       baselineSampleSize: baseline.sampleSize,
     })
     let finalRecommendation = savedCheckIn.quickRecommendation
@@ -1297,13 +1321,15 @@ function App() {
     let finalRecommendationStatus = savedCheckIn.quickRecommendation ? 'ai' : 'local'
     let deterministicSave = null
 
-    if (supabase) {
+    if (isSupabaseSession) {
       try {
         deterministicSave = await saveCheckInWithPainReports(savedCheckIn, deterministicRecommendation, getPainReportsWithResolutions(
           savedCheckIn.painMap,
           {
             date: savedCheckIn.eventDate ?? todayIso,
             notes: savedCheckIn.notes,
+            painDetails: savedCheckIn.painDetails,
+            relatedEventId: savedCheckIn.eventId,
             sourceId: previousEntry?.id ?? null,
             sourceType: 'check_in',
             triggerMovement: savedCheckIn.hurtsWhen,
@@ -1312,11 +1338,7 @@ function App() {
         ), isEditingToday ? previousEntry?.id : null)
         setHistory((current) => [deterministicSave.record, ...current.filter((entry) => entry.id !== deterministicSave.record.id && entry.eventId !== deterministicSave.record.eventId)])
         setPainReports((current) => [...deterministicSave.painReports, ...current.filter((report) => report.sourceId !== deterministicSave.record.id && report.sourceId !== previousEntry?.id)])
-        setSubmittedRecommendation(deterministicRecommendation)
-        setSubmittedRecommendationStatus('local')
-        setSubmittedRecommendationContext({ scoreLabel: 'readiness', session: savedCheckIn.session, title: 'Check-in report' })
         setDataStatus('synced')
-        setIsSavingCheckIn(false)
       } catch (error) {
         console.error(error)
         setDataStatus('error')
@@ -1325,7 +1347,7 @@ function App() {
       }
     }
 
-    if (!savedCheckIn.quickRecommendation) {
+    if (isSupabaseSession && !savedCheckIn.quickRecommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, selectedCheckInEvent)
         const previousRecoveryCompletion = recoveryCompletions.find((completion) =>
@@ -1377,10 +1399,11 @@ function App() {
         console.error('Check-in AI recommendation failed', error)
         finalRecommendation = deterministicRecommendation
         finalRecommendationStatus = 'local'
+        setCheckInAiError('Your check-in was saved, but the AI event plan could not be generated. Please try again from this check-in.')
       }
     }
 
-    if (supabase) {
+    if (isSupabaseSession) {
       let savedEntry = null
       try {
         const result = await saveCheckInWithPainReports(savedCheckIn, finalRecommendation, getPainReportsWithResolutions(
@@ -1388,6 +1411,8 @@ function App() {
           {
             date: savedCheckIn.eventDate ?? todayIso,
             notes: savedCheckIn.notes,
+            painDetails: savedCheckIn.painDetails,
+            relatedEventId: savedCheckIn.eventId,
             sourceId: deterministicSave?.record.id ?? (isEditingToday ? previousEntry?.id : null),
             sourceType: 'check_in',
             triggerMovement: savedCheckIn.hurtsWhen,
@@ -1447,6 +1472,8 @@ function App() {
         ...getPainReportsWithResolutions(scheduleDrivenCheckIn.painMap, {
           date: scheduleDrivenCheckIn.eventDate ?? todayIso,
           notes: scheduleDrivenCheckIn.notes,
+          painDetails: scheduleDrivenCheckIn.painDetails,
+          relatedEventId: scheduleDrivenCheckIn.eventId,
           sourceId: currentEntry.id ?? currentEntry.eventId ?? currentEntry.date,
           sourceType: 'check_in',
           triggerMovement: scheduleDrivenCheckIn.hurtsWhen,
@@ -1461,14 +1488,19 @@ function App() {
     }
 
     setIsEditingToday(false)
-    setSubmittedRecommendation(finalRecommendation)
     clearDraft({ accountId: session?.user?.id ?? 'guest', feature: 'checkin', scope: selectedCheckInEvent?.id ?? todayIso })
-    setSubmittedRecommendationStatus(finalRecommendationStatus)
-    setSubmittedRecommendationContext({
-      scoreLabel: 'readiness',
-      session: scheduleDrivenCheckIn.session,
-      title: 'Check-in report',
-    })
+    await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    setActiveView('Home')
+    if (finalRecommendationStatus === 'ai') {
+      setSubmittedRecommendation(finalRecommendation)
+      setSubmittedRecommendationStatus('ai')
+      setSubmittedRecommendationContext({
+        checkIn: savedCheckIn,
+        scoreLabel: 'readiness',
+        session: scheduleDrivenCheckIn.session,
+        title: `Your plan for ${scheduleDrivenCheckIn.session}`,
+      })
+    }
     setIsSavingCheckIn(false)
   }
 
@@ -1756,22 +1788,11 @@ function App() {
     }
   }
 
-  async function saveSubmittedRecommendationFeedback(usefulness) {
-    const recommendationId = submittedRecommendation?.recordId
-    if (!athleteProfile?.athleteId || !recommendationId) return
-    try {
-      await upsertRecommendationFeedback({ athleteId: athleteProfile.athleteId, recommendationId, usefulness })
-      setSubmittedRecommendation((current) => ({ ...current, feedback: usefulness }))
-    } catch (error) {
-      console.error(error)
-      setDataStatus('error')
-    }
-  }
-
   async function deleteHistoryEntry(entry, kind) {
     if (!entry?.id) return
 
     if (kind === 'recovery-completion') {
+      const removedCompletion = recoveryCompletions.find((item) => item.id === entry.id) ?? entry
       setRecoveryCompletions((current) => current.filter((item) => item.id !== entry.id))
 
       if (isSupabaseSession) {
@@ -1779,7 +1800,9 @@ function App() {
           await deleteRecoveryRoutineCompletion(entry.id)
         } catch (error) {
           console.error(error)
+          setRecoveryCompletions((current) => [removedCompletion, ...current.filter((item) => item.id !== entry.id)])
           setDataStatus('error')
+          throw error
         }
       }
       return
@@ -1787,8 +1810,7 @@ function App() {
 
     if (kind === 'recovery') {
       const checkout = checkouts.find((item) => item.id === entry.id)
-      const event = schedule.find((item) => item.id === checkout?.eventId)
-      if (!checkout || !event) return
+      if (!checkout) return
 
       const recommendation = { ...(checkout.recommendation ?? {}) }
       delete recommendation.recoveryPlan
@@ -1797,11 +1819,12 @@ function App() {
 
       if (isSupabaseSession) {
         try {
-          const savedCheckout = await updateTrainingCheckout(checkout.id, event, updatedCheckout)
-          setCheckouts((current) => [savedCheckout, ...current.filter((item) => item.id !== savedCheckout.id)])
+          await deleteHistoryEntryComplete('recovery', checkout.id)
         } catch (error) {
           console.error(error)
+          setCheckouts((current) => [checkout, ...current.filter((item) => item.id !== checkout.id)])
           setDataStatus('error')
+          throw error
         }
       }
       return
@@ -1820,6 +1843,7 @@ function App() {
           setCheckouts((current) => [entry, ...current.filter((item) => item.id !== entry.id)])
           setPainReports((current) => [...removedPainReports, ...current.filter((report) => report.sourceId !== entry.id)])
           setDataStatus('error')
+          throw error
         }
       }
       return
@@ -1837,6 +1861,7 @@ function App() {
         setHistory((current) => [entry, ...current.filter((item) => item.id !== entry.id)])
         setPainReports((current) => [...removedPainReports, ...current.filter((report) => report.sourceId !== entry.id)])
         setDataStatus('error')
+        throw error
       }
     }
   }
@@ -1863,6 +1888,53 @@ function App() {
       ...current,
       { id: `association-${Date.now()}`, name: trimmedName },
     ])
+  }
+
+  async function saveEventTemplate(name, template) {
+    const cleanName = name.trim()
+    if (!cleanName) return false
+
+    const templateToSave = {
+      ...template,
+      date: undefined,
+      id: undefined,
+      recurrenceRule: {},
+      repeat: 'Does not repeat',
+      repeatCount: 1,
+      templateSourceId: undefined,
+    }
+
+    if (!isSupabaseSession) {
+      setEventTemplates((current) => [{ id: `template-${Date.now()}`, name: cleanName, template: templateToSave }, ...current])
+      return true
+    }
+
+    try {
+      const savedTemplate = await createEventTemplate({ athleteId: athleteProfile?.athleteId, name: cleanName, template: templateToSave })
+      setEventTemplates((current) => [savedTemplate, ...current])
+      setDataStatus('synced')
+      return true
+    } catch (error) {
+      console.error(error)
+      setDataStatus('error')
+      return false
+    }
+  }
+
+  async function removeEventTemplate(id) {
+    const previousTemplates = eventTemplates
+    setEventTemplates((current) => current.filter((template) => template.id !== id))
+    if (!isSupabaseSession) return true
+
+    try {
+      await deleteEventTemplate(id)
+      return true
+    } catch (error) {
+      console.error(error)
+      setEventTemplates(previousTemplates)
+      setDataStatus('error')
+      return false
+    }
   }
 
   async function renameAssociation(id, name) {
@@ -1936,6 +2008,8 @@ function App() {
         {
           date: event.date,
           notes: '',
+          painDetails: checkout.painDetails,
+          relatedEventId: event.id,
           sourceId: existingCheckout?.id ?? null,
           sourceType: 'checkout',
           triggerMovement: checkout.painChange,
@@ -1943,13 +2017,9 @@ function App() {
       ), existingCheckout?.id ?? null)
       setCheckouts((current) => [deterministicSave.record, ...current.filter((item) => item.id !== deterministicSave.record.id)])
       setPainReports((current) => [...deterministicSave.painReports, ...current.filter((report) => report.sourceId !== deterministicSave.record.id && report.sourceId !== existingCheckout?.id)])
-      setCheckoutEvent(null)
-      setSubmittedRecommendation(deterministicRecommendation)
-      setSubmittedRecommendationStatus('local')
-      setSubmittedRecommendationContext({ scoreLabel: 'recovery', session: event.type, title: 'Checkout report' })
     }
 
-    if (supabase) {
+    if (isSupabaseSession) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, event)
 
@@ -2011,6 +2081,8 @@ function App() {
           {
             date: event.date,
             notes: '',
+            painDetails: checkout.painDetails,
+            relatedEventId: event.id,
             sourceId: existingCheckout?.id ?? null,
             sourceType: 'checkout',
             triggerMovement: checkout.painChange,
@@ -2052,20 +2124,18 @@ function App() {
           }),
         }).catch((error) => console.warn('Unable to update checkout baselines.', error))
       }
-      setCheckoutEvent(null)
-      setSubmittedRecommendation(finalRecommendation)
-      setSubmittedRecommendationStatus(finalRecommendationStatus)
-      setSubmittedRecommendationContext({
-        scoreLabel: 'recovery',
-        session: event.title || event.type,
-        title: 'Checkout report',
-      })
       if (savedCheckout.recommendationNotPersisted) {
         setDataStatus('offline')
       } else {
         setDataStatus('synced')
       }
       advanceCheckInAfterCheckout(event, savedCheckout)
+      await new Promise((resolve) => window.setTimeout(resolve, 1000))
+      setCheckoutEvent(null)
+      setActiveView('Home')
+      setSubmittedRecommendation(finalRecommendation)
+      setSubmittedRecommendationStatus(finalRecommendationStatus)
+      setSubmittedRecommendationContext({ scoreLabel: 'recovery', session: event.title || event.type, title: 'Checkout complete' })
       return
     }
 
@@ -2095,6 +2165,8 @@ function App() {
       ...getPainReportsFromMap(checkout.painMap, {
         date: event.date,
         notes: '',
+        painDetails: checkout.painDetails,
+        relatedEventId: event.id,
         sourceId: savedCheckout.id,
         sourceType: 'checkout',
         triggerMovement: checkout.painChange,
@@ -2104,15 +2176,34 @@ function App() {
       })),
       ...current.filter((report) => report.sourceId !== savedCheckout.id),
     ])
+    advanceCheckInAfterCheckout(event, savedCheckout)
+    await new Promise((resolve) => window.setTimeout(resolve, 1000))
     setCheckoutEvent(null)
+    setActiveView('Home')
     setSubmittedRecommendation(finalRecommendation)
     setSubmittedRecommendationStatus(finalRecommendationStatus)
-    setSubmittedRecommendationContext({
-      scoreLabel: 'recovery',
-      session: event.title || event.type,
-      title: 'Checkout report',
+    setSubmittedRecommendationContext({ scoreLabel: 'recovery', session: event.title || event.type, title: 'Checkout complete' })
+  }
+
+  async function persistLivingRecoveryPlan(plan, checkout, completedEvent, upcomingEvent, actionStatuses = {}) {
+    if (!isSupabaseSession || !plan) return
+    await upsertRecoveryPlan({
+      sourceCheckoutId: checkout?.id ?? null,
+      sourceEventId: checkout?.eventId ?? completedEvent?.id ?? null,
+      nextEventId: upcomingEvent?.id ?? null,
+      plan,
+      inputSignature: `recovery:${checkout?.id ?? 'standalone'}:${plan.planType ?? 'session'}`,
+      contextSnapshot: {
+        checkoutId: checkout?.id ?? null,
+        eventId: checkout?.eventId ?? completedEvent?.id ?? null,
+        nextEventId: upcomingEvent?.id ?? null,
+        wellnessUpdatedAt: dailyWellness?.updatedAt ?? null,
+      },
+      actionStatuses,
+      engineVersion: plan.engineVersion,
+      promptVersion: plan.promptVersion,
+      catalogVersion: plan.catalogVersion,
     })
-    advanceCheckInAfterCheckout(event, savedCheckout)
   }
 
   async function generateRecoveryPlan({ equipment, planType, targetedAreas, timeAvailable }) {
@@ -2197,7 +2288,7 @@ function App() {
         recentRoutineExerciseNames,
         recentRoutineSequences,
         recoveryCompletions: recoveryCompletions.slice(0, 5),
-        recoveryCatalog: RECOVERY_EXERCISE_LIST.map(({ id, name, category, equipment, sportDemandTags, recoveryGoalTags }) => ({ id, name, category, equipment, sportDemandTags, recoveryGoalTags })),
+        recoveryCatalog: RECOVERY_EXERCISE_LIST.map(({ id, name, category, movementType, laterality, equipment, targetBodyParts, targetMuscles, sportDemandTags, recoveryGoalTags, doseModels }) => ({ id, name, category, movementType, laterality, equipment, targetBodyParts, targetMuscles, sportDemandTags, recoveryGoalTags, doseModels })),
         requestType: 'recovery_plan',
         scheduleContext,
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
@@ -2211,8 +2302,17 @@ function App() {
       setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
       setIsGeneratedRecoveryPlanSaved(false)
       setRecoveryPlanStatus('ai')
+      await persistLivingRecoveryPlan(plan, latestCheckout, completedEvent, nextScheduledEvent, {
+        fueling: 'pending', hydration: 'pending', routine: 'pending', sleep: 'pending',
+      }).catch((error) => console.warn('Unable to persist the living recovery plan.', error))
     } catch (error) {
       console.error(error)
+      if (isSupabaseSession) {
+        setGeneratedRecoveryPlan(null)
+        setGeneratedRecoveryCheckoutId(null)
+        setRecoveryPlanStatus('error')
+        return
+      }
       const fallback = buildFallbackRecommendation('recovery_plan', buildAthleteContext({
         athleteProfile,
         checkIn: preCheckIn,
@@ -2233,12 +2333,24 @@ function App() {
       })
       setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
       setRecoveryPlanStatus('local')
+      await persistLivingRecoveryPlan({
+        ...fallback,
+        planType,
+        routine: {
+          ...fallback.routine,
+          durationMinutes: Math.max(5, Math.min(30, Number.parseInt(timeAvailable, 10) || 15)),
+        },
+      }, contextCheckout, completedEvent, nextScheduledEvent, {
+        fueling: 'pending', hydration: 'pending', routine: 'pending', sleep: 'pending',
+      }).catch((persistError) => console.warn('Unable to persist the local recovery plan.', persistError))
     }
   }
 
   async function saveRecoveryPlan(plan) {
     const checkoutId = generatedRecoveryCheckoutId
     const checkout = checkouts.find((item) => item.id === checkoutId)
+    const completedEvent = checkout ? schedule.find((event) => event.id === checkout.eventId) : null
+    const planNextEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : nextEvent
 
     if (!plan || recoveryPlanSaveInFlightRef.current || isGeneratedRecoveryPlanSaved) return false
     recoveryPlanSaveInFlightRef.current = true
@@ -2252,6 +2364,11 @@ function App() {
     }
 
     try {
+      if (isSupabaseSession) {
+        await persistLivingRecoveryPlan(plan, checkout, completedEvent, planNextEvent, {
+          fueling: 'pending', hydration: 'pending', routine: 'completed', sleep: 'pending',
+        })
+      }
       const savedCompletion = isSupabaseSession
         ? await createRecoveryRoutineCompletion(completion)
         : completion
@@ -2786,6 +2903,11 @@ function App() {
     isSigningOutRef.current = false
   }
 
+  function requestSignOut() {
+    setIsMobileAccountMenuOpen(false)
+    setIsSignOutConfirmOpen(true)
+  }
+
   async function resetDeletedSession() {
     isSigningOutRef.current = true
     if (supabase) {
@@ -2802,6 +2924,7 @@ function App() {
     clearAccountDrafts(session?.user?.id ?? 'guest')
     setSchedule([])
     setAssociations([])
+    setEventTemplates([])
     setHistory([])
     setCheckouts([])
     setPainReports([])
@@ -2924,7 +3047,7 @@ function App() {
           profile={athleteProfile}
           onOpenDataControls={() => setIsRestrictedDataControlsOpen(true)}
           onSave={confirmAthleteAge}
-          onSignOut={signOut}
+          onSignOut={requestSignOut}
         />
       )}
 
@@ -2944,7 +3067,7 @@ function App() {
               className={onboardingTour && !onboardingTour.endsWith('-nav') ? 'tour-hidden-mobile' : ''}
               lockedView={getTourNavigationTarget()}
               onSelect={selectNavigationView}
-              onSignOut={signOut}
+              onSignOut={requestSignOut}
               views={views}
             />
             <div className="dashboard-main">
@@ -2980,7 +3103,7 @@ function App() {
                     <strong className="mobile-account-name">{athleteDisplayName}</strong>
                     <nav aria-label="Account actions">
                       <button onClick={() => { setIsMobileAccountMenuOpen(false); selectNavigationView('Settings') }} type="button">Settings</button>
-                      <button onClick={() => { setIsMobileAccountMenuOpen(false); signOut() }} type="button">Sign out</button>
+                      <button onClick={requestSignOut} type="button">Sign out</button>
                     </nav>
                   </aside>
                 </div>
@@ -3016,6 +3139,7 @@ function App() {
                 isSaving={isSavingCheckIn}
                 nextEvent={nextEvent}
                 selectedEvent={selectedCheckInEvent}
+                savedEntry={history.find((entry) => selectedCheckInEvent?.id ? entry.eventId === selectedCheckInEvent.id : entry.date === todayIso)}
                 selectedEventId={selectedCheckInEvent?.id ?? null}
                 todayEvents={todayEvents}
                 todayIso={todayIso}
@@ -3029,6 +3153,7 @@ function App() {
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
                 isQuickMode={false}
                 restDayPlanned={todayEvents.some(isRestDayEvent)}
+                unitSystem={athleteProfile?.unitSystem ?? displayPreferences.unitSystem}
               />
             )}
 
@@ -3041,6 +3166,7 @@ function App() {
                 nutritionHistory={nutritionHistory}
                 painReports={painReports}
                 painIssues={painIssues}
+                recoveryCompletions={recoveryCompletions}
                 recommendation={recommendation}
                 recommendationStatus="local"
                 schedule={schedule}
@@ -3048,6 +3174,7 @@ function App() {
                 onOpenCheckout={openCheckout}
                 onSavePainIssue={savePainIssue}
                 onSharePainIssue={recordPainIssueShare}
+                onViewRecovery={() => setActiveView('Recovery')}
               />
             )}
 
@@ -3086,17 +3213,20 @@ function App() {
                 athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 checkIns={history}
+                eventTemplates={eventTemplates}
                 onAdd={addScheduleItem}
                 onAddTournament={addTournament}
                 onUpdateTournament={editTournament}
                 onAddAssociation={addAssociation}
                 onRenameAssociation={renameAssociation}
                 onRemoveAssociation={removeAssociation}
+                onRemoveTemplate={removeEventTemplate}
                 onOpenCheckIn={openPreCheckIn}
                 onOpenCheckout={openCheckout}
                 onRemove={removeScheduleItem}
                 onRemoveTournament={removeTournament}
                 onUpdate={updateScheduleItem}
+                onSaveTemplate={saveEventTemplate}
                 onboardingAssociation={onboardingAssociation}
                 isOnboardingEventCreation={onboardingTour === 'schedule'}
                 schedule={schedule}
@@ -3109,12 +3239,14 @@ function App() {
                 athleteProfile={athleteProfile}
                 checkouts={checkouts}
                 history={history}
+                painReports={painReports}
                 insights={trendInsights}
                 onClear={clearHistory}
                 onDeleteEntry={deleteHistoryEntry}
                 onFavoriteRoutine={favoriteRecoveryRoutine}
                 recoveryCompletions={recoveryCompletions}
                 savedRoutines={savedRoutines}
+                schedule={schedule}
                 weekStartsOn={displayPreferences.weekStartsOn}
               />
             )}
@@ -3158,6 +3290,7 @@ function App() {
             return report.sourceType === 'check_in' && report.sourceId === checkIn?.id
           })}
           onClose={() => setCheckoutEvent(null)}
+          onOpenRecovery={() => { setCheckoutEvent(null); setActiveView('Recovery') }}
           onSave={saveCheckout}
         />
       )}
@@ -3170,37 +3303,8 @@ function App() {
         />
       )}
 
-      {submittedRecommendation && (
-        <div className="modal-backdrop">
-          <section aria-labelledby="recommendation-dialog-title" className="event-modal recommendation-modal glass-panel" ref={recommendationDialogRef} role="dialog" aria-modal="true" tabIndex={-1}>
-            <div className="schedule-header">
-              <div>
-                <p className="eyebrow">AI report</p>
-                <h2 id="recommendation-dialog-title">{submittedRecommendationContext.title}</h2>
-              </div>
-              <button className="ghost-close" onClick={() => setSubmittedRecommendation(null)} type="button">
-                Close
-              </button>
-            </div>
-            {submittedRecommendationContext.scoreLabel === 'recovery' ? (
-              <RecoveryPlanCard
-                recommendation={submittedRecommendation}
-                recommendationStatus={submittedRecommendationStatus}
-                session={submittedRecommendationContext.session}
-              />
-            ) : (
-              <RecommendationCard
-                onFeedback={submittedRecommendation?.recordId ? saveSubmittedRecommendationFeedback : undefined}
-                recommendation={submittedRecommendation}
-                recommendationStatus={submittedRecommendationStatus}
-                scoreLabel={submittedRecommendationContext.scoreLabel}
-                session={submittedRecommendationContext.session}
-              />
-            )}
-            <PerformanceQuote surface={submittedRecommendationContext.scoreLabel === 'recovery' ? 'checkout' : 'checkIn'} />
-          </section>
-        </div>
-      )}
+      {submittedRecommendation && submittedRecommendationStatus === 'ai' && submittedRecommendationContext.scoreLabel === 'readiness' && <AiDecisionModal checkIn={submittedRecommendationContext.checkIn} context={submittedRecommendationContext} dialogRef={recommendationDialogRef} onClose={() => setSubmittedRecommendation(null)} recommendation={submittedRecommendation} />}
+      {submittedRecommendation && submittedRecommendationContext.scoreLabel === 'recovery' && <CheckoutAiModal context={submittedRecommendationContext} dialogRef={recommendationDialogRef} onClose={() => setSubmittedRecommendation(null)} onOpenRecovery={() => { setSubmittedRecommendation(null); setActiveView('Recovery') }} recommendation={submittedRecommendation} />}
 
       {checkInAiError && (
         <div className="modal-backdrop" onClick={() => setCheckInAiError('')}>
@@ -3232,6 +3336,23 @@ function App() {
       )}
 
         </>
+      )}
+
+      {isSignOutConfirmOpen && (
+        <DialogShell
+          backdropClassName="sign-out-confirmation-backdrop"
+          className="sign-out-confirmation"
+          eyebrow="Account"
+          onClose={() => setIsSignOutConfirmOpen(false)}
+          showClose={false}
+          title="Sign out of Athlete Reload?"
+        >
+          <p>Your saved athlete data will stay here. You’ll need to sign in again to access it.</p>
+          <div className="sign-out-confirmation-actions">
+            <button className="secondary-button" onClick={() => setIsSignOutConfirmOpen(false)} type="button">Cancel</button>
+            <button className="primary-button" onClick={() => { setIsSignOutConfirmOpen(false); signOut() }} type="button">Sign Out</button>
+          </div>
+        </DialogShell>
       )}
 
       {activeLegalModal && (

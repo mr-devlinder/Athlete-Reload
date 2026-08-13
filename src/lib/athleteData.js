@@ -41,8 +41,13 @@ function fromScheduleRow(row) {
     activityKey: row.activity_key ?? '',
     association: isOtherActivity ? row.association ?? 'None' : row.association ?? 'Personal',
     availability: row.availability ?? 'Required',
+    activityKind: row.activity_kind ?? inferActivityKind(row.event_type),
     environment: row.environment ?? 'Outdoor',
     eventSubtype: row.event_subtype ?? '',
+    expectedIntensity: row.expected_intensity ?? null,
+    importance: row.importance ?? legacyImportance(row.availability),
+    recurrenceRule: row.recurrence_rule ?? {},
+    templateSourceId: row.template_source_id ?? null,
     customActivityName,
     expectedDuration: isAllDay ? null : Number(row.expected_duration ?? row.planned_minutes ?? 60),
     id: row.id,
@@ -71,9 +76,14 @@ function toScheduleRow(event) {
     activity_key: event.activityKey ?? '',
     ...(event.athleteId ? { athlete_id: event.athleteId } : {}),
     association: isOtherActivity ? event.association ?? 'None' : event.association ?? 'Personal',
+    activity_kind: event.activityKind ?? inferActivityKind(event.type),
     availability: event.availability ?? 'Required',
     environment: event.environment ?? 'Outdoor',
     event_subtype: event.eventSubtype ?? '',
+    expected_intensity: event.expectedIntensity ?? null,
+    importance: event.importance ?? legacyImportance(event.availability),
+    recurrence_rule: event.recurrenceRule ?? {},
+    template_source_id: event.templateSourceId ?? null,
     expected_duration: isAllDay ? 0 : Number(event.expectedDuration ?? event.plannedMinutes ?? 60),
     event_date: event.date,
     event_time: isAllDay ? '' : event.time ?? '',
@@ -98,6 +108,17 @@ function fromAssociationRow(row) {
   return {
     id: row.id,
     name: row.name,
+  }
+}
+
+function fromEventTemplateRow(row) {
+  return {
+    athleteId: row.athlete_id ?? null,
+    createdAt: row.created_at,
+    id: row.id,
+    name: row.name,
+    template: row.template_json ?? {},
+    updatedAt: row.updated_at,
   }
 }
 
@@ -137,7 +158,7 @@ function fromShareAuditRow(row) {
 
 function fromCheckInRow(row) {
   return {
-    affectedMovement: row.affected_movement ?? 'None',
+    affectedMovement: row.affected_movement,
     checkInType: row.check_in_type ?? 'pre_event',
     createdAt: row.created_at,
     date: row.check_in_date,
@@ -159,7 +180,7 @@ function fromCheckInRow(row) {
     pain: row.pain,
     painDetails: row.pain_details ?? {},
     painMap: normalizePainMapScale(row.pain_map ?? {}, row.pain),
-    painTrend: row.pain_trend ?? 'New',
+    painTrend: row.pain_trend,
     painType: row.pain_type,
     plannedIntensity: row.planned_intensity ?? row.session_type,
     recommendation: row.recommendation_json,
@@ -176,8 +197,9 @@ function fromCheckInRow(row) {
 }
 
 function toCheckInRow(checkIn, recommendation) {
+  const hasPain = Number(checkIn.pain) > 0 || Object.values(checkIn.painMap ?? {}).some((value) => Number(value) > 0)
   return {
-    affected_movement: checkIn.affectedMovement ?? 'None',
+    affected_movement: hasPain ? checkIn.affectedMovement ?? null : null,
     check_in_date: checkIn.eventDate ?? format(new Date(), 'yyyy-MM-dd'),
     check_in_type: checkIn.checkInType ?? 'pre_event',
     energy: normalizeFivePointValue(checkIn.energy, 5),
@@ -185,17 +207,17 @@ function toCheckInRow(checkIn, recommendation) {
     fatigue: normalizeFivePointValue(checkIn.fatigue, 0),
     illness_symptoms: String(checkIn.illnessSymptoms ?? 0),
     leg_heaviness: normalizeFivePointValue(checkIn.legHeaviness, null),
-    hurts_when: checkIn.hurtsWhen,
+    hurts_when: hasPain ? checkIn.hurtsWhen ?? null : null,
     hydration: checkIn.hydration,
     hydration_ml: Number(checkIn.hydrationMl ?? fluidOuncesToMilliliters(checkIn.hydrationOz) ?? 0),
-    injury_type: checkIn.injuryType,
+    injury_type: hasPain ? checkIn.injuryType ?? null : null,
     notes: checkIn.notes ?? '',
     pain: checkIn.pain,
-    pain_details: checkIn.painDetails ?? {},
-    pain_map: checkIn.painMap ?? {},
-    pain_trend: checkIn.painTrend ?? 'New',
-    pain_location: checkIn.location,
-    pain_type: checkIn.painType,
+    pain_details: hasPain ? checkIn.painDetails ?? {} : {},
+    pain_map: hasPain ? checkIn.painMap ?? {} : {},
+    pain_trend: hasPain ? checkIn.painTrend ?? null : null,
+    pain_location: hasPain ? checkIn.location ?? null : null,
+    pain_type: hasPain ? checkIn.painType ?? null : null,
     planned_intensity: checkIn.plannedIntensity ?? checkIn.session,
     recommendation_json: recommendation,
     recovery_actions: checkIn.recoveryActions ?? [],
@@ -216,6 +238,7 @@ function fromCheckoutRow(row) {
   return {
     actualMinutes: row.actual_minutes,
     completionLevel: row.completion_level,
+    completionReason: row.completion_reason ?? '',
     cramping: row.cramping ?? false,
     createdAt: row.created_at,
     date: row.session_date,
@@ -224,7 +247,10 @@ function fromCheckoutRow(row) {
     heatSymptoms: row.heat_symptoms ?? [],
     eventId: row.schedule_event_id,
     id: row.id,
+    movementEffect: row.movement_effect ?? null,
     notes: row.notes ?? '',
+    onset: row.onset ?? null,
+    relatedEventId: row.related_event_id ?? null,
     mentalFocus: row.mental_focus ?? null,
     motivation: row.motivation ?? null,
     movementChanged: row.movement_changed ?? false,
@@ -251,6 +277,7 @@ function toCheckoutRow(event, checkout, options = {}) {
   const row = {
     actual_minutes: Number(checkout.actualMinutes),
     completion_level: checkout.participation ?? checkout.completionLevel,
+    completion_reason: checkout.completionReason ?? '',
     cramping: Boolean(checkout.cramping),
     difficulty: Number(checkout.difficulty),
     fatigue_affected_technique: Boolean(checkout.fatigueAffectedTechnique),
@@ -298,6 +325,7 @@ function fromPainReportRow(row) {
     side: row.side,
     sourceId: row.source_id,
     sourceType: row.source_type,
+    trend: row.trend ?? null,
     triggerMovement: row.trigger_movement ?? '',
   }
 }
@@ -305,12 +333,16 @@ function fromPainReportRow(row) {
 function toPainReportRow(report) {
   return {
     body_part: report.bodyPart,
+    movement_effect: report.movementEffect ?? null,
     notes: report.notes ?? '',
+    onset: report.onset ?? null,
+    related_event_id: report.relatedEventId ?? null,
     report_date: report.date ?? format(new Date(), 'yyyy-MM-dd'),
     severity: Number(report.severity),
     side: report.side ?? 'center',
     source_id: report.sourceId,
     source_type: report.sourceType,
+    trend: report.trend ?? null,
     trigger_movement: report.triggerMovement ?? '',
   }
 }
@@ -372,10 +404,12 @@ function fromDailyWellnessRow(row) {
   return {
     date: row.wellness_date,
     hydrationMl: Number(row.hydration_ml ?? fluidOuncesToMilliliters(row.hydration_oz) ?? 0),
+    hydrationLogged: Boolean(row.hydration_logged),
     id: row.id,
     mealTiming: row.meal_timing_json ?? {},
     nutritionEntries: row.nutrition_entries ?? [],
     nutritionGoalOverride: row.nutrition_goal_override ?? {},
+    nutritionLastLoggedAt: row.nutrition_last_logged_at ?? null,
     updatedAt: row.updated_at,
   }
 }
@@ -404,6 +438,12 @@ function fromSavedRecoveryRoutineRow(row) {
     createdAt: row.created_at,
     id: row.id,
     isFavorite: Boolean(row.is_favorite),
+    planType: row.plan_type ?? 'mobility',
+    generatedAt: row.generated_at ?? row.created_at,
+    contextSnapshot: row.context_snapshot ?? {},
+    engineVersion: row.engine_version ?? null,
+    ruleVersion: row.rule_version ?? null,
+    catalogVersion: row.catalog_version ?? null,
     sourceCheckoutId: row.source_checkout_id,
     title: row.title,
     routine: row.routine_json,
@@ -414,6 +454,12 @@ function fromSavedRecoveryRoutineRow(row) {
 function toSavedRecoveryRoutineRow(routine) {
   return {
     is_favorite: Boolean(routine.isFavorite),
+    plan_type: routine.planType ?? routine.routine?.planType ?? 'mobility',
+    generated_at: routine.generatedAt ?? new Date().toISOString(),
+    context_snapshot: routine.contextSnapshot ?? {},
+    engine_version: routine.engineVersion ?? routine.routine?.engineVersion ?? 'deterministic-3.0.0',
+    rule_version: routine.ruleVersion ?? 'recovery-rules-1.0.0',
+    catalog_version: routine.catalogVersion ?? 'recovery-catalog-2.0.0',
     routine_json: routine.routine,
     source_checkout_id: routine.sourceCheckoutId ?? null,
     title: routine.title,
@@ -425,9 +471,48 @@ function fromRecoveryRoutineCompletionRow(row) {
   return {
     completedAt: row.completed_at,
     details: row.completion_json ?? {},
+    routineType: row.routine_type ?? 'mobility',
+    generatedAt: row.generated_at ?? null,
+    startedAt: row.started_at ?? null,
+    finishedAt: row.finished_at ?? row.completed_at,
+    plannedDurationSeconds: row.planned_duration_seconds ?? null,
+    actualDurationSeconds: row.actual_duration_seconds ?? null,
+    movementIds: row.movement_ids ?? [],
+    movementOrder: row.movement_order ?? [],
+    plannedPrescription: row.planned_prescription ?? {},
+    completedPrescription: row.completed_prescription ?? {},
+    movementsCompleted: row.movements_completed ?? [],
+    movementsSkipped: row.movements_skipped ?? [],
+    completionPercentage: row.completion_percentage == null ? null : Number(row.completion_percentage),
+    hurtEvents: row.hurt_events ?? [],
+    modifications: row.modifications ?? [],
+    associatedEventId: row.associated_event_id ?? null,
+    athleteState: row.athlete_state ?? {},
+    equipment: row.equipment ?? [],
+    statedGoal: row.stated_goal ?? '',
+    status: row.status ?? 'completed',
     id: row.id,
     routineId: row.routine_id,
     sourceCheckoutId: row.source_checkout_id,
+  }
+}
+
+function fromRecoveryPlanRow(row) {
+  return {
+    actionStatuses: row.action_statuses ?? {},
+    catalogVersion: row.catalog_version,
+    contextSnapshot: row.context_snapshot ?? {},
+    engineVersion: row.engine_version,
+    id: row.id,
+    inputSignature: row.input_signature,
+    nextEventId: row.next_event_id,
+    plan: row.plan_json ?? {},
+    promptVersion: row.prompt_version,
+    refreshedAt: row.refreshed_at,
+    ruleVersion: row.rule_version,
+    sourceCheckoutId: row.source_checkout_id,
+    sourceEventId: row.source_event_id,
+    updatedAt: row.updated_at,
   }
 }
 
@@ -452,8 +537,10 @@ function toPainIssueRow(issue) {
 function toDailyWellnessRow(wellness) {
   return {
     hydration_ml: Math.max(0, Number(wellness.hydrationMl ?? fluidOuncesToMilliliters(wellness.hydrationOz) ?? 0)),
+    hydration_logged: Boolean(wellness.hydrationLogged ?? (wellness.hydrationMl != null)),
     meal_timing_json: wellness.mealTiming ?? {},
     nutrition_entries: wellness.nutritionEntries ?? [],
+    nutrition_last_logged_at: wellness.nutritionLastLoggedAt ?? ((wellness.nutritionEntries?.length ?? 0) > 0 ? new Date().toISOString() : null),
     nutrition_goal_override: wellness.nutritionGoalOverride ?? {},
     updated_at: new Date().toISOString(),
     wellness_date: wellness.date ?? format(new Date(), 'yyyy-MM-dd'),
@@ -483,12 +570,14 @@ export async function loadAthleteData({ signal } = {}) {
   const [
     scheduleResponse,
     associationsResponse,
+    eventTemplatesResponse,
     checkInsResponse,
     checkoutsResponse,
     painReportsResponse,
     painIssuesResponse,
     savedRoutinesResponse,
     recoveryCompletionsResponse,
+    recoveryPlansResponse,
     tournamentsResponse,
     shareAuditResponse,
     wellnessResponse,
@@ -502,6 +591,10 @@ export async function loadAthleteData({ signal } = {}) {
       .from('athlete_associations')
       .select('*')
       .order('name', { ascending: true }), signal),
+    withAbortSignal(supabase
+      .from('event_templates')
+      .select('*')
+      .order('updated_at', { ascending: false }), signal),
     withAbortSignal(supabase
       .from('check_ins')
       .select('*')
@@ -531,6 +624,11 @@ export async function loadAthleteData({ signal } = {}) {
       .select('*')
       .order('completed_at', { ascending: false }), signal),
     withAbortSignal(supabase
+      .from('recovery_plans')
+      .select('*')
+      .order('refreshed_at', { ascending: false })
+      .limit(12), signal),
+    withAbortSignal(supabase
       .from('tournaments')
       .select('*')
       .order('start_date', { ascending: true }), signal),
@@ -546,24 +644,28 @@ export async function loadAthleteData({ signal } = {}) {
 
   if (scheduleResponse.error) throw scheduleResponse.error
   if (associationsResponse.error) throw associationsResponse.error
+  if (eventTemplatesResponse.error) throw eventTemplatesResponse.error
   if (checkInsResponse.error) throw checkInsResponse.error
   if (checkoutsResponse.error) throw checkoutsResponse.error
   if (painReportsResponse.error) throw painReportsResponse.error
   if (painIssuesResponse.error) throw painIssuesResponse.error
   if (savedRoutinesResponse.error) throw savedRoutinesResponse.error
   if (recoveryCompletionsResponse.error) throw recoveryCompletionsResponse.error
+  if (recoveryPlansResponse.error) throw recoveryPlansResponse.error
   if (tournamentsResponse.error) throw tournamentsResponse.error
   if (shareAuditResponse.error) throw shareAuditResponse.error
   if (wellnessResponse.error) throw wellnessResponse.error
 
   return {
     associations: associationsResponse.data.map(fromAssociationRow),
+    eventTemplates: eventTemplatesResponse.data.map(fromEventTemplateRow),
     checkouts: checkoutsResponse.data.map(fromCheckoutRow),
     history: checkInsResponse.data.map(fromCheckInRow),
     painReports: painReportsResponse.data.map(fromPainReportRow),
     painIssues: painIssuesResponse.data.map(fromPainIssueRow),
     savedRoutines: savedRoutinesResponse.data.map(fromSavedRecoveryRoutineRow),
     recoveryCompletions: recoveryCompletionsResponse.data.map(fromRecoveryRoutineCompletionRow),
+    recoveryPlans: recoveryPlansResponse.data.map(fromRecoveryPlanRow),
     shareAuditLogs: shareAuditResponse.data.map(fromShareAuditRow),
     schedule: scheduleResponse.data.map(fromScheduleRow),
     tournaments: tournamentsResponse.data.map(fromTournamentRow),
@@ -728,10 +830,31 @@ export async function updateSavedRecoveryRoutine(id, routine) {
 }
 
 export async function createRecoveryRoutineCompletion(completion) {
+  const session = completion.routineSession ?? completion.details?.routineSession ?? completion.details?.completion?.session ?? completion.details?.plan?.routineSession ?? {}
   const { data, error } = await supabase
     .from('recovery_routine_completions')
     .insert({
       completion_json: completion.details ?? {},
+      routine_type: session.routineType ?? completion.routineType ?? 'mobility',
+      generated_at: session.generatedAt ?? completion.generatedAt ?? null,
+      started_at: session.startedAt ?? completion.startedAt ?? null,
+      finished_at: session.finishedAt ?? completion.finishedAt ?? completion.completedAt ?? new Date().toISOString(),
+      planned_duration_seconds: session.plannedDurationSeconds ?? completion.plannedDurationSeconds ?? null,
+      actual_duration_seconds: session.actualDurationSeconds ?? completion.actualDurationSeconds ?? null,
+      movement_ids: session.movementIds ?? completion.movementIds ?? [],
+      movement_order: session.movementOrder ?? completion.movementOrder ?? session.movementIds ?? completion.movementIds ?? [],
+      planned_prescription: session.plannedPrescription ?? completion.plannedPrescription ?? {},
+      completed_prescription: session.completedPrescription ?? completion.completedPrescription ?? {},
+      movements_completed: session.movementsCompleted ?? completion.movementsCompleted ?? [],
+      movements_skipped: session.movementsSkipped ?? completion.movementsSkipped ?? [],
+      completion_percentage: session.completionPercentage ?? completion.completionPercentage ?? null,
+      hurt_events: session.hurtEvents ?? completion.hurtEvents ?? [],
+      modifications: session.modifications ?? completion.modifications ?? [],
+      associated_event_id: session.associatedEventId ?? completion.associatedEventId ?? null,
+      athlete_state: session.athleteState ?? completion.athleteState ?? {},
+      equipment: session.equipment ?? completion.equipment ?? [],
+      stated_goal: session.statedGoal ?? completion.statedGoal ?? '',
+      status: session.status ?? completion.status ?? 'completed',
       routine_id: completion.routineId ?? null,
       source_checkout_id: completion.sourceCheckoutId ?? null,
     })
@@ -741,6 +864,65 @@ export async function createRecoveryRoutineCompletion(completion) {
   if (error) throw error
 
   return fromRecoveryRoutineCompletionRow(data)
+}
+
+export async function upsertRecoveryPlan(plan) {
+  if (!supabase) return null
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError) throw userError
+  if (!user) throw new Error('Sign in to save a recovery plan.')
+  const row = {
+    user_id: user.id,
+    source_checkout_id: plan.sourceCheckoutId ?? null,
+    source_event_id: plan.sourceEventId ?? null,
+    next_event_id: plan.nextEventId ?? null,
+    plan_json: plan.plan ?? {},
+    context_snapshot: plan.contextSnapshot ?? {},
+    input_signature: plan.inputSignature,
+    engine_version: plan.engineVersion ?? 'deterministic-3.0.0',
+    rule_version: plan.ruleVersion ?? 'recovery-rules-1.0.0',
+    prompt_version: plan.promptVersion ?? null,
+    catalog_version: plan.catalogVersion ?? 'recovery-catalog-2.0.0',
+    action_statuses: plan.actionStatuses ?? {},
+    refreshed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }
+  const { data, error } = await supabase.from('recovery_plans').upsert(row, { onConflict: 'user_id,input_signature' }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+export async function recordRoutinePainEvent(event) {
+  if (!supabase || !event?.movementId || !event?.actionTaken) return null
+  const { data, error } = await supabase.from('routine_pain_events').insert({
+    routine_completion_id: event.routineCompletionId ?? null,
+    routine_id: event.routineId ?? null,
+    source_checkout_id: event.sourceCheckoutId ?? event.checkoutId ?? null,
+    movement_id: event.movementId,
+    body_region: event.bodyRegion ?? '',
+    side: event.side ?? 'not_applicable',
+    response: event.response ?? 'meaningful_pain',
+    action_taken: event.actionTaken,
+    context_json: event.context ?? {},
+  }).select('*').single()
+  if (error) throw error
+  return data
+}
+
+function inferActivityKind(value) {
+  const text = String(value ?? '').toLowerCase()
+  if (/game|match|meet|race|competition|tournament|bout/.test(text)) return 'competition'
+  if (/gym|strength|lift|weight/.test(text)) return 'strength'
+  if (/conditioning|interval|tempo|hills/.test(text)) return 'conditioning'
+  if (/rest|recovery|mobility|flexibility/.test(text)) return 'recovery'
+  if (/practice|training|session|skills/.test(text)) return 'training'
+  return 'other'
+}
+
+function legacyImportance(value) {
+  if (value === 'Required max effort') return 'priority'
+  if (value === 'Required') return 'important'
+  return 'normal'
 }
 
 export async function deleteRecoveryRoutineCompletion(id) {
@@ -941,6 +1123,27 @@ export async function createAssociation(name) {
   return fromAssociationRow(data)
 }
 
+export async function createEventTemplate({ athleteId, name, template }) {
+  const { data, error } = await supabase
+    .from('event_templates')
+    .insert({
+      ...(athleteId ? { athlete_id: athleteId } : {}),
+      name: name.trim(),
+      template_json: template,
+      updated_at: new Date().toISOString(),
+    })
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return fromEventTemplateRow(data)
+}
+
+export async function deleteEventTemplate(id) {
+  const { error } = await supabase.from('event_templates').delete().eq('id', id)
+  if (error) throw error
+}
+
 export async function updateAssociation(id, name) {
   const { data, error } = await supabase
     .from('athlete_associations')
@@ -1003,7 +1206,7 @@ export function isUnreleasedScheduleColumnError(error) {
   if (!error) return false
   const details = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`
   return /PGRST204|schema cache/i.test(details)
-    && /athlete_id|event_subtype|position_or_event/i.test(details)
+    && /athlete_id|event_subtype|position_or_event|activity_kind|importance|expected_intensity|recurrence_rule|template_source_id/i.test(details)
 }
 
 export function withoutUnreleasedScheduleColumns(row) {
@@ -1011,6 +1214,11 @@ export function withoutUnreleasedScheduleColumns(row) {
   delete compatibleRow.athlete_id
   delete compatibleRow.event_subtype
   delete compatibleRow.position_or_event
+  delete compatibleRow.activity_kind
+  delete compatibleRow.importance
+  delete compatibleRow.expected_intensity
+  delete compatibleRow.recurrence_rule
+  delete compatibleRow.template_source_id
   return compatibleRow
 }
 
@@ -1238,7 +1446,7 @@ export async function saveCheckoutWithPainReports(event, checkout, reports, id =
     p_pain_reports: reports.map(toPainReportRow),
     p_checkout_id: id,
   })
-  if (isMissingAtomicWriteRpc(error, 'save_checkout_with_pain_reports')) {
+  if (isMissingAtomicWriteRpc(error, 'save_checkout_with_pain_reports') || isCheckoutAtomicWritePermissionError(error)) {
     const row = withoutUnknownCheckoutFields(toCheckoutRow(event, checkout))
     const query = id
       ? supabase.from('training_checkouts').update(row).eq('id', id)
@@ -1285,6 +1493,12 @@ export function isMissingAtomicWriteRpc(error, functionName) {
   if (!error) return false
   const details = `${error.code ?? ''} ${error.message ?? ''} ${error.details ?? ''}`
   return /PGRST202|schema cache/i.test(details) && details.includes(functionName)
+}
+
+export function isCheckoutAtomicWritePermissionError(error) {
+  if (!error || String(error.code ?? '') !== '42501') return false
+  const details = `${error.message ?? ''} ${error.details ?? ''}`.toLowerCase()
+  return details.includes('save_checkout_with_pain_reports_base')
 }
 
 export function withoutUnknownCheckInFields(row) {

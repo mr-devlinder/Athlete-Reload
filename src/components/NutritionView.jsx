@@ -5,7 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
 import { getHydrationGuidance, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { buildDailyFuelingContext } from '../domain/nutrition/dailyFuelingContext'
-import { getCanonicalServing, getSourceServingFactor, getSourceServingOptions } from '../lib/foodServing'
+import { getCanonicalServing, getSourceServingOptions, scaleFoodForServing } from '../lib/foodServing'
 import { SectionHeading } from './SectionHeading'
 import { fluidOuncesToMilliliters, formatHydration } from '../utils/units'
 import { formatRecordingTime, useAudioRecorder } from '../hooks/useAudioRecorder'
@@ -111,6 +111,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       </section>
 
       {showTargets && <p className="nutrition-target-note">{targets.reason}</p>}
+      <p className="nutrition-data-attribution">Food search data by <a href="https://www.opennutrition.app" rel="noreferrer" target="_blank">OpenNutrition</a>; some records include data from <a href="https://world.openfoodfacts.org" rel="noreferrer" target="_blank">Open Food Facts contributors</a>. Verified Athlete Reload foods and your private saved/recent foods are ranked first when relevant.</p>
 
       {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food, meal) => setSelectedFood({ food, meal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {selectedFood && <NutritionModalPortal><ServingModal canSaveReusable={Boolean(selectedFood.entryId)} food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: selectedFood.entryId ? entries.map((entry) => entry.id === selectedFood.entryId ? { ...food, id: entry.id, loggedAt: entry.loggedAt } : entry) : [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
@@ -457,32 +458,19 @@ function normalizeBarcode(value) {
 function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) {
   useModalAccessibility(true, onClose)
   const existingServing = parseStoredServing(food)
-  const nutrientKeys = ['calories', 'protein', 'carbohydrates', 'fats', 'fiber', 'sugar', 'saturatedFat', 'polyunsaturatedFat', 'monounsaturatedFat', 'transFat', 'cholesterol', 'sodium', 'potassium', 'vitaminA', 'vitaminC', 'vitaminD', 'vitaminE', 'vitaminK', 'calcium', 'iron']
-  const baseFood = { ...food, servingSize: existingServing.servingSize }
-  nutrientKeys.forEach((key) => {
-    if (food[key] != null && Number.isFinite(Number(food[key]))) baseFood[key] = Number(food[key]) / existingServing.servings
-  })
-  const options = getServingOptions(baseFood)
-  const [servingSize, setServingSize] = useState(options[0])
+  const options = getServingOptions(food)
+  const [servingSize, setServingSize] = useState(options.includes(existingServing.servingSize) ? existingServing.servingSize : options[0])
   const [servings, setServings] = useState(existingServing.servings)
   const [savedFoods, setSavedFoods] = useState([])
   const [saveMessage, setSaveMessage] = useState('')
   const [isSavingFood, setIsSavingFood] = useState(false)
-  const factor = getServingFactor(baseFood, servingSize) * Math.max(0, Number(servings) || 0)
-  const micronutrientKeys = nutrientKeys.slice(4)
   const scaledFood = {
-    ...baseFood,
+    ...scaleFoodForServing(food, servingSize, servings, {
+      label: existingServing.servingSize,
+      servings: existingServing.servings,
+    }),
     meal,
-    servingSize,
-    servings: Math.max(0, Number(servings) || 0),
-    calories: Math.round(Number(baseFood.calories || 0) * factor),
-    protein: roundNutrient(Number(baseFood.protein || 0) * factor),
-    carbohydrates: roundNutrient(Number(baseFood.carbohydrates || 0) * factor),
-    fats: roundNutrient(Number(baseFood.fats || 0) * factor),
   }
-  micronutrientKeys.forEach((key) => {
-    if (baseFood[key] != null && Number.isFinite(Number(baseFood[key]))) scaledFood[key] = roundNutrient(Number(baseFood[key]) * factor)
-  })
 
   const isAlreadySaved = savedFoods.some((savedFood) => isSameSavedFood(savedFood, scaledFood))
 
@@ -507,10 +495,6 @@ function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) 
   }
 
   return <div className="modal-backdrop" onClick={onClose}><section className="serving-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow={canSaveReusable ? 'Edit food' : 'Add food'} title={food.name} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><div className="serving-preview"><strong>{scaledFood.calories} cal</strong><span>{food.brand || food.foodSource}</span></div><label className="serving-field">Serving size<select value={servingSize} onChange={(event) => { setServingSize(event.target.value); setSaveMessage('') }}>{options.map((option) => <option key={option}>{option}</option>)}</select></label><label className="serving-field">Number of servings<input min="0.25" step="0.25" type="number" value={servings} onChange={(event) => { setServings(event.target.value); setSaveMessage('') }} /></label><div className="serving-total"><span>Total added</span><strong>{scaledFood.calories} calories</strong><small>{scaledFood.protein}g protein · {scaledFood.carbohydrates}g carbs · {scaledFood.fats}g fat</small></div>{canSaveReusable && <><button className="secondary-button" disabled={isAlreadySaved || isSavingFood} onClick={saveReusableFood} type="button">{isAlreadySaved ? 'Already in Saved Foods' : isSavingFood ? 'Saving...' : 'Save to Saved Foods'}</button>{saveMessage && <p className="form-message">{saveMessage}</p>}</>}<button className="primary-button" onClick={() => onSave(scaledFood)} type="button">{canSaveReusable ? 'Save meal changes' : `Add to ${meal}`}</button></section></div>
-}
-
-function getServingFactor(food, selectedServing) {
-  return getSourceServingFactor(food, selectedServing)
 }
 
 function parseStoredServing(food) {

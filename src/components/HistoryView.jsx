@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO, startOfYear } from 'date-fns'
 import { calendarWeekStart, localDateKey, parseLocalCalendarDate } from '../utils/calendarDate'
-import { RecommendationCard, RecoveryPlanCard } from './RecommendationCard'
+import { RecoveryPlanCard } from './RecommendationCard'
+import { AiDecisionReport, DecisionHeader } from './AiDecisionModal'
 import '../styles/history-rework.css'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
 import { formatHydration } from '../utils/units'
 import { AppIcon } from './AppIcon'
 import { DialogShell } from './DialogShell'
+import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 const clearOptions = [
   { label: 'Today', days: 0 },
@@ -23,7 +25,7 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [], weekStartsOn = 1 }) {
+export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [], schedule = [], weekStartsOn = 1 }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
@@ -40,6 +42,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   const archive = getHistoryArchive(recordFilter === 'checkout' || recordFilter === 'recovery' ? [] : filteredHistory, recordFilter === 'check-in' || recordFilter === 'recovery' ? [] : filteredCheckouts, recordFilter === 'check-in' || recordFilter === 'checkout' ? [] : filteredRecovery, weekStartsOn)
   const summary = getWindowSummary(filteredHistory, filteredCheckouts)
   const analytics = getHistoryAnalytics(filteredHistory, filteredCheckouts, filteredRecovery)
+  const chartData = getQuestionChartData(filteredHistory, filteredCheckouts, filteredRecovery, schedule)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -127,6 +130,18 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
         <AnalyticsPanel title="Load" eyebrow="What you have done" rows={[['Completed minutes', analytics.sessionMinutes], ['Session-RPE load', summary.load], ['Completed sessions', summary.checkoutCount]]} />
         <AnalyticsPanel title="Pain & availability" eyebrow="What affected movement" rows={[['Check-ins with pain', analytics.painReports], ['Recurring areas', analytics.painAreas], ['Current direction', analytics.painDirection]]} />
       </div>
+
+      <section className="history-question-charts" aria-label="History trend charts">
+        <HistoryQuestionChart data={chartData.readiness} question="How has my readiness changed?" empty="Save at least three check-ins to see a readiness trend.">
+          <LineChart data={chartData.readiness}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="label" /><YAxis domain={[0, 100]} /><Tooltip /><Legend /><Line dataKey="readiness" name="Readiness" stroke="#57d7a0" strokeWidth={3} /><Line connectNulls={false} dataKey="importantEvent" name="Important event" stroke="transparent" dot={{ fill: '#ffb454', r: 5 }} /></LineChart>
+        </HistoryQuestionChart>
+        <HistoryQuestionChart data={chartData.load} question="How hard has training felt recently?" empty="Complete at least three checkouts to see session load.">
+          <BarChart data={chartData.load}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="label" /><YAxis /><Tooltip /><Legend /><Bar dataKey="sessionLoad" name="Session-RPE load" fill="#7f8cff" radius={[5, 5, 0, 0]} /></BarChart>
+        </HistoryQuestionChart>
+        <HistoryQuestionChart data={chartData.recovery} question="Is pain changing—and am I completing recovery?" empty="Three pain or recovery records are needed before this comparison appears.">
+          <LineChart data={chartData.recovery}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="label" /><YAxis domain={[0, 100]} /><Tooltip /><Legend /><Line connectNulls dataKey="pain" name="Pain severity ×10" stroke="#ff7f72" strokeWidth={2} /><Line connectNulls dataKey="completion" name="Routine completion %" stroke="#5bc0ff" strokeWidth={2} /></LineChart>
+        </HistoryQuestionChart>
+      </section>
 
       <section className="history-insights-section"><div className="history-section-heading"><div><span>Insights</span><h2>Patterns worth watching</h2></div><p>Associations only—not proof that one factor caused another.</p></div><div className="trend-grid">
         {insights.map((insight) => (
@@ -217,19 +232,76 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   )
 }
 
+function HistoryQuestionChart({ children, data, empty, question }) {
+  return <article className="history-question-chart"><div><span>Trend question</span><h2>{question}</h2></div>{data.length < 3 ? <p className="history-chart-empty">{empty}</p> : <div aria-label={question} className="history-chart-canvas" role="img"><ResponsiveContainer height="100%" width="100%">{children}</ResponsiveContainer></div>}</article>
+}
+
+function getQuestionChartData(history, checkouts, recovery, schedule) {
+  const importantDates = new Set(schedule.filter((event) => ['important', 'priority'].includes(event.importance)).map((event) => event.date))
+  const readiness = history.slice().sort(byDate).map((entry) => ({
+    label: shortDate(entry.date),
+    readiness: finiteOrNull(entry.score),
+    importantEvent: importantDates.has(entry.date) ? 100 : null,
+  })).filter((entry) => entry.readiness != null)
+  const load = checkouts.slice().sort(byDate).map((entry) => ({
+    label: shortDate(entry.sessionDate ?? entry.date),
+    sessionLoad: Number(entry.sessionLoad) || Number(entry.actualMinutes ?? 0) * Number(entry.difficulty ?? 0),
+  }))
+  const recoveryByDate = new Map()
+  for (const entry of history) {
+    const pain = Math.max(Number(entry.pain) || 0, ...Object.values(entry.painMap ?? {}).map(Number))
+    if (pain > 0) recoveryByDate.set(entry.date, { ...(recoveryByDate.get(entry.date) ?? {}), pain: pain * 10 })
+  }
+  for (const entry of recovery) {
+    const date = String(entry.finishedAt ?? entry.completedAt ?? '').slice(0, 10)
+    if (date) recoveryByDate.set(date, { ...(recoveryByDate.get(date) ?? {}), completion: finiteOrNull(entry.completionPercentage) })
+  }
+  const recoveryData = [...recoveryByDate.entries()].sort(([first], [second]) => first.localeCompare(second)).map(([date, values]) => ({ label: shortDate(date), ...values }))
+  return { readiness, load, recovery: recoveryData }
+}
+
+function finiteOrNull(value) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function byDate(first, second) {
+  return String(first.date ?? first.sessionDate ?? first.completedAt ?? '').localeCompare(String(second.date ?? second.sessionDate ?? second.completedAt ?? ''))
+}
+
+function shortDate(value) {
+  if (!value) return ''
+  try { return format(parseISO(String(value).slice(0, 10)), 'MMM d') } catch { return String(value) }
+}
+
 function filterByWindow(entries, windowValue, customRange) {
   if (windowValue === 'all') return entries
   const today = new Date()
   const cutoff = windowValue === 'custom'
     ? (customRange.start ? new Date(`${customRange.start}T00:00:00`) : null)
-    : new Date(today.getTime() - (Number(windowValue) - 1) * 86400000)
-  const end = windowValue === 'custom' && customRange.end ? new Date(`${customRange.end}T23:59:59`) : today
+    : startOfLocalDayOffset(today, -(Number(windowValue) - 1))
+  const end = windowValue === 'custom' && customRange.end
+    ? new Date(`${customRange.end}T23:59:59.999`)
+    : endOfLocalDay(today)
   return entries.filter((entry) => {
     const value = entry.date ?? entry.sessionDate ?? entry.completedAt ?? entry.createdAt
     if (!value) return false
     const parsed = new Date(String(value).includes('T') ? value : `${value}T12:00:00`)
     return !Number.isNaN(parsed.getTime()) && (!cutoff || parsed >= cutoff) && parsed <= end
   })
+}
+
+function startOfLocalDayOffset(date, dayOffset) {
+  const value = new Date(date)
+  value.setDate(value.getDate() + dayOffset)
+  value.setHours(0, 0, 0, 0)
+  return value
+}
+
+function endOfLocalDay(date) {
+  const value = new Date(date)
+  value.setHours(23, 59, 59, 999)
+  return value
 }
 
 function HistoryMetric({ detail, label, unit = '', value }) {
@@ -362,11 +434,11 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
             const savedAt = isCompletion ? item.entry.completedAt : item.entry.createdAt
 
             return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`${item.historyKind}-${item.entry.id}`} kind={item.historyKind} onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
-              <span className="history-record-kind recovery-record-kind">Saved</span>
+              <span className="history-record-kind recovery-record-kind">{isCompletion ? 'Completed' : 'Plan'}</span>
               <div>
                 <p className="eyebrow">{savedAt ? format(parseISO(savedAt), 'MMM d, yyyy · h:mm a') : formatCheckoutDate(item.entry)}</p>
                 <strong>{plan?.routine?.title ?? 'Recovery routine'}</strong>
-                <small>{plan?.routine?.durationMinutes ?? '—'} min routine · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}</small>
+                <small>{plan?.routine?.durationMinutes ?? '—'} min · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}{isCompletion && item.entry.completionPercentage != null ? ` · ${Math.round(item.entry.completionPercentage)}% complete` : ''}</small>
               </div>
             </HistoryRow>
           })
@@ -378,6 +450,7 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
 
 function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectEntry }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
   const detailEntry = kind === 'check-in' ? entry : { ...entry, historyKind: kind }
 
   function openDetails() {
@@ -385,9 +458,15 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
     onSelectEntry(detailEntry)
   }
 
-  function deleteEntry() {
-    setIsMenuOpen(false)
-    onDeleteEntry?.(entry, kind)
+  async function deleteEntry() {
+    if (!onDeleteEntry || isDeleting) return
+    setIsDeleting(true)
+    try {
+      await onDeleteEntry(entry, kind)
+      setIsMenuOpen(false)
+    } catch {
+      setIsDeleting(false)
+    }
   }
 
   return (
@@ -408,7 +487,7 @@ function HistoryRow({ children, className, entry, kind, onDeleteEntry, onSelectE
         {isMenuOpen && (
           <div className="history-quick-menu">
             <button onClick={openDetails} type="button">View details</button>
-            {onDeleteEntry && <button className="history-delete-action" onClick={deleteEntry} type="button">Delete</button>}
+            {onDeleteEntry && <button className="history-delete-action" disabled={isDeleting} onClick={deleteEntry} type="button">{isDeleting ? 'Deleting…' : 'Delete'}</button>}
           </div>
         )}
       </div>
@@ -516,32 +595,20 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSy
     return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
   }
 
-  const detailSections = getCheckInDetailSections(entry, unitSystem)
-  const painSections = getPainDetailSections(entry)
-
   return (
-    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop ai-decision-backdrop history-modal-backdrop" onClick={onClose}>
       <section
-        className="event-modal history-modal glass-panel"
+        className="event-modal ai-decision-modal history-checkin-decision-modal"
         onClick={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
-        <div className="schedule-header">
-          <SectionHeading
-            eyebrow={formatHistoryDate(entry)}
-            title="Check-in details."
-          />
-          <button className="ghost-close" onClick={onClose} type="button">
-            Close
-          </button>
-        </div>
+        <DecisionHeader context={{ session: `${entry.eventTitle ?? entry.session} · ${formatHistoryDate(entry)}` }} onClose={onClose} />
 
         {entry.recommendation ? (
-          <RecommendationCard
+          <AiDecisionReport
+            checkIn={entry}
             recommendation={entry.recommendation}
-            recommendationStatus="ai"
-            session={entry.eventTitle ?? entry.session}
           />
         ) : (
           <div className="history-readiness-summary">
@@ -558,49 +625,13 @@ function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSy
           </div>
         )}
 
-        <div className="history-detail-sections">
-          {detailSections.map((section) => (
-            <section className="history-detail-section" key={section.title}>
-              <h3>{section.title}</h3>
-              <div className="history-detail-grid">
-                {section.items.map(([label, value]) => (
-                  <span key={label}>
-                    <strong>{label}</strong>
-                    {value ?? 'Not saved'}
-                  </span>
-                ))}
-              </div>
-            </section>
-          ))}
-
-          {painSections.length > 0 && (
-            <section className="history-detail-section">
-              <h3>Pain</h3>
-              <div className="history-pain-stack">
-                {painSections.map((section) => (
-                  <article className="history-pain-card" key={section.title}>
-                    <strong>{section.title}</strong>
-                    <div className="history-detail-grid">
-                      {section.items.map(([label, value]) => (
-                        <span key={label}>
-                          <strong>{label}</strong>
-                          {value ?? 'Not saved'}
-                        </span>
-                      ))}
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-
         {entry.note && (
-          <div className="history-note">
+          <div className="history-note ai-decision-history-note">
             <strong>Notes</strong>
             <p>{entry.note}</p>
           </div>
         )}
+        <footer className="ai-decision-footer"><button className="primary-button" onClick={onClose} type="button">Close</button></footer>
       </section>
     </div>
   )
@@ -700,13 +731,16 @@ function RecoveryCompletionHistoryModal({ entry, onClose, onFavoriteRoutine, sav
           <button className="ghost-close" onClick={onClose} type="button">Close</button>
         </div>
         <div className="history-detail-grid recovery-history-summary">
-          <span><strong>Saved</strong>{format(parseISO(entry.completedAt), 'MMM d, yyyy · h:mm a')}</span>
-          <span><strong>Routine type</strong>{formatRecoveryPlanType(plan?.planType)}</span>
+          <span><strong>Finished</strong>{format(parseISO(entry.finishedAt ?? entry.completedAt), 'MMM d, yyyy · h:mm a')}</span>
+          <span><strong>Routine type</strong>{formatRecoveryPlanType(entry.routineType ?? plan?.planType)}</span>
           <span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span>
           <span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span>
+          <span><strong>Completion</strong>{entry.completionPercentage == null ? 'Not measured' : `${Math.round(entry.completionPercentage)}%`}</span>
+          <span><strong>Completed / skipped</strong>{entry.movementsCompleted?.length ?? 0} / {entry.movementsSkipped?.length ?? 0}</span>
           <span><strong>Body areas</strong>{getRecoveryRoutineAreas(plan?.routine)}</span>
           <span><strong>Equipment</strong>{getRecoveryRoutineEquipment(plan?.routine)}</span>
         </div>
+        {entry.hurtEvents?.length > 0 && <section className="history-detail-section"><h3>Movement safety notes</h3><ul>{entry.hurtEvents.map((event, index) => <li key={`${event.movementId ?? event.exercise ?? 'movement'}-${index}`}>{event.exercise ?? event.movementId ?? 'Movement'}: {String(event.response ?? 'pain reported').replaceAll('_', ' ')} — {String(event.actionTaken ?? 'stopped').replaceAll('_', ' ')}</li>)}</ul></section>}
         {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan details are available.</p>}
         {plan?.routine && (
           <button className={`secondary-button recovery-modal-favorite ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">

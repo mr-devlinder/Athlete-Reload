@@ -64,9 +64,9 @@ export function inputWeightToKilograms(value, unitSystem = 'imperial') {
 export function formatHydration(hydrationMl, unitSystem = 'imperial') {
   const value = unitSystem === 'metric' ? toFiniteNumber(hydrationMl) : millilitersToFluidOunces(hydrationMl)
   if (value === null) return '—'
-  return unitSystem === 'metric' && value >= 1000
+  return unitSystem === 'metric'
     ? `${roundMeasurement(value / 1000, 2)} L`
-    : `${Math.round(value)} ${unitSystem === 'metric' ? 'mL' : 'fl oz'}`
+    : `${Math.round(value)} fl oz`
 }
 
 export function getWorkloadFieldDisplay(field, canonicalValue, unitSystem = 'imperial') {

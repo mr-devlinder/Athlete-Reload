@@ -162,9 +162,11 @@ export function BodyPainMap({
               <p className="eyebrow">{activeArea.label} details</p>
               <PainDetailSelect label="Injury type" options={injuryTypeOptions} value={details[activeArea.id]?.injuryType ?? injuryType ?? 'Unknown'} onChange={(value) => updateDetail('injuryType', value)} />
               <PainDetailSelect label="Pain type" options={painTypeOptions} value={details[activeArea.id]?.painType ?? painType ?? 'Tight / pulling'} onChange={(value) => updateDetail('painType', value)} />
+              <PainDetailSelect label="When did it begin?" options={onsetOptions} value={details[activeArea.id]?.onset ?? 'Today'} onChange={(value) => updateDetail('onset', value)} />
               <PainDetailSelect label="When it occurs" options={hurtsWhenOptions} value={details[activeArea.id]?.hurtsWhen ?? hurtsWhen ?? 'At rest'} onChange={(value) => updateDetail('hurtsWhen', value)} />
               <PainDetailSelect label="Change since last session" options={painTrendOptions} value={details[activeArea.id]?.painTrend ?? painTrend ?? 'New'} onChange={(value) => updateDetail('painTrend', value)} />
               <PainDetailSelect label="Affected movement" options={affectedMovementOptions} value={details[activeArea.id]?.affectedMovement ?? affectedMovement ?? 'None'} onChange={(value) => updateDetail('affectedMovement', value)} />
+              <PainDetailSelect label="How much does it affect movement?" options={movementEffectOptions} value={details[activeArea.id]?.movementEffect ?? 'Noticeable, but I can move'} onChange={(value) => updateDetail('movementEffect', value)} />
             </div>
           )}
         </div>
@@ -268,6 +270,15 @@ const hurtsWhenOptions = [
 ]
 
 const painTrendOptions = ['New', 'Improving', 'Unchanged', 'Worsening']
+
+const onsetOptions = ['Today', 'In the past few days', 'Ongoing']
+
+const movementEffectOptions = [
+  'No effect',
+  'Noticeable, but I can move',
+  'Limits how I move',
+  'I cannot perform the movement',
+]
 
 const affectedMovementOptions = [
   'None',
