@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { addMonths, eachDayOfInterval, endOfMonth, endOfWeek, format, isSameMonth, parseISO, startOfMonth, startOfWeek, subMonths } from 'date-fns'
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
 import { findFoodByBarcode, getFoodCuratorStatus, isSameSavedFood, loadFoodDetails, loadSavedFoods, recordFoodUsage, removeSavedFood, saveFood, searchFoods, validateCuratorFood, verifyFood } from '../lib/foodApi'
+import { attachFoodBarcode, normalizeFoodBarcode } from '../lib/foodBarcode'
 import { getHydrationGuidance, getNutritionProgressParts, getNutritionTargets, getNutritionTotals, mealOptions } from '../lib/nutrition'
 import { buildDailyFuelingContext } from '../domain/nutrition/dailyFuelingContext'
 import { getCanonicalServing, getSourceServingOptions, scaleFoodForServing } from '../lib/foodServing'
@@ -111,7 +112,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       </section>
 
       {showTargets && <p className="nutrition-target-note">{targets.reason}</p>}
-      <p className="nutrition-data-attribution">Food search data by <a href="https://www.opennutrition.app" rel="noreferrer" target="_blank">OpenNutrition</a>; some records include data from <a href="https://world.openfoodfacts.org" rel="noreferrer" target="_blank">Open Food Facts contributors</a>. Verified Athlete Reload foods and your private saved/recent foods are ranked first when relevant.</p>
+      <p className="nutrition-data-attribution"><a href="https://www.opennutrition.app" rel="noreferrer" target="_blank">OpenNutrition</a> is the sole external provider for food search, details, and barcode lookup. Verified Athlete Reload foods and your private saved/recent foods are ranked first when relevant.</p>
 
       {loggingMeal && <NutritionModalPortal><FoodLogModal initialMeal={loggingMeal} onClose={() => setLoggingMeal(null)} onSelectFood={(food, meal) => setSelectedFood({ food, meal })} onSave={(food) => { save({ nutritionEntries: [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setLoggingMeal(null) }} /></NutritionModalPortal>}
       {selectedFood && <NutritionModalPortal><ServingModal canSaveReusable={Boolean(selectedFood.entryId)} food={selectedFood.food} meal={selectedFood.meal} onClose={() => setSelectedFood(null)} onSave={(food) => { save({ nutritionEntries: selectedFood.entryId ? entries.map((entry) => entry.id === selectedFood.entryId ? { ...food, id: entry.id, loggedAt: entry.loggedAt } : entry) : [...entries, { ...food, id: `food-${Date.now()}`, loggedAt: new Date().toISOString() }] }); setSelectedFood(null); setLoggingMeal(null) }} /></NutritionModalPortal>}
@@ -136,6 +137,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
   const [results, setResults] = useState([])
   const [message, setMessage] = useState('')
   const [scannerStatus, setScannerStatus] = useState('idle')
+  const [pendingBarcode, setPendingBarcode] = useState('')
   const [isManualEntryOpen, setIsManualEntryOpen] = useState(false)
   const [savedFoods, setSavedFoods] = useState([])
   const [isFoodCurator, setIsFoodCurator] = useState(false)
@@ -187,6 +189,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
 
   async function startScanner() {
     stopScanner(false)
+    setPendingBarcode('')
     await initializeScanner(0)
   }
 
@@ -221,13 +224,16 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
       readerRef.current = reader
       scannerControlsRef.current = await reader.decodeFromStream(stream, videoElement, async (result) => {
         if (!result || sessionId !== scannerSessionRef.current) return
-        const normalizedBarcode = normalizeBarcode(result.getText())
+        const normalizedBarcode = normalizeFoodBarcode(result.getText())
         if (!normalizedBarcode) return
+        setPendingBarcode(normalizedBarcode)
         stopScanner()
         try {
           const food = await findFoodByBarcode(normalizedBarcode)
           setResults(food ? [food] : [])
-          if (!food) setMessage('No food found for that barcode.')
+          setMessage(food
+            ? `Barcode ${normalizedBarcode} decoded. Confirm the product matches the package.`
+            : `Barcode ${normalizedBarcode} decoded, but OpenNutrition has no barcode match. Search by name, then select the exact product to link it for future scans.`)
         } catch (error) {
           setMessage(error.message)
         }
@@ -256,19 +262,19 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
 
   async function search(searchValue = query) {
     try {
-      setMessage('')
+      setMessage(pendingBarcode ? `Select the matching food to link barcode ${pendingBarcode}.` : '')
       const found = await searchFoods(searchValue)
       const terms = searchValue.toLowerCase().match(/[a-z0-9]+/g) ?? []
       const savedMatches = savedFoods.filter((food) => terms.every((term) => food.name.toLowerCase().includes(term)))
       const keys = new Set(savedMatches.map(foodResultKey))
       setResults([...savedMatches, ...found.filter((food) => !keys.has(foodResultKey(food)))])
+      if (pendingBarcode) setMessage(`Select the matching food to link barcode ${pendingBarcode} for future scans.`)
     } catch (error) { setMessage(error.message) }
   }
 
   async function selectFood(food) {
-    void recordFoodUsage(food)
-    setMessage(food.sourceType === 'usda_generic' ? 'Loading source serving details...' : '')
-    const detailedFood = await loadFoodDetails(food)
+    const detailedFood = attachFoodBarcode(await loadFoodDetails(food), pendingBarcode)
+    await recordFoodUsage(detailedFood)
     setMessage('')
     if (onSelectFood) onSelectFood(detailedFood, meal); else onSave({ ...detailedFood, meal })
   }
@@ -305,7 +311,7 @@ function FoodLogModal({ initialMeal, onClose, onSave, onSelectFood }) {
     } catch (error) { setMessage(error.message) }
   }
 
-  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button disabled={voiceRecorder.status === 'requesting'} onClick={toggleVoiceSearch} type="button"><Icon name="mic" />{voiceRecorder.isRecording ? `Stop (${formatRecordingTime(voiceRecorder.elapsedSeconds)})` : voiceRecorder.status === 'requesting' ? 'Waiting...' : 'Voice Search'}</button><button onClick={() => { setQuery(''); setResults(savedFoods); setMessage(''); setIsManualEntryOpen(false) }} type="button"><Icon name="bookmark" />Saved Foods</button><button className={isManualEntryOpen ? 'active' : ''} onClick={() => { stopScanner(false); setIsManualEntryOpen((current) => !current); setMessage('') }} type="button"><Icon name="plus" />Manual Add</button></div>{voiceRecorder.isRecording && <p className="recording-indicator" role="status"><span aria-hidden="true" />Recording {formatRecordingTime(voiceRecorder.elapsedSeconds)}</p>}{voiceRecorder.error && <p className="form-message">{voiceRecorder.error}</p>}{isManualEntryOpen && <ManualFoodForm meal={meal} onCancel={() => setIsManualEntryOpen(false)} onSave={onSave} />}{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && !isManualEntryOpen && message && <p className="form-message">{message}</p>}{!isManualEntryOpen && results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
+  return <div className="modal-backdrop" onClick={closeModal}><section className="food-log-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><div className="food-meal-select-wrap"><span>Log food to</span><label><select value={meal} onChange={(event) => setMeal(event.target.value)}>{mealOptions.filter((option) => option !== 'Custom').map((option) => <option key={option} value={option}>{option === 'Snack' ? 'Snacks' : option}</option>)}</select><Icon name="chevron" /></label></div><button className="ghost-close" onClick={closeModal} type="button">Close</button></div><div className="food-modal-search"><Icon name="search" /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && search()} placeholder="Search foods, brands, and flavors..." /><button aria-label="Search" onClick={() => search()} type="button"><Icon name="search" /></button></div><div className="food-modal-actions"><button disabled={scannerStatus === 'retrying'} onClick={isScanning ? stopScanner : startScanner} type="button"><Icon name="barcode" />{getScannerButtonLabel(scannerStatus)}</button><button disabled={voiceRecorder.status === 'requesting'} onClick={toggleVoiceSearch} type="button"><Icon name="mic" />{voiceRecorder.isRecording ? `Stop (${formatRecordingTime(voiceRecorder.elapsedSeconds)})` : voiceRecorder.status === 'requesting' ? 'Waiting...' : 'Voice Search'}</button><button onClick={() => { setPendingBarcode(''); setQuery(''); setResults(savedFoods); setMessage(''); setIsManualEntryOpen(false) }} type="button"><Icon name="bookmark" />Saved Foods</button><button className={isManualEntryOpen ? 'active' : ''} onClick={() => { stopScanner(false); setPendingBarcode(''); setIsManualEntryOpen((current) => !current); setMessage('') }} type="button"><Icon name="plus" />Manual Add</button></div>{voiceRecorder.isRecording && <p className="recording-indicator" role="status"><span aria-hidden="true" />Recording {formatRecordingTime(voiceRecorder.elapsedSeconds)}</p>}{voiceRecorder.error && <p className="form-message">{voiceRecorder.error}</p>}{isManualEntryOpen && <ManualFoodForm meal={meal} onCancel={() => setIsManualEntryOpen(false)} onSave={onSave} />}{isScanning && <div className={`barcode-scanner ${scannerStatus}`}><video autoPlay ref={videoRef} muted playsInline /><p>{message}</p></div>}{!isScanning && !isManualEntryOpen && message && <p className="form-message">{message}</p>}{!isManualEntryOpen && results.length > 0 && <div className="food-results">{results.map((food, index) => <FoodResult food={food} isCurator={isFoodCurator} key={`${foodResultKey(food)}-${index}`} onPromote={promoteFood} onSave={toggleSaved} onSelect={selectFood} />)}</div>}</section></div>
 }
 
 const manualNutrientFields = [
@@ -449,10 +455,6 @@ function foodResultKey(food) { return String(food.barcode || `${food.name}|${foo
 
 function Icon({ name }) {
   return <AppIcon name={name} size={20} />
-}
-
-function normalizeBarcode(value) {
-  return String(value || '').replace(/\D/g, '').slice(0, 14)
 }
 
 function ServingModal({ canSaveReusable = false, food, meal, onClose, onSave }) {

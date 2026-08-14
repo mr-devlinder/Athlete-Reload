@@ -1,407 +1,662 @@
-export const RECOVERY_CATALOG_VERSION = 'recovery-catalog-2.0.0'
+export const MOBILITY_CATALOG_VERSION = 'mobility-catalog-3.0.0'
+export const RECOVERY_CATALOG_VERSION = MOBILITY_CATALOG_VERSION
+
+export const MOBILITY_ROUTINE_TYPES = [
+  'session_recovery',
+  'full_body',
+  'lower_body',
+  'upper_body',
+  'flexibility',
+  'warm_up',
+  'light_recovery',
+  'custom_mobility',
+]
 
 const UNIVERSAL_STOP_CONDITIONS = [
-  'Sharp or worsening pain',
-  'Numbness, tingling, or spreading symptoms',
-  'Dizziness, unusual shortness of breath, or loss of balance',
-  'A feeling that a joint is unstable or giving way',
+  'Stop for sharp or worsening pain.',
+  'Stop for numbness, tingling, instability, dizziness, or loss of balance.',
 ]
 
-const CATEGORY_PROFILES = {
-  'Neck / upper trap': profile(['Neck', 'Upper traps'], ['upper trapezius', 'levator scapulae'], ['upper-body', 'posture']),
-  Shoulder: profile(['Shoulders'], ['deltoids', 'scapular stabilizers'], ['upper-body', 'overhead']),
-  'Rotator cuff': profile(['Shoulders'], ['rotator cuff'], ['upper-body', 'throwing', 'overhead']),
-  Chest: profile(['Chest', 'Shoulders'], ['pectorals'], ['upper-body', 'pushing']),
-  'Thoracic spine': profile(['Upper back'], ['thoracic extensors', 'obliques'], ['trunk', 'rotation']),
-  Lats: profile(['Lats', 'Shoulders'], ['latissimus dorsi'], ['upper-body', 'overhead']),
-  'Upper back': profile(['Upper back', 'Shoulder blades'], ['rhomboids', 'middle trapezius'], ['upper-body', 'posture']),
-  'Lower back / trunk': profile(['Lower back', 'Trunk'], ['spinal erectors', 'obliques'], ['trunk', 'rotation']),
-  Core: profile(['Trunk'], ['abdominals', 'deep core'], ['trunk', 'control']),
-  'Hip flexors': profile(['Front of hips'], ['iliopsoas', 'rectus femoris'], ['lower-body', 'running']),
-  Glutes: profile(['Glutes', 'Hips'], ['gluteus maximus', 'gluteus medius'], ['lower-body', 'running']),
-  'Hip rotation': profile(['Hips'], ['deep hip rotators'], ['lower-body', 'change-of-direction']),
-  Adductors: profile(['Inner thighs', 'Groin'], ['adductors'], ['lower-body', 'change-of-direction']),
-  Abductors: profile(['Outer hips'], ['gluteus medius', 'hip abductors'], ['lower-body', 'lateral-movement']),
-  Quadriceps: profile(['Front of thighs'], ['quadriceps'], ['lower-body', 'running', 'jumping']),
-  Hamstrings: profile(['Back of thighs'], ['hamstrings'], ['lower-body', 'sprinting']),
-  'Knees / knee control': profile(['Knees'], ['quadriceps', 'glutes'], ['lower-body', 'landing']),
-  Calves: profile(['Calves'], ['gastrocnemius', 'soleus'], ['lower-body', 'running', 'jumping']),
-  Ankles: profile(['Ankles'], ['ankle stabilizers'], ['lower-body', 'change-of-direction']),
-  Feet: profile(['Feet'], ['intrinsic foot muscles'], ['lower-body', 'running']),
-  'Full body': profile(['Full body'], ['multiple muscle groups'], ['full-body', 'general']),
+const GROUPS = [
+  group('hips', ['hips'], ['hip_flexors', 'hip_rotators', 'adductors', 'glutes'], `
+90/90 Hip Switch
+90/90 Hip Hold
+90/90 Forward Fold
+Shin Box Switch
+Seated Hip Internal Rotation
+Seated Hip External Rotation
+Standing Hip CAR
+Quadruped Hip CAR
+Figure-Four Stretch
+Supine Figure-Four Stretch
+Pigeon Stretch
+Modified Pigeon Stretch
+Half-Kneeling Hip Flexor Stretch
+Half-Kneeling Hip Flexor Stretch with Side Bend
+Couch Stretch
+Standing Hip Flexor Stretch
+Frog Stretch
+Frog Rock-Back
+Butterfly Stretch
+Butterfly Forward Fold
+Adductor Rock-Back
+Wide-Knee Adductor Rock-Back
+Half-Kneeling Adductor Rock
+Lateral Lunge Mobility
+Cossack Squat
+Assisted Cossack Squat
+Deep Squat Hold
+Deep Squat Hip Shift
+Deep Squat Pry
+Knee-to-Chest Hip Stretch
+Supine Hip Rotation
+Windshield Wipers
+Standing Hip Circles
+Fire Hydrant
+Controlled Fire Hydrant
+Hip Airplane
+Assisted Hip Airplane`),
+  group('hamstrings', ['hamstrings', 'hips'], ['hamstrings'], `
+Standing Hamstring Stretch
+Seated Single-Leg Hamstring Stretch
+Seated Double-Leg Hamstring Stretch
+Supine Hamstring Stretch
+Active Straight-Leg Raise
+Dynamic Hamstring Sweep
+Hamstring Scoop
+Half-Split Stretch
+Standing Toe Reach
+Single-Leg Toe Reach
+Downward Dog Hamstring Stretch
+Inchworm
+Walkout to Plank
+Squat-to-Stand
+Hamstring Rock-Back
+Single-Leg Hamstring Rock-Back
+Straight-Leg Kick
+Controlled Front Leg Swing
+Supine Leg Extension`),
+  group('quadriceps', ['quadriceps', 'hips'], ['quadriceps', 'hip_flexors'], `
+Standing Quad Stretch
+Side-Lying Quad Stretch
+Prone Quad Stretch
+Half-Kneeling Quad Stretch
+Couch Stretch with Glute Squeeze
+Dynamic Quad Pull
+Heel-to-Glute Hold
+Kneeling Quad Lean
+Reverse Nordic
+Assisted Reverse Nordic
+Standing Quad-to-Hip-Flexor Stretch`),
+  group('ankles_feet', ['ankles', 'calves', 'feet'], ['ankles', 'calves', 'feet'], `
+Standing Calf Stretch
+Bent-Knee Soleus Stretch
+Wall Calf Stretch
+Wall Soleus Stretch
+Downward Dog Calf Stretch
+Single-Leg Calf Stretch
+Knee-to-Wall Ankle Rock
+Half-Kneeling Ankle Rock
+Ankle Dorsiflexion Rock
+Ankle Circles
+Ankle Alphabet
+Toe Raises
+Tibialis Raises
+Standing Calf Raise
+Single-Leg Calf Raise
+Bent-Knee Calf Raise
+Seated Calf Raise
+Heel Raise Hold
+Toe Yoga
+Big-Toe Lift
+Four-Toe Lift
+Toe Spread
+Short-Foot Hold
+Heel-to-Toe Weight Shift
+Controlled Ankle Inversion
+Controlled Ankle Eversion
+Plantar Flexion Point-and-Flex
+Single-Leg Ankle Balance`),
+  group('glutes', ['glutes', 'hips'], ['glutes'], `
+Glute Bridge
+Glute Bridge Hold
+Glute Bridge March
+Single-Leg Glute Bridge
+Frog Pump
+Hip Thrust
+Single-Leg Hip Thrust
+Quadruped Hip Extension
+Donkey Kick
+Straight-Leg Donkey Kick
+Side-Lying Hip Abduction
+Side-Lying Hip Abduction Hold
+Clamshell
+Reverse Clamshell
+Standing Hip Abduction
+Standing Hip Extension
+Bridge Abduction`),
+  group('adductors_groin', ['adductors', 'groin', 'hips'], ['adductors', 'groin'], `
+Side Lunge Hold
+Wide-Stance Squat Hold
+Standing Groin Shift
+Supine Groin Stretch
+Half-Kneeling Adductor Stretch
+Seated Straddle Stretch
+Straddle Side Reach
+Straddle Forward Fold
+Side-Lying Adductor Raise
+Copenhagen Plank — Short Lever
+Copenhagen Hold — Short Lever`),
+  group('core', ['core', 'trunk'], ['abdominals', 'trunk_control'], `
+Dead Bug
+Dead Bug Hold
+Alternating Dead Bug
+Heel-Tap Dead Bug
+Bird Dog
+Bird Dog Hold
+Bird Dog Crunch
+Bear Plank
+Bear Plank Shoulder Tap
+Forearm Plank
+High Plank
+Side Plank
+Side Plank from Knees
+Side Plank Hip Lift
+Plank Shoulder Tap
+Plank Knee Tap
+Hollow Body Hold
+Tuck Hold
+Supine Heel Tap
+Reverse Crunch
+Bent-Knee Leg Lower
+Straight-Leg Leg Lower
+McGill Curl-Up
+Pallof Press
+Pallof Hold
+Standing Anti-Rotation Hold
+Tall-Kneeling Anti-Rotation Press
+Half-Kneeling Anti-Rotation Press`),
+  group('thoracic_spine', ['thoracic_spine', 'upper_back'], ['thoracic_spine'], `
+Open Book
+Thread the Needle
+Quadruped Thoracic Rotation
+Half-Kneeling Thoracic Rotation
+Seated Thoracic Rotation
+Standing Thoracic Rotation
+Side-Lying Thoracic Rotation
+Child's Pose with Side Reach
+Extended Child's Pose
+Cat-Cow
+Quadruped Spine Flexion-Extension
+Thoracic Extension over Hands
+Kneeling Lat-Thoracic Stretch
+Wall Thoracic Rotation
+Wall Thoracic Extension`),
+  group('shoulders', ['shoulders', 'scapular_region'], ['shoulders', 'scapulae', 'chest'], `
+Arm Circles
+Controlled Arm Circles
+Shoulder CAR
+Cross-Body Shoulder Stretch
+Overhead Triceps Stretch
+Posterior Shoulder Stretch
+Doorway Pec Stretch
+Single-Arm Doorway Pec Stretch
+Wall Pec Stretch
+Wall Shoulder Flexion
+Wall Slides
+Floor Angels
+Wall Angels
+Scapular Wall Slide
+Scapular Push-Up
+Quadruped Scapular Push-Up
+Prone Y
+Prone T
+Prone W
+Prone I
+Prone Y-T-W
+Shoulder External Rotation
+Shoulder Internal Rotation
+Band External Rotation
+Band Internal Rotation
+Band Pull-Apart
+Band Face Pull
+Band Overhead Pull-Apart
+Band Shoulder Pass-Through
+Serratus Wall Slide`),
+  group('neck_upper_back', ['neck', 'upper_back'], ['neck', 'upper_trapezius', 'scapulae'], `
+Gentle Neck Rotation
+Neck Side Bend
+Upper-Trap Stretch
+Levator Scapulae Stretch
+Chin Tuck
+Chin Tuck Hold
+Shoulder Shrug
+Shoulder Roll
+Scapular Retraction
+Scapular Depression
+Wall Scapular Retraction`),
+  group('wrists_forearms', ['wrists', 'forearms'], ['wrists', 'forearms', 'fingers'], `
+Wrist Flexor Stretch
+Wrist Extensor Stretch
+Prayer Stretch
+Reverse Prayer Stretch
+Wrist Circles
+Forearm Pronation-Supination
+Finger Extension Stretch
+Finger Flexion Stretch
+Quadruped Wrist Rock
+Backward-Hand Wrist Rock
+Fist-to-Palm Wrist Mobility
+Wrist Flexion-Extension Control
+Radial-Ulnar Wrist Deviation
+Finger Spread and Close`),
+  group('full_body', ['full_body'], ['multiple_regions'], `
+World's Greatest Stretch
+World's Greatest Stretch with Rotation
+Downward Dog to Plank
+Downward Dog to Cobra
+Cobra to Child's Pose
+Lunge with Thoracic Rotation
+Reverse Lunge with Reach
+Lateral Lunge with Reach
+Deep Squat with Reach
+Deep Squat Thoracic Rotation
+Spiderman Stretch
+Spiderman Stretch with Rotation
+Bear to Downward Dog
+Quadruped Rock-Back
+Tall-Kneeling Hip Hinge
+Half-Kneeling Reach
+Standing Side Bend
+Standing Overhead Reach
+Standing Rotation Reach`),
+  group('dynamic_warm_up', ['full_body'], ['dynamic_preparation'], `
+High Knees in Place
+Butt Kicks in Place
+A-March in Place
+A-Skip in Place
+Pogo Hops
+Low Pogo Hops
+Single-Leg Pogo
+Lateral Pogo
+Line Hops Forward-Back
+Line Hops Side-to-Side
+Jumping Jacks
+Seal Jacks
+Split Jacks
+Fast Feet in Place
+Lateral Quick Feet
+Skater Step
+Skater Hop
+Squat to Calf Raise
+Bodyweight Squat
+Tempo Bodyweight Squat
+Squat Hold
+Reverse Lunge
+Forward Lunge
+Lateral Lunge
+Curtsy Lunge
+Split Squat
+Split Squat Hold
+Lunge Switch
+Squat Jump
+Snap Down
+Snap Down to Athletic Stance
+Ankle Bounce
+Single-Leg Balance Reach
+Dynamic Knee Hug
+Standing Leg Swing — Front/Back
+Standing Leg Swing — Side-to-Side
+Hip Openers
+Hip Closers
+Standing Hamstring Kick`),
+  group('balance_stability', ['balance', 'hips', 'ankles'], ['balance', 'stability'], `
+Single-Leg Balance
+Single-Leg Balance with Knee Drive
+Single-Leg Balance with Reach
+Single-Leg Balance with Rotation
+Single-Leg RDL Reach
+Bodyweight Single-Leg RDL
+Supported Single-Leg RDL
+Split-Stance Balance Hold
+Tandem Balance Hold
+Single-Leg Calf Raise Hold
+Single-Leg Quarter-Squat Hold
+Single-Leg Mini Squat
+Clock Reach
+Three-Way Reach
+Single-Leg Toe Tap
+Single-Leg Lateral Toe Tap
+Single-Leg Forward Toe Tap
+Single-Leg Posterior Toe Tap`),
+  group('band', ['full_body'], ['activation', 'control'], `
+Lateral Band Walk
+Monster Walk
+Banded Clamshell
+Banded Glute Bridge
+Banded Hip Abduction
+Banded Hip Extension
+Banded Squat
+Banded Ankle Dorsiflexion
+Band Row
+Band Lat Stretch
+Band Serratus Punch
+Band No-Money Drill
+Band Pallof Press
+Band Pallof Hold`),
+  group('bench_chair', ['full_body'], ['supported_mobility'], `
+Bench Hip Flexor Stretch
+Elevated Hamstring Stretch
+Elevated Calf Stretch
+Rear-Foot Elevated Hip Flexor Stretch
+Supported Cossack Squat
+Supported Deep Squat
+Chair Figure-Four Stretch
+Seated Figure-Four Stretch
+Bench Glute Stretch
+Elevated Pigeon Stretch
+Step-Up
+Lateral Step-Up`),
+]
+
+const ID_OVERRIDES = {
+  '90/90 Hip Switch': 'hip_90_90_switch',
+  '90/90 Hip Hold': 'hip_90_90_hold',
+  '90/90 Forward Fold': 'hip_90_90_forward_fold',
+  'Half-Kneeling Hip Flexor Stretch': 'half_kneeling_hip_flexor_stretch',
 }
 
-// Each entry is a recognized movement with an explicit execution cue. The catalog
-// stores one canonical movement; laterality is expanded only when composing a routine.
-const SEEDS = [
-  seed('neck-nods', 'Supine neck nods', 'Neck / upper trap', 'bilateral', 'control', [], 'Lie on your back and make a small yes motion, lengthening the back of the neck without lifting the head.'),
-  seed('neck-rotation', 'Gentle neck rotation', 'Neck / upper trap', 'each-side', 'mobility', [], 'Sit tall and slowly turn your head toward one shoulder, return to center, then change sides without tipping the chin.'),
-  seed('upper-trap-stretch', 'Upper trap stretch', 'Neck / upper trap', 'each-side', 'flexibility', [], 'Sit tall, hold the chair with one hand, and tip the opposite ear toward the opposite shoulder without rotating.'),
-  seed('levator-scapulae-stretch', 'Levator scapulae stretch', 'Neck / upper trap', 'each-side', 'flexibility', [], 'Turn your head about 45 degrees, look toward the armpit, and add only light hand pressure.'),
-  seed('shoulder-shrugs', 'Shoulder shrugs and release', 'Neck / upper trap', 'bilateral', 'mobility', [], 'Lift both shoulders toward the ears, pause briefly, then let them settle down and back.'),
-  seed('scapular-clock', 'Scapular clock', 'Neck / upper trap', 'each-side', 'control', [], 'With one hand on a wall, glide that shoulder blade up, down, toward, and away from the spine without bending the elbow.'),
+const INSTRUCTION_OVERRIDES = {
+  '90/90 Hip Switch': 'Sit tall with both knees bent and feet planted wider than your hips. Lower both knees to one side, return through center, and switch sides without forcing the range.',
+  'Half-Kneeling Hip Flexor Stretch': 'Kneel with one knee on the floor and the opposite foot in front. Gently tuck your pelvis, squeeze the glute of the kneeling side, and shift forward until the front of that hip stretches.',
+  'Dead Bug': 'Lie on your back with hips and knees bent to 90 degrees and arms above your shoulders. Lower the opposite arm and leg without letting your low back lift, then return and alternate.',
+  'Bird Dog': 'Start on hands and knees. Reach one arm and the opposite leg long while keeping your ribs and hips level, then return with control and alternate.',
+  'Glute Bridge': 'Lie on your back with knees bent and feet flat. Press through both feet and squeeze your glutes to lift your hips without arching your low back.',
+  'Open Book': 'Lie on your side with knees stacked and arms together in front. Sweep the top arm open as your upper back rotates while both knees stay together.',
+  'Cat-Cow': 'Start on hands and knees. Slowly round your spine, then move through neutral into a gentle arch without forcing either end position.',
+  'Side Plank': 'Lie on your side with your elbow below your shoulder. Lift your hips so your head, trunk, and legs form one line without rolling forward or backward.',
+  'World\'s Greatest Stretch': 'Step into a long lunge and place both hands inside the front foot. Keep the back leg long and move only through a comfortable hip and upper-back range.',
+  'Knee-to-Wall Ankle Rock': 'Face a wall with one foot flat a short distance away. Drive that knee toward the wall over the middle toes while the heel stays down.',
+  'Pallof Press': 'Stand sideways to an anchored resistance band and hold it at your chest. Press your hands straight forward without letting the band rotate your trunk.',
+}
 
-  seed('arm-circles', 'Arm circles', 'Shoulder', 'bilateral', 'mobility', [], 'Circle straight arms from small to comfortable larger arcs while keeping the ribs stacked over the hips.'),
-  seed('shoulder-cars', 'Shoulder CARs', 'Shoulder', 'each-side', 'mobility', [], 'Move one straight arm slowly through the largest pain-free circle you can control without turning the trunk.'),
-  seed('wall-angels', 'Wall angels', 'Shoulder', 'bilateral', 'control', ['Wall'], 'Keep the head, ribs, and hips quiet as the arms slide up and down the wall through a comfortable range.'),
-  seed('scapular-wall-slide', 'Scapular wall slide', 'Shoulder', 'bilateral', 'control', ['Wall'], 'Press forearms lightly into the wall and slide them upward while the shoulder blades rotate smoothly.'),
-  seed('wall-shoulder-flexion', 'Wall Shoulder Flexion', 'Shoulder', 'bilateral', 'mobility', ['Wall'], 'Slide both hands up the wall while the ribs stay stacked, stopping before the shoulders pinch or shrug.'),
-  seed('serratus-wall-slide', 'Serratus Wall Slide', 'Shoulder', 'bilateral', 'activation', ['Wall'], 'Press the forearms into the wall and slide upward while reaching the shoulder blades around the rib cage.'),
-  seed('cross-body-shoulder-stretch', 'Cross-body shoulder stretch', 'Shoulder', 'each-side', 'flexibility', [], 'Bring one arm across the chest and use the other forearm to draw it closer without hiking the shoulder.'),
-  seed('sleeper-stretch', 'Sleeper stretch', 'Shoulder', 'each-side', 'flexibility', ['Mat'], 'Lie on one side with the shoulder and elbow at 90 degrees and gently rotate the forearm toward the floor without forcing.'),
+const rawMovements = GROUPS.flatMap((entry) => entry.names.map((name) => ({ ...entry, name })))
+const uniqueMovements = rawMovements.filter((movement, index) => rawMovements.findIndex((candidate) => candidate.name.toLowerCase() === movement.name.toLowerCase()) === index)
 
-  seed('band-external-rotation', 'Band external rotation', 'Rotator cuff', 'each-side', 'activation', ['Resistance band'], 'Keep the elbow against your side and rotate the forearm outward while the shoulder stays down.'),
-  seed('band-internal-rotation', 'Band internal rotation', 'Rotator cuff', 'each-side', 'activation', ['Resistance band'], 'Keep the elbow against your side and draw the forearm toward the abdomen without turning the trunk.'),
-  seed('band-no-money', 'Band no-money drill', 'Rotator cuff', 'bilateral', 'activation', ['Resistance band'], 'Hold elbows at your sides with palms up and separate the hands while gently setting the shoulder blades.'),
-  seed('side-lying-external-rotation', 'Side-lying external rotation', 'Rotator cuff', 'each-side', 'activation', ['Light dumbbell', 'Mat'], 'Lie on your side with the top elbow tucked and rotate the forearm upward without rolling the torso back.'),
-  seed('wall-isometric-external-rotation', 'Wall external-rotation isometric', 'Rotator cuff', 'each-side', 'isometric', ['Wall'], 'Press the back of the hand gently into a wall while the elbow stays tucked and the shoulder remains relaxed.'),
-  seed('scaption-raise', 'Scaption raise', 'Rotator cuff', 'bilateral', 'activation', ['Light dumbbells'], 'Raise the arms in a shallow V with thumbs up, stopping below any painful or pinching range.'),
+export const MOBILITY_MOVEMENTS = uniqueMovements.map(buildMovement)
+export const MOBILITY_MOVEMENT_BY_ID = Object.fromEntries(MOBILITY_MOVEMENTS.map((movement) => [movement.id, movement]))
 
-  seed('doorway-pec-stretch', 'Doorway pec stretch', 'Chest', 'each-side', 'flexibility', ['Doorway'], 'Place one forearm below shoulder height on a doorway and turn the chest away while keeping the shoulder down.'),
-  seed('corner-chest-stretch', 'Corner chest stretch', 'Chest', 'bilateral', 'flexibility', ['Wall'], 'Place both forearms on adjacent walls and lean the body forward as one unit until the chest gently stretches.'),
-  seed('floor-chest-opener', 'Floor chest opener', 'Chest', 'each-side', 'flexibility', ['Mat'], 'Lie face down with one arm out to the side and roll gently away from that arm without forcing the shoulder.'),
-  seed('foam-roller-chest-opener', 'Foam roller chest opener', 'Chest', 'bilateral', 'flexibility', ['Foam roller'], 'Lie lengthwise on the roller with head supported and let the arms open only as far as the shoulders stay comfortable.'),
-  seed('hands-behind-back-opener', 'Hands-behind-back chest opener', 'Chest', 'bilateral', 'mobility', [], 'Hold the hands or a strap behind you, lengthen the arms, and lift slightly without arching the low back.'),
-  seed('bench-pec-stretch', 'Bench pec stretch', 'Chest', 'each-side', 'flexibility', ['Chair or bench'], 'Place one forearm on a bench and lower the chest slightly while keeping the shoulder away from the ear.'),
+// Compatibility exports point to the same canonical objects. There is no second catalog.
+export const RECOVERY_EXERCISE_LIST = MOBILITY_MOVEMENTS
+export const RECOVERY_EXERCISES = MOBILITY_MOVEMENT_BY_ID
+export const RECOVERY_CATEGORIES = [...new Set(MOBILITY_MOVEMENTS.map((movement) => movement.category))]
+export const RECOVERY_ROUTINE_IDS = Object.fromEntries(MOBILITY_ROUTINE_TYPES.map((type) => [type, MOBILITY_MOVEMENTS.filter((movement) => movement.routineTypes.includes(type)).map((movement) => movement.id)]))
 
-  seed('cat-cow', 'Cat-Cow', 'Thoracic spine', 'bilateral', 'mobility', ['Mat'], 'From hands and knees, round the spine slowly, then pass through neutral into a gentle extension.'),
-  seed('thread-the-needle', 'Thread the Needle', 'Thoracic spine', 'each-side', 'mobility', ['Mat'], 'From hands and knees, slide one arm under the other, rotate through the upper back, then return and reach upward.'),
-  seed('open-book', 'Open Book', 'Thoracic spine', 'each-side', 'mobility', ['Mat'], 'Lie on your side with knees stacked and open the top arm as the upper back rotates while the knees stay together.'),
-  seed('thoracic-extension-roller', 'Thoracic extension on foam roller', 'Thoracic spine', 'bilateral', 'mobility', ['Foam roller'], 'Support the head, place the roller across the upper back, and extend over it without flaring the ribs.'),
-  seed('quadruped-thoracic-rotation', 'Quadruped thoracic rotation', 'Thoracic spine', 'each-side', 'mobility', ['Mat'], 'Place one hand behind the head and rotate that elbow toward the supporting arm, then open toward the ceiling.'),
-  seed('seated-thoracic-rotation', 'Seated thoracic rotation', 'Thoracic spine', 'each-side', 'mobility', ['Chair or bench'], 'Sit tall with arms crossed and rotate the rib cage while the hips and knees continue facing forward.'),
+export function getMovementById(id) {
+  return MOBILITY_MOVEMENT_BY_ID[String(id ?? '')] ?? null
+}
 
-  seed('standing-lat-stretch', 'Standing lat stretch', 'Lats', 'each-side', 'flexibility', ['Wall'], 'Hold a stable support with one hand and sit the hips back while reaching that side long.'),
-  seed('prayer-lat-stretch', 'Prayer lat stretch', 'Lats', 'bilateral', 'flexibility', ['Chair or bench'], 'Kneel with elbows on a bench and send the chest down while keeping the ribs gently controlled.'),
-  seed('side-bend-lat-stretch', 'Side-bend lat stretch', 'Lats', 'each-side', 'flexibility', [], 'Reach one arm overhead and arc the trunk away without rotating or collapsing forward.'),
-  seed('foam-roller-lat-roll', 'Foam roller lat roll', 'Lats', 'each-side', 'self-massage', ['Foam roller'], 'Lie partly on your side with the roller below the armpit and make short slow passes along the outer upper back.'),
-  seed('childs-pose-side-reach', "Child's Pose side reach", 'Lats', 'each-side', 'flexibility', ['Mat'], 'From Child’s Pose, walk both hands to one side and breathe into the lengthened side of the trunk.'),
-  seed('bench-lat-rock', 'Bench lat rock-back', 'Lats', 'bilateral', 'mobility', ['Chair or bench'], 'Place hands on a bench and rock the hips back while the spine stays long and shoulders remain comfortable.'),
-
-  seed('band-pull-apart', 'Band pull-apart', 'Upper back', 'bilateral', 'activation', ['Resistance band'], 'Hold the band at chest height and separate the hands until the shoulder blades gently draw together.'),
-  seed('foam-roller-thoracic-roll', 'Foam roller thoracic roll', 'Upper back', 'bilateral', 'self-massage', ['Foam roller'], 'Cross the arms and make short slow rolls from the lower shoulder blades to the upper back, avoiding the neck.'),
-  seed('prone-y-raise', 'Prone Y raise', 'Upper back', 'bilateral', 'activation', ['Mat'], 'Lie face down and lift the arms in a Y using the shoulder blades without lifting the ribs.'),
-  seed('prone-t-raise', 'Prone T raise', 'Upper back', 'bilateral', 'activation', ['Mat'], 'Lie face down with arms out to the sides and lift them slightly as the shoulder blades move together.'),
-  seed('scapular-push-up', 'Scapular push-up', 'Upper back', 'bilateral', 'control', ['Mat'], 'From a wall or plank position, keep elbows straight while the chest moves between and then away from the hands.'),
-  seed('wall-reach', 'Wall reach with scapular protraction', 'Upper back', 'bilateral', 'control', ['Wall'], 'Press forearms into a wall and reach the shoulder blades forward without rounding the low back.'),
-  seed('band-face-pull', 'Band Face Pull', 'Upper back', 'bilateral', 'activation', ['Resistance band'], 'Pull the band toward eye level with elbows high enough to rotate comfortably, then return without shrugging.'),
-  seed('prone-w-raise', 'Prone W Raise', 'Upper back', 'bilateral', 'activation', ['Mat'], 'Lie face down with elbows bent into a W and lift the arms slightly by drawing the shoulder blades down and together.'),
-
-  seed('supine-trunk-rotation', 'Supine trunk rotation', 'Lower back / trunk', 'alternating', 'mobility', ['Mat'], 'Lie on your back with knees bent and lower both knees side to side through a comfortable range.'),
-  seed('pelvic-tilt', 'Pelvic tilt', 'Lower back / trunk', 'bilateral', 'control', ['Mat'], 'Lie on your back and gently alternate between flattening and releasing the low back without pushing through the feet.'),
-  seed('childs-pose', "Child's Pose", 'Lower back / trunk', 'bilateral', 'flexibility', ['Mat'], 'Sit the hips toward the heels and reach forward, stopping before knee, hip, or back discomfort.'),
-  seed('gentle-press-up', 'Cobra / gentle press-up', 'Lower back / trunk', 'bilateral', 'mobility', ['Mat'], 'Lie face down and use the forearms or hands to lift the chest only as far as the low back remains comfortable.'),
-  seed('knees-to-chest', 'Single knee-to-chest', 'Lower back / trunk', 'each-side', 'mobility', ['Mat'], 'Lie on your back and draw one thigh toward the trunk while the other leg remains relaxed.'),
-  seed('standing-trunk-rotation', 'Standing trunk rotation', 'Lower back / trunk', 'alternating', 'mobility', [], 'Stand with soft knees and rotate the rib cage gently side to side while the pelvis stays mostly forward.'),
-
-  seed('dead-bug', 'Dead Bug', 'Core', 'alternating', 'control', ['Mat'], 'Brace gently with hips and knees at 90 degrees, then lower opposite arm and leg without the low back lifting.'),
-  seed('bird-dog', 'Bird Dog', 'Core', 'alternating', 'control', ['Mat'], 'From hands and knees, reach opposite arm and leg long while keeping the pelvis and rib cage level.'),
-  seed('heel-slide', 'Supine heel slide', 'Core', 'alternating', 'control', ['Mat'], 'Brace gently and slide one heel away without letting the pelvis tip or the low back arch.'),
-  seed('bent-knee-fallout', 'Bent-knee fallout', 'Core', 'alternating', 'control', ['Mat'], 'Lie with knees bent and let one knee open outward while the opposite side of the pelvis stays still.'),
-  seed('bear-hover-breathing', 'Bear hover breathing', 'Core', 'bilateral', 'isometric', ['Mat'], 'From hands and knees, hover the knees slightly and take controlled breaths without rounding or sagging.'),
-  seed('side-plank-knees', 'Side plank from knees', 'Core', 'each-side', 'isometric', ['Mat'], 'Support on one forearm and bent knees, then lift the hips so shoulders, hips, and knees align.'),
-  seed('pallof-press', 'Pallof Press', 'Core', 'each-side', 'control', ['Resistance band'], 'Stand perpendicular to an anchored band and press the hands forward without letting the trunk rotate.'),
-  seed('dead-bug-heel-tap', 'Dead Bug Heel Tap', 'Core', 'alternating', 'control', ['Mat'], 'Hold the hips and knees near 90 degrees and tap one heel down at a time while the trunk stays braced.'),
-
-  seed('half-kneeling-hip-flexor', 'Half-kneeling hip flexor stretch', 'Hip flexors', 'each-side', 'flexibility', ['Mat'], 'Tuck the pelvis slightly in a half-kneeling stance and shift forward without arching the low back.'),
-  seed('couch-stretch', 'Couch stretch', 'Hip flexors', 'each-side', 'flexibility', ['Wall', 'Mat'], 'Set the rear shin near a wall, squeeze that glute, and bring the torso upright only as comfort allows.'),
-  seed('standing-hip-flexor-stretch', 'Standing hip flexor stretch', 'Hip flexors', 'each-side', 'flexibility', [], 'Take a split stance, tuck the pelvis, and shift forward while the rear heel may lift.'),
-  seed('rear-foot-elevated-hip-flexor-rock', 'Rear-foot-elevated hip flexor rock', 'Hip flexors', 'each-side', 'mobility', ['Chair or bench'], 'Place the rear foot on a low support and make small forward rocks while the pelvis stays tucked.'),
-  seed('walking-knee-hug', 'Walking knee hug', 'Hip flexors', 'alternating', 'mobility', [], 'Stand tall, draw one knee toward the chest briefly, step through, and alternate without leaning back.'),
-  seed('marching-hip-flexion', 'Controlled marching', 'Hip flexors', 'alternating', 'activation', [], 'Lift one knee to a comfortable height while staying tall, lower quietly, and alternate.'),
-
-  seed('glute-bridge', 'Glute Bridge', 'Glutes', 'bilateral', 'activation', ['Mat'], 'Drive through both feet and lift the hips until the trunk and thighs align without arching the back.'),
-  seed('single-leg-glute-bridge', 'Single-leg glute bridge', 'Glutes', 'each-side', 'activation', ['Mat'], 'Keep one thigh lifted and raise the hips using the planted leg without allowing the pelvis to rotate.'),
-  seed('figure-four-stretch', 'Figure-Four Stretch', 'Glutes', 'each-side', 'flexibility', ['Mat'], 'Cross one ankle over the opposite thigh and draw the supporting thigh toward you while the pelvis stays level.'),
-  seed('pigeon-variation', 'Supported pigeon variation', 'Glutes', 'each-side', 'flexibility', ['Mat', 'Yoga blocks'], 'Support the front hip as needed and hinge forward only until the outer hip feels a mild stretch.'),
-  seed('quadruped-hip-extension', 'Quadruped hip extension', 'Glutes', 'each-side', 'activation', ['Mat'], 'From hands and knees, press one heel back and slightly up without rotating the pelvis or arching the back.'),
-  seed('standing-glute-squeeze', 'Standing glute squeeze', 'Glutes', 'bilateral', 'isometric', [], 'Stand tall, gently contract both glutes, hold without clenching the low back, then fully release.'),
-
-  seed('hip-switches-90-90', '90/90 Hip Switch', 'Hip rotation', 'alternating', 'mobility', ['Mat'], 'Sit with knees bent and rotate both knees from one side to the other while the feet stay planted.'),
-  seed('hip-stretch-90-90', '90/90 Hip Stretch', 'Hip rotation', 'each-side', 'flexibility', ['Mat'], 'Set both knees near 90 degrees and hinge over the front shin while keeping the spine long.'),
-  seed('hip-cars', 'Hip CARs', 'Hip rotation', 'each-side', 'mobility', [], 'Use support and move one knee through a slow controlled circle without turning the pelvis.'),
-  seed('prone-hip-rotation', 'Prone hip rotation', 'Hip rotation', 'alternating', 'mobility', ['Mat'], 'Lie face down with knees bent and let the feet move apart and together while the pelvis remains heavy.'),
-  seed('shin-box-get-up', 'Shin-box transition', 'Hip rotation', 'alternating', 'control', ['Mat'], 'Move between 90/90 positions and lift the hips slightly using control rather than momentum.'),
-  seed('standing-hip-openers', 'Standing hip openers', 'Hip rotation', 'alternating', 'mobility', [], 'Lift one knee, guide it outward in a controlled circle, place the foot down, and alternate.'),
-  seed('quadruped-hip-cars', 'Quadruped Hip CARs', 'Hip rotation', 'each-side', 'mobility', ['Mat'], 'From hands and knees, move one knee through a slow controlled circle while the pelvis stays level.'),
-  seed('supported-hip-airplane', 'Supported Hip Airplane', 'Hip rotation', 'each-side', 'control', ['Stable support'], 'Balance with light support, hinge over one leg, and rotate the pelvis open and closed without losing foot pressure.'),
-
-  seed('adductor-rock-back', 'Adductor Rock-Back', 'Adductors', 'each-side', 'mobility', ['Mat'], 'Extend one leg to the side from hands and knees and rock the hips back toward the bent-leg heel.'),
-  seed('frog-stretch', 'Frog Stretch', 'Adductors', 'bilateral', 'flexibility', ['Mat'], 'Widen the knees from hands and knees and rock back only until the inner thighs gently stretch.'),
-  seed('butterfly-stretch', 'Butterfly Stretch', 'Adductors', 'bilateral', 'flexibility', ['Mat'], 'Sit with soles together, keep the spine long, and hinge forward without pressing on the knees.'),
-  seed('cossack-shift', 'Cossack Shift', 'Adductors', 'alternating', 'mobility', [], 'Use a wide stance and shift the hips toward one bent knee while the other leg lengthens, then change sides.'),
-  seed('lateral-lunge-shift', 'Lateral lunge shift', 'Adductors', 'alternating', 'mobility', [], 'Step wide and move the hips side to side while each working knee tracks over the toes.'),
-  seed('standing-adductor-stretch', 'Standing adductor stretch', 'Adductors', 'each-side', 'flexibility', [], 'Take a wide stance, bend one knee, and sit toward it while the other leg remains long.'),
-  seed('half-kneeling-adductor-shift', 'Half-Kneeling Adductor Shift', 'Adductors', 'each-side', 'mobility', ['Mat'], 'Extend one leg to the side from a half-kneeling position and shift the hips back while the long foot stays planted.'),
-
-  seed('clamshell', 'Clamshell', 'Abductors', 'each-side', 'activation', ['Mini band', 'Mat'], 'Lie on your side with knees bent and open the top knee without rolling the pelvis backward.'),
-  seed('side-lying-hip-abduction', 'Side-Lying Hip Abduction', 'Abductors', 'each-side', 'activation', ['Mat'], 'Keep the top leg long and slightly behind you as it lifts without the toes turning toward the ceiling.'),
-  seed('mini-band-lateral-walk', 'Mini-Band Lateral Walk', 'Abductors', 'alternating', 'activation', ['Mini band'], 'Stay in a shallow athletic stance and take controlled side steps while keeping constant band tension.'),
-  seed('monster-walk', 'Monster Walk', 'Abductors', 'alternating', 'activation', ['Mini band'], 'Maintain a shallow squat and take diagonal steps forward and backward without the knees collapsing inward.'),
-  seed('standing-hip-abduction', 'Standing hip abduction', 'Abductors', 'each-side', 'activation', [], 'Use support and move one straight leg slightly outward without leaning or rotating the toes up.'),
-  seed('lateral-step-down-control', 'Lateral step-down control', 'Abductors', 'each-side', 'control', ['Low step'], 'Stand on a low step and lower the free heel toward the floor while the stance knee tracks over the foot.'),
-  seed('quadruped-fire-hydrant', 'Quadruped Fire Hydrant', 'Abductors', 'each-side', 'activation', ['Mat'], 'From hands and knees, lift one bent knee to the side without rotating the pelvis or shifting through the trunk.'),
-
-  seed('standing-quad-stretch', 'Standing Quad Stretch', 'Quadriceps', 'each-side', 'flexibility', [], 'Hold the ankle behind you, keep knees close, and tuck the pelvis without pulling the heel forcefully.'),
-  seed('side-lying-quad-stretch', 'Side-Lying Quad Stretch', 'Quadriceps', 'each-side', 'flexibility', ['Mat'], 'Lie on your side, hold the top ankle, and bring the thigh slightly behind without arching the back.'),
-  seed('prone-quad-stretch-strap', 'Prone quad stretch with strap', 'Quadriceps', 'each-side', 'flexibility', ['Stretching strap', 'Mat'], 'Lie face down and use a strap to bend one knee until the front thigh gently stretches.'),
-  seed('walking-quad-pull', 'Walking Quad Pull', 'Quadriceps', 'alternating', 'mobility', [], 'Briefly hold one ankle behind you while standing tall, release, step forward, and alternate.'),
-  seed('reverse-lunge-mobility', 'Reverse Lunge Mobility', 'Quadriceps', 'alternating', 'mobility', [], 'Step backward into a shallow lunge, keep the front knee tracking over the foot, then return and alternate.'),
-  seed('quad-foam-roll', 'Quadriceps foam roll', 'Quadriceps', 'each-side', 'self-massage', ['Foam roller'], 'Support on the forearms and make slow passes along one front thigh, avoiding direct pressure on the kneecap.'),
-  seed('quad-set-isometric', 'Quad Set Isometric', 'Quadriceps', 'each-side', 'isometric', ['Mat'], 'Sit or lie with one leg straight and tighten the thigh to gently press the back of the knee toward the floor.'),
-
-  seed('supine-hamstring-stretch', 'Supine Hamstring Stretch', 'Hamstrings', 'each-side', 'flexibility', ['Stretching strap', 'Mat'], 'Lift one thigh and slowly straighten the knee while the pelvis and opposite leg stay relaxed.'),
-  seed('seated-hamstring-stretch', 'Seated Hamstring Stretch', 'Hamstrings', 'each-side', 'flexibility', [], 'Extend one leg, keep the spine long, and hinge from the hips toward that thigh.'),
-  seed('standing-hamstring-stretch', 'Standing Hamstring Stretch', 'Hamstrings', 'each-side', 'flexibility', ['Chair or bench'], 'Place one heel on a low support and hinge forward with a long spine and soft knee.'),
-  seed('hamstring-floss', 'Hamstring Floss', 'Hamstrings', 'each-side', 'mobility', ['Mat'], 'Support the thigh, alternate slowly between straightening the knee with toes pointed and bending it with toes drawn back.'),
-  seed('hamstring-sweeps', 'Walking hamstring sweep', 'Hamstrings', 'alternating', 'mobility', [], 'Place one heel forward, sit the hips back, sweep the hands toward the toes, then step through.'),
-  seed('hamstring-bridge-walkout', 'Hamstring bridge walkout', 'Hamstrings', 'bilateral', 'activation', ['Mat'], 'Lift into a bridge and take small heel steps away and back while keeping the hips controlled.'),
-  seed('hamstring-heel-dig', 'Hamstring Heel-Dig Isometric', 'Hamstrings', 'each-side', 'isometric', ['Mat'], 'Lie with one knee bent, press that heel down and back without sliding it, and hold the pelvis steady.'),
-  seed('active-straight-leg-raise', 'Active Straight-Leg Raise', 'Hamstrings', 'each-side', 'control', ['Mat'], 'Keep one leg long on the floor and lift the other straight leg without bending the knee or tipping the pelvis.'),
-
-  seed('bodyweight-squat', 'Bodyweight Squat to Comfortable Depth', 'Knees / knee control', 'bilateral', 'control', [], 'Sit between the hips to a comfortable depth while knees track with the toes, then stand evenly.'),
-  seed('supported-deep-squat-hold', 'Supported Deep Squat Hold', 'Knees / knee control', 'bilateral', 'flexibility', ['Stable support'], 'Hold a stable support and settle into a comfortable squat while heels stay grounded as able.'),
-  seed('terminal-knee-extension-band', 'Band terminal knee extension', 'Knees / knee control', 'each-side', 'activation', ['Resistance band'], 'Place a band behind one knee, bend slightly, then straighten the knee by tightening the thigh.'),
-  seed('step-up-control', 'Low step-up control', 'Knees / knee control', 'each-side', 'control', ['Low step'], 'Step onto a low platform, stand tall through the whole foot, and lower slowly without the knee collapsing inward.'),
-  seed('split-squat-isometric', 'Supported split-squat isometric', 'Knees / knee control', 'each-side', 'isometric', ['Stable support'], 'Use support, lower into a shallow split stance, and hold with the front knee tracking over the foot.'),
-  seed('wall-sit-comfortable', 'Comfortable wall sit', 'Knees / knee control', 'bilateral', 'isometric', ['Wall'], 'Slide down a wall to a shallow comfortable angle and hold while pressure stays even through both feet.'),
-  seed('spanish-squat-isometric', 'Spanish Squat Isometric', 'Knees / knee control', 'bilateral', 'isometric', ['Resistance band'], 'Lean back against a strong band behind the knees and hold a comfortable squat with the torso upright.'),
-
-  seed('calf-stretch-straight-knee', 'Calf Stretch — Straight Knee', 'Calves', 'each-side', 'flexibility', ['Wall'], 'Step one foot back, keep that knee straight and heel down, and shift toward the wall.'),
-  seed('soleus-stretch-bent-knee', 'Soleus Stretch — Bent Knee', 'Calves', 'each-side', 'flexibility', ['Wall'], 'Step one foot back, bend that knee while keeping the heel down, and shift forward gently.'),
-  seed('calf-raises', 'Calf Raises', 'Calves', 'bilateral', 'activation', [], 'Rise through the balls of both feet, pause without rolling the ankles, and lower slowly.'),
-  seed('single-leg-calf-raise', 'Supported single-leg calf raise', 'Calves', 'each-side', 'activation', ['Stable support'], 'Use light support, rise through one forefoot with the ankle aligned, then lower under control.'),
-  seed('seated-calf-raise', 'Seated calf raise', 'Calves', 'bilateral', 'activation', ['Chair or bench'], 'Sit with feet flat, lift both heels while the toes stay down, pause, and lower slowly.'),
-  seed('calf-foam-roll', 'Calf foam roll', 'Calves', 'each-side', 'self-massage', ['Foam roller'], 'Support with the hands and make slow passes along one calf, avoiding direct pressure behind the knee.'),
-  seed('eccentric-calf-lower', 'Eccentric Calf Lower', 'Calves', 'each-side', 'control', ['Stable support'], 'Rise using both feet, shift to one foot, and lower that heel slowly while using support for balance.'),
-
-  seed('ankle-knee-to-wall', 'Ankle Knee-to-Wall', 'Ankles', 'each-side', 'mobility', ['Wall'], 'Keep the heel down and guide the knee toward the wall in line with the middle toes, then return.'),
-  seed('ankle-circles', 'Ankle Circles', 'Ankles', 'each-side', 'mobility', [], 'Lift one foot and draw slow circles with the toes while the lower leg stays still.'),
-  seed('ankle-cars', 'Ankle CARs', 'Ankles', 'each-side', 'mobility', [], 'Trace the largest controlled ankle circle you can without moving the knee.'),
-  seed('heel-to-toe-rock', 'Heel-to-Toe Rock', 'Ankles', 'bilateral', 'mobility', [], 'Rock from heels to forefeet slowly while the body stays tall and movement remains controlled.'),
-  seed('band-ankle-eversion', 'Band ankle eversion', 'Ankles', 'each-side', 'activation', ['Resistance band'], 'Anchor a band inward and turn the forefoot outward without rotating the knee.'),
-  seed('single-leg-balance', 'Supported single-leg balance', 'Ankles', 'each-side', 'control', ['Stable support'], 'Stand on one foot with light fingertip support and keep the arch, knee, and hip aligned.'),
-  seed('banded-ankle-dorsiflexion', 'Banded Ankle Dorsiflexion', 'Ankles', 'each-side', 'mobility', ['Resistance band'], 'Anchor a band low around the front of the ankle and guide the knee forward over the toes while the heel stays down.'),
-
-  seed('toe-raises', 'Toe Raises', 'Feet', 'bilateral', 'activation', [], 'Keep both heels down, lift the forefeet and toes, then lower quietly.'),
-  seed('tibialis-raises', 'Tibialis Raises', 'Feet', 'bilateral', 'activation', ['Wall'], 'Lean lightly against a wall with heels down and lift both forefeet toward the shins.'),
-  seed('short-foot', 'Foot Doming / Short Foot', 'Feet', 'each-side', 'activation', [], 'Keep toes relaxed and gently draw the ball of the big toe toward the heel to raise the arch.'),
-  seed('toe-yoga', 'Toe Yoga', 'Feet', 'each-side', 'control', [], 'Alternate lifting the big toe alone and the four smaller toes alone without rolling the foot.'),
-  seed('toe-spread', 'Toe spread and relax', 'Feet', 'bilateral', 'control', [], 'Spread all toes without curling them, hold briefly, then let the feet fully relax.'),
-  seed('ball-foot-roll', 'Massage ball foot roll', 'Feet', 'each-side', 'self-massage', ['Massage ball'], 'Roll the sole slowly over a ball with light pressure, avoiding any sharp or bruised area.'),
-  seed('foot-tripod-balance', 'Foot Tripod Balance', 'Feet', 'each-side', 'control', ['Stable support'], 'Balance with light support while keeping pressure under the heel, big-toe base, and little-toe base.'),
-
-  seed('worlds-greatest-stretch', "World's Greatest Stretch", 'Full body', 'each-side', 'mobility', ['Mat'], 'Step into a long lunge, place the inside hand down, rotate the other arm upward, then return with control.'),
-  seed('inchworm', 'Inchworm', 'Full body', 'alternating', 'mobility', [], 'Hinge forward, walk the hands to a comfortable plank, pause, and walk back without rushing.'),
-  seed('leg-swings-front-back', 'Leg Swings Front/Back', 'Full body', 'each-side', 'mobility', ['Stable support'], 'Use support and swing one leg forward and back from the hip while the trunk stays tall.'),
-  seed('leg-swings-side', 'Leg Swings Side-to-Side', 'Full body', 'each-side', 'mobility', ['Stable support'], 'Use support and swing one leg across and away from the body without twisting the pelvis.'),
-  seed('walking-lunge-reach', 'Walking lunge with reach', 'Full body', 'alternating', 'mobility', [], 'Step into a shallow lunge and reach overhead without arching, then step through and alternate.'),
-  seed('squat-to-stand', 'Squat to stand', 'Full body', 'bilateral', 'mobility', [], 'Hinge to hold the shins or toes, lower into a comfortable squat, lift the chest, then stand.'),
-  seed('lunge-with-rotation', 'Reverse Lunge with Rotation', 'Full body', 'alternating', 'mobility', [], 'Step back into a shallow lunge and rotate the trunk toward the front leg before returning to stand.'),
-  seed('lateral-squat-reach', 'Lateral Squat to Reach', 'Full body', 'alternating', 'mobility', [], 'Shift into a comfortable lateral squat and reach both hands forward while the working knee tracks over the foot.'),
-  seed('a-march-in-place', 'A-March in Place', 'Full body', 'alternating', 'activation', [], 'Drive one knee up with the opposite arm, pause in a tall posture, and switch sides with quiet foot contacts.'),
-  seed('high-knees-in-place', 'High Knees in Place', 'Full body', 'alternating', 'activation', [], 'Run lightly in place with quick knee lifts while staying tall and keeping foot contacts under the hips.'),
-]
-
-export const RECOVERY_EXERCISES = Object.freeze(Object.fromEntries(SEEDS.map((item) => [item.id, Object.freeze(buildExercise(item))])))
-export const RECOVERY_EXERCISE_LIST = Object.freeze(Object.values(RECOVERY_EXERCISES))
-export const RECOVERY_CATEGORIES = Object.freeze([...new Set(RECOVERY_EXERCISE_LIST.map((item) => item.category))])
-
-const ATHLETIC_ROUTINE_IDS = RECOVERY_EXERCISE_LIST
-  .filter((item) => !['breathing', 'active-recovery'].includes(item.movementType))
-  .map((item) => item.id)
-
-export const RECOVERY_ROUTINE_IDS = Object.freeze({
-  session: ATHLETIC_ROUTINE_IDS,
-  competition: RECOVERY_EXERCISE_LIST.filter((item) => !['breathing', 'active-recovery', 'self-massage'].includes(item.movementType) && item.sportDemandTags.some((tag) => ['lower-body', 'running', 'jumping', 'landing', 'change-of-direction', 'full-body'].includes(tag))).map((item) => item.id),
-  quick: ['cat-cow', 'hip-switches-90-90', 'ankle-knee-to-wall', 'shoulder-cars', 'glute-bridge', 'cossack-shift', 'toe-raises', 'dead-bug'],
-  'full-body': ['cat-cow', 'thread-the-needle', 'shoulder-cars', 'worlds-greatest-stretch', 'cossack-shift', 'ankle-knee-to-wall', 'glute-bridge', 'dead-bug'],
-  flexibility: idsByType('flexibility'),
-  targeted: ATHLETIC_ROUTINE_IDS,
-  'recovery-day': ATHLETIC_ROUTINE_IDS,
-  'pre-event': RECOVERY_EXERCISE_LIST.filter((item) => !['flexibility', 'self-massage', 'breathing'].includes(item.movementType)).map((item) => item.id),
-  mobility: idsByType('mobility'),
-  general: ATHLETIC_ROUTINE_IDS,
-})
-
-export function getCatalogExercises(ids = RECOVERY_ROUTINE_IDS.general) {
-  return ids.map((id) => RECOVERY_EXERCISES[id]).filter(Boolean).map(cloneExercise)
+export function getCatalogExercises(ids = []) {
+  return ids.map(getMovementById).filter(Boolean).map(cloneMovement)
 }
 
 export function resolveVettedExerciseSelections(selections = []) {
-  return selections.map((selection, sequenceIndex) => {
-    const id = typeof selection === 'string' ? selection : selection?.id
-    const vetted = RECOVERY_EXERCISES[id]
-    if (!vetted) return null
-    const requestedDose = typeof selection === 'object' ? (selection.dose ?? selection) : null
-    const allowedDose = resolveRequestedDose(requestedDose, vetted.doseModels)
-    const side = normalizeRequestedSide(selection?.side, vetted.laterality)
-    return { ...cloneExercise(vetted), dose: allowedDose, rationale: String(selection?.rationale ?? '').trim(), sequenceIndex, ...(side ? { side } : {}) }
+  return selections.map((selection) => {
+    const id = typeof selection === 'string' ? selection : selection?.movementId ?? selection?.id
+    const movement = getMovementById(id)
+    if (!movement) return null
+    const prescription = normalizePrescription(selection?.prescription ?? selection?.dose, movement)
+    return withPrescription(cloneMovement(movement), prescription)
   }).filter(Boolean)
 }
 
-function resolveRequestedDose(requested, doseModels) {
-  const fallback = { ...doseModels[0] }
-  if (!requested || !doseModels.some((dose) => dose.model === requested.model)) return fallback
-  if (requested.model === 'timer') return {
-    model: 'timer',
-    durationSeconds: clamp(Number(requested.durationSeconds), 15, 90, fallback.durationSeconds),
-    sets: clamp(Number(requested.sets), 1, 4, fallback.sets),
-    restSeconds: clamp(Number(requested.restSeconds), 0, 90, fallback.restSeconds),
-  }
+export function estimateExerciseSeconds(exercise, transitionSeconds = exercise?.estimatedTransitionSeconds ?? 10) {
+  const prescription = exercise?.prescription ?? exercise?.dose ?? {}
+  const sides = exercise?.unilateral && !/left|right/i.test(String(exercise?.side ?? '')) ? 2 : 1
+  const sets = Math.max(1, Number(prescription.sets ?? exercise?.sets) || 1)
+  const active = prescription.type === 'time' || prescription.model === 'timer'
+    ? Math.max(1, Number(prescription.durationSeconds ?? exercise?.durationSeconds) || 0)
+    : Math.max(1, Number(prescription.reps ?? exercise?.reps) || 0) * Math.max(2, Number(prescription.secondsPerRep ?? prescription.tempoSecondsPerRep ?? exercise?.secondsPerRep) || 3)
+  return sides * (sets * active + Math.max(0, sets - 1) * Math.max(0, Number(prescription.restSeconds ?? exercise?.restSeconds) || 0)) + Math.max(0, Number(transitionSeconds) || 0)
+}
+
+function buildMovement(seed) {
+  const prescriptionType = inferPrescriptionType(seed.name)
+  const unilateral = inferUnilateral(seed.name)
+  const equipment = inferEquipment(seed.name)
+  const categories = inferCategories(seed.name, seed.category)
+  const routineTypes = inferRoutineTypes(seed.name, seed.category, categories)
+  const defaults = prescriptionType === 'time'
+    ? { durationSeconds: inferHoldSeconds(seed.name), reps: null, sets: 1, restSeconds: 0, secondsPerRep: null }
+    : { durationSeconds: null, reps: inferReps(seed.name), sets: 1, restSeconds: 0, secondsPerRep: inferSecondsPerRep(seed.name) }
+  const instruction = INSTRUCTION_OVERRIDES[seed.name] ?? inferInstruction(seed, prescriptionType)
+  const shouldFeel = inferShouldFeel(seed, categories)
+  const avoid = inferAvoid(seed.name, prescriptionType)
+  const painSensitiveRegions = [...new Set(seed.bodyRegions.flatMap(expandPainRegion))]
+  const id = ID_OVERRIDES[seed.name] ?? slugify(seed.name)
+  const prescription = prescriptionType === 'time'
+    ? { type: 'time', durationSeconds: defaults.durationSeconds, sets: 1, restSeconds: 0 }
+    : { type: 'reps', reps: defaults.reps, sets: 1, restSeconds: 0, secondsPerRep: defaults.secondsPerRep }
+  const laterality = unilateral ? 'each-side' : /alternat|switch|march|wiper|circle|openers|closers/i.test(seed.name) ? 'alternating' : 'bilateral'
+  const targetAreas = seed.targetAreas[0] === 'multiple_regions' ? seed.bodyRegions : seed.targetAreas
+
   return {
-    model: 'reps',
-    reps: clamp(Number(requested.reps), 3, 20, fallback.reps),
-    sets: clamp(Number(requested.sets), 1, 4, fallback.sets),
-    restSeconds: clamp(Number(requested.restSeconds), 0, 90, fallback.restSeconds),
-    tempoSecondsPerRep: clamp(Number(requested.tempoSecondsPerRep), 2, 8, fallback.tempoSecondsPerRep),
-  }
-}
-
-function normalizeRequestedSide(value, laterality) {
-  if (laterality !== 'each-side') return ''
-  const side = String(value ?? '').toLowerCase()
-  if (side.startsWith('left')) return 'Left side'
-  if (side.startsWith('right')) return 'Right side'
-  return ''
-}
-
-function clamp(value, minimum, maximum, fallback) {
-  return Number.isFinite(value) ? Math.max(minimum, Math.min(maximum, Math.round(value))) : fallback
-}
-
-export function estimateExerciseSeconds(exercise, transitionSeconds = exercise.estimatedTransitionSeconds ?? 12) {
-  const dose = exercise.dose ?? exercise.doseModels?.[0] ?? exercise
-  const sides = exercise.laterality === 'each-side' && !/left|right/i.test(exercise.side ?? '') ? 2 : 1
-  const sets = Math.max(1, Number(dose.sets) || 1)
-  const active = dose.model === 'timer'
-    ? Math.max(1, Number(dose.durationSeconds) || 0)
-    : Math.max(1, Number(dose.reps) || 0) * Math.max(1, Number(dose.tempoSecondsPerRep) || 4)
-  return sides * (sets * active + Math.max(0, sets - 1) * Math.max(0, Number(dose.restSeconds) || 0)) + Number(transitionSeconds || 0)
-}
-
-function buildExercise(item) {
-  const category = CATEGORY_PROFILES[item.category]
-  const isTimed = ['flexibility', 'isometric', 'breathing', 'self-massage', 'active-recovery'].includes(item.movementType)
-  const doseModels = isTimed
-    ? [timerDose(item.movementType === 'active-recovery' ? 120 : item.movementType === 'breathing' ? 60 : 30), timerDose(item.movementType === 'active-recovery' ? 180 : 45)]
-    : [repDose(item.movementType === 'activation' ? 10 : 6), repDose(item.movementType === 'activation' ? 12 : 8)]
-  const setup = setupFor(item)
-  return {
-    id: item.id,
-    name: item.name,
-    canonicalName: item.name,
-    aliases: item.aliases,
-    category: item.category,
-    bodyRegion: item.category,
-    area: item.category,
-    targetBodyParts: category.targetBodyParts,
-    targetMuscles: category.targetMuscles,
-    movementType: item.movementType,
-    laterality: item.laterality,
-    side: item.laterality === 'each-side' ? 'Each side' : item.laterality === 'alternating' ? 'Alternating' : 'Both sides',
-    equipment: item.equipment,
-    sportDemandTags: category.sportDemandTags,
-    activityDemandTags: category.sportDemandTags,
-    recoveryGoalTags: recoveryTags(item),
-    target: [...category.sportDemandTags, ...recoveryTags(item)],
-    difficulty: 'Foundational',
-    position: positionFor(item),
-    contraindications: contraindicationsFor(item),
-    painExclusions: painExclusionsFor(item),
-    setup: [setup],
-    steps: [item.action, completionCue(item)],
-    movement: item.action,
-    completionCue: completionCue(item),
-    whatYouShouldFeel: [feelFor(item)],
-    expectedSensation: feelFor(item),
-    feel: feelFor(item),
-    thingsToAvoid: avoidFor(item),
+    id,
+    name: seed.name,
+    canonicalName: seed.name,
+    categories,
+    category: humanize(seed.category),
+    routineTypes,
+    bodyRegions: seed.bodyRegions,
+    bodyRegion: humanize(seed.bodyRegions[0]),
+    targetAreas,
+    targetBodyParts: seed.bodyRegions.map(humanize),
+    targetMuscles: targetAreas.map(humanize),
+    equipment,
+    difficulty: /copenhagen|single-leg pogo|squat jump|skater hop|reverse nordic|hip airplane/i.test(seed.name) ? 'intermediate' : 'beginner',
+    prescriptionType,
+    defaults,
+    prescription,
+    dose: toLegacyDose(prescription),
+    doseModels: [toLegacyDose(prescription)],
+    doseModel: prescriptionType === 'time' ? 'timer' : 'reps',
+    unilateral,
+    laterality,
+    side: unilateral ? 'Each side' : laterality === 'alternating' ? 'Alternating' : 'Both sides',
+    instructions: instruction,
+    instruction,
+    setup: instruction.split(/(?<=[.!?])\s+/)[0],
+    movement: instruction,
+    completionCue: prescriptionType === 'time' ? 'Ease out of the position when the time ends.' : 'Return to the start under control to complete each repetition.',
+    steps: [instruction, prescriptionType === 'time' ? 'Hold only in a comfortable range, then ease out slowly.' : 'Move smoothly and finish every repetition under control.'],
+    shouldFeel,
+    whatYouShouldFeel: shouldFeel,
+    feel: shouldFeel[0],
+    avoid,
+    thingsToAvoid: avoid,
     stopConditions: UNIVERSAL_STOP_CONDITIONS,
+    painSensitiveRegions,
+    painExclusions: painSensitiveRegions.map((region) => `${region}_pain`),
+    contraindications: painSensitiveRegions.map((region) => `${region}_symptoms`),
+    tags: [...new Set([seed.category, ...seed.bodyRegions, ...targetAreas, ...categories, ...routineTypes])],
+    movementType: inferMovementType(categories),
+    position: inferPosition(seed.name),
+    estimatedTransitionSeconds: 10,
+    durationSeconds: defaults.durationSeconds ?? 0,
+    reps: defaults.reps ?? 0,
+    sets: 1,
+    restSeconds: 0,
+    secondsPerRep: defaults.secondsPerRep ?? 0,
+    purpose: `Support comfortable ${humanize(seed.bodyRegions[0]).toLowerCase()} movement for this routine's goal.`,
     substitutions: [],
-    progressions: ['Use the second allowed dose only when every repetition or breath remains smooth and symptom-free.'],
-    regressions: ['Reduce the range, use stable support, or stop and choose a different body area.'],
-    purpose: `Support ${item.category.toLowerCase()} recovery with controlled ${item.movementType.replace('-', ' ')} work.`,
-    doseModels,
-    dose: doseModels[0],
-    doseModel: doseModels[0].model,
-    durationSeconds: doseModels[0].durationSeconds ?? 0,
-    reps: doseModels[0].reps ?? 0,
-    sets: doseModels[0].sets,
-    restSeconds: doseModels[0].restSeconds,
-    estimatedTransitionSeconds: item.movementType === 'active-recovery' ? 20 : 12,
-    catalogVersion: RECOVERY_CATALOG_VERSION,
+    catalogVersion: MOBILITY_CATALOG_VERSION,
   }
 }
 
-function seed(id, name, category, laterality, movementType, equipment, action, aliases = []) {
-  return { id, name, category, laterality, movementType, equipment, action, aliases }
+function group(category, bodyRegions, targetAreas, names) {
+  return { category, bodyRegions, targetAreas, names: names.trim().split('\n').map((name) => name.trim()).filter(Boolean) }
 }
 
-function profile(targetBodyParts, targetMuscles, sportDemandTags) { return { targetBodyParts, targetMuscles, sportDemandTags } }
-function timerDose(durationSeconds, sets = 1, restSeconds = 0) { return { model: 'timer', durationSeconds, sets, restSeconds } }
-function repDose(reps, sets = 1, tempoSecondsPerRep = 4, restSeconds = 0) { return { model: 'reps', reps, sets, tempoSecondsPerRep, restSeconds } }
-function idsByTags(tags) { return RECOVERY_EXERCISE_LIST.filter((item) => tags.some((tag) => item.target.includes(tag))).map((item) => item.id) }
-function idsByType(type) { return RECOVERY_EXERCISE_LIST.filter((item) => item.movementType === type).map((item) => item.id) }
-function cloneExercise(item) { return { ...item, dose: { ...item.dose }, doseModels: item.doseModels.map((dose) => ({ ...dose })), setup: [...item.setup], steps: [...item.steps], whatYouShouldFeel: [...item.whatYouShouldFeel], thingsToAvoid: [...item.thingsToAvoid], stopConditions: [...item.stopConditions] } }
-function sameDose(first, second) { return ['model', 'durationSeconds', 'reps', 'sets', 'restSeconds', 'tempoSecondsPerRep'].every((key) => (first[key] ?? null) === (second[key] ?? null)) }
-
-function recoveryTags(item) {
-  const tags = ['recovery']
-  if (['mobility', 'control'].includes(item.movementType)) tags.push('mobility', 'pre-event')
-  if (item.movementType === 'flexibility') tags.push('flexibility', 'post-session')
-  if (item.movementType === 'breathing') tags.push('downshift', 'post-session')
-  if (item.movementType === 'active-recovery') tags.push('active-recovery', 'recovery-day')
-  if (item.movementType === 'activation') tags.push('activation', 'pre-event')
-  return tags
+function inferCategories(name, category) {
+  const categories = []
+  if (/stretch|fold|hold|pose|prayer/i.test(name)) categories.push('flexibility')
+  if (/hop|skip|jump|jack|pogo|ankle bounce/i.test(name)) categories.push('plyometrics')
+  if (/hop|skip|jump|jack|fast feet|high knees|butt kicks|snap down|a-march|lunge switch|ankle bounce/i.test(name)) categories.push('warm_up')
+  if (/bridge|plank|raise|curl|press|row|walk|squat|lunge|thrust|kick|clamshell|hydrant|nordic|step-up/i.test(name)) categories.push('activation')
+  if (/balance|stability|airplane|toe tap|clock reach|three-way reach/i.test(name)) categories.push('balance')
+  if (category === 'dynamic_warm_up') categories.push('warm_up')
+  if (categories.length === 0 || /mobility|rotation|circle|rock|switch|car|slide|reach|cat-cow|open book|thread|point-and-flex|yoga/i.test(name)) categories.unshift('mobility')
+  return [...new Set(categories)]
 }
 
-function setupFor(item) {
-  if (item.movementType === 'active-recovery') return 'Choose a safe, level environment and begin at an effort where you can speak in full sentences.'
-  if (item.position === 'lying') return `Use a mat or comfortable surface and set up for ${item.name.toLowerCase()} with the head and spine supported.`
-  if (item.position === 'quadruped') return 'Start on hands and knees with hands below shoulders and knees below hips; add padding as needed.'
-  if (item.position === 'seated') return 'Sit on a stable surface with both feet supported and the trunk comfortably tall.'
-  return `Use ${item.equipment.length ? item.equipment.join(' and ').toLowerCase() : 'a stable support if needed'} and begin in a balanced, pain-free position.`
+function inferRoutineTypes(name, category, categories) {
+  if (category === 'dynamic_warm_up') return ['warm_up']
+  const types = ['custom_mobility']
+  const upper = ['shoulders', 'neck_upper_back', 'wrists_forearms', 'thoracic_spine', 'core'].includes(category)
+  const lower = ['hips', 'hamstrings', 'quadriceps', 'ankles_feet', 'glutes', 'adductors_groin', 'balance_stability'].includes(category)
+  if (upper) types.push('upper_body')
+  if (lower) types.push('lower_body')
+  types.push('full_body')
+  if (categories.includes('flexibility')) types.push('flexibility')
+  if (!isDemanding(name)) types.push('session_recovery', 'light_recovery')
+  if (!categories.includes('flexibility') || /dynamic|rock|switch|circle|car|reach|squat-to-stand|inchworm|leg swing/i.test(name)) types.push('warm_up')
+  return [...new Set(types)]
 }
 
-function positionFor(item) {
-  if (/supine|dead bug|heel slide|bridge|90\/90 breathing|legs-up|floor chest/.test(item.name.toLowerCase())) return 'lying'
-  if (/prone|crocodile|cobra/.test(item.name.toLowerCase())) return 'lying'
-  if (/quadruped|cat-cow|bird dog|thread|rock-back/.test(item.name.toLowerCase())) return 'quadruped'
-  if (/seated|butterfly|90\/90 hip|shin-box/.test(item.name.toLowerCase())) return 'seated'
-  return 'standing or supported'
+function inferEquipment(name) {
+  if (/band|pallof|anti-rotation/i.test(name)) return ['resistance_band']
+  if (/bench|chair|elevated|rear-foot elevated|step-up/i.test(name)) return ['bench_or_chair']
+  return []
 }
 
-function completionCue(item) {
-  if (['flexibility', 'isometric', 'breathing', 'self-massage', 'active-recovery'].includes(item.movementType)) return 'Continue only for the prescribed time, then exit the position or slow down gradually.'
-  if (item.laterality === 'alternating') return 'Complete both directions with the same controlled range.'
-  return 'Return to the starting position under control to complete the repetition.'
+function inferPrescriptionType(name) {
+  return /stretch|hold|plank$|bear plank$|tuck hold|chin tuck hold|deep squat hold|split squat hold|prayer|child's pose|wall sit/i.test(name) ? 'time' : 'reps'
 }
 
-function feelFor(item) {
-  if (item.movementType === 'flexibility') return `Mild, broad tension around the ${item.category.toLowerCase()}, never pinching or joint pain.`
-  if (item.movementType === 'self-massage') return 'Tolerable pressure in soft tissue that eases when pressure is reduced.'
-  if (item.movementType === 'breathing') return 'Quiet expansion through the lower ribs with the neck and shoulders staying relaxed.'
-  if (item.movementType === 'active-recovery') return 'Easy whole-body movement that leaves breathing controlled and symptoms unchanged or better.'
-  return `Smooth muscular work and controlled motion around the ${item.category.toLowerCase()} without joint pain.`
+function inferUnilateral(name) {
+  return /single[- ]leg|single[- ]arm|side-lying|half-kneeling|one arm|one leg|open book|figure-four|pigeon|couch|calf stretch|soleus stretch|hamstring stretch|quad stretch|hip flexor stretch|adductor stretch|upper-trap|levator|cross-body|triceps|posterior shoulder|doorway|pec stretch|wrist flexor|wrist extensor|straddle side reach|side plank|side lunge hold|cossack|lateral step-up|step-up|hip airplane/i.test(name)
 }
 
-function avoidFor(item) {
-  const avoid = ['Forcing range or using momentum', 'Holding your breath unless the movement is a breathing drill']
-  if (item.laterality === 'each-side') avoid.push('Using a visibly different range on one side to push through symptoms')
-  if (item.movementType === 'flexibility') avoid.push('Bouncing or turning mild tension into pain')
-  if (item.movementType === 'active-recovery') avoid.push('Letting the effort rise above an easy conversational pace')
-  return avoid
+function inferHoldSeconds(name) { return /flexibility|fold|pigeon|frog|couch|straddle|butterfly/i.test(name) ? 40 : 30 }
+function inferReps(name) { return /circle|car|rotation|rock|switch|reach|raise|lunge|squat|bridge|kick|march|tap/i.test(name) ? 8 : 10 }
+function inferSecondsPerRep(name) { return /hop|skip|jack|fast feet|high knees|butt kicks|pogo/i.test(name) ? 2 : /car|controlled|rotation|nordic/i.test(name) ? 4 : 3 }
+
+function inferInstruction(seed, prescriptionType) {
+  const { name } = seed
+  const lower = name.toLowerCase()
+  const region = humanize(seed.bodyRegions[0]).toLowerCase()
+
+  if (/90\/90|shin box/.test(lower)) return 'Sit with both knees bent and feet wider than your hips. Lower both knees toward one side while keeping your chest tall, then return through center or hold the end position as named.'
+  if (/dead bug/.test(lower)) return 'Lie on your back with your arms up and hips and knees bent to 90 degrees. Brace gently, lower the named arm-and-leg pattern without letting your low back lift, then return with control.'
+  if (/bird dog/.test(lower)) return 'Start on hands and knees with your spine neutral. Reach one arm and the opposite leg long without rotating your hips, then return slowly or hold as named.'
+  if (/glute bridge|frog pump/.test(lower)) return 'Lie on your back with knees bent and feet planted; for a frog pump, place the soles of your feet together. Press through your feet, squeeze your glutes, and lift your hips without arching your low back.'
+  if (/hip thrust/.test(lower)) return 'Place your upper back against a stable bench or chair with your feet flat. Drive through your feet and lift your hips until your trunk and thighs form a straight line, then lower under control.'
+  if (/clamshell/.test(lower)) return /reverse/.test(lower) ? 'Lie on your side with hips and knees bent and your knees together. Keep both knees touching as you lift the top foot, then lower it without rolling your pelvis backward.' : 'Lie on your side with hips and knees bent and feet together. Keep your pelvis stacked as you open the top knee, then close it slowly without rolling backward.'
+  if (/fire hydrant/.test(lower)) return 'Start on hands and knees with your trunk still. Lift one bent knee out to the side without hiking or rotating your pelvis, then lower it with control.'
+  if (/donkey kick|quadruped hip extension/.test(lower)) return 'Start on hands and knees and brace lightly. Drive one heel up and back by extending the hip while keeping your knee bent and low back quiet, then return slowly.'
+  if (/side-lying hip abduction/.test(lower)) return 'Lie on your side with the bottom knee bent and top leg straight. Keep the top toes facing forward as you lift the leg from the outer hip, then lower without rolling backward.'
+  if (/side-lying adductor raise/.test(lower)) return 'Lie on your side with the top leg crossed in front and the bottom leg straight. Lift the bottom leg a few inches using the inner thigh, then lower it slowly.'
+  if (/copenhagen/.test(lower)) return 'Lie on your side with the top knee supported on a stable bench and your elbow beneath your shoulder. Lift your hips and press the supported inner thigh down so your trunk stays in one straight line.'
+  if (/hip flexor/.test(lower)) return /standing/.test(lower) ? 'Take a short split stance and tuck your pelvis slightly. Squeeze the glute of the back leg and shift forward until you feel the front of that hip lengthen.' : 'Kneel with one foot in front and the other knee down. Tuck your pelvis, squeeze the glute of the kneeling side, and shift forward without arching your back.'
+  if (/quad stretch|heel-to-glute|quad pull/.test(lower)) return /side-lying|prone/.test(lower) ? 'Lie in the named position, bend one knee, and hold that ankle or pant leg. Draw the heel toward your glute while keeping both knees close and your pelvis still.' : 'Stand tall near support, bend one knee, and hold that ankle or pant leg behind you. Keep your knees close and gently tuck your pelvis instead of arching your back.'
+  if (/calf stretch|soleus stretch/.test(lower)) return `Face a wall in a split stance with both feet pointing forward. Keep the back heel down and ${/soleus|bent-knee/.test(lower) ? 'bend the back knee slightly' : 'keep the back knee straight'} as you shift toward the wall.`
+  if (/hamstring stretch|half-split|toe reach|forward fold/.test(lower)) return /supine/.test(lower) ? 'Lie on your back and raise one leg, holding behind the thigh or using a strap. Gently straighten the knee until the back of the thigh lengthens while your pelvis stays heavy.' : 'Place the working leg straight in front of you with the heel down and toes up. Hinge forward from your hips with a long spine until you feel the back of the thigh lengthen.'
+  if (/figure-four|glute stretch|pigeon/.test(lower)) return /chair|seated/.test(lower) ? 'Sit tall and cross one ankle over the opposite thigh. Keep the foot flexed and hinge forward from your hips until you feel the outside of the crossed-leg hip.' : 'Cross one ankle over the opposite thigh while lying down, or place the front shin across the floor for pigeon. Keep the front foot active and shift only far enough to feel the outside of the hip.'
+  if (/adductor|groin|frog|butterfly|straddle/.test(lower) && /stretch|fold|hold|rock/.test(lower)) return /butterfly/.test(lower) ? 'Sit with the soles of your feet together and let your knees open comfortably. Hold your ankles and hinge forward with a long spine without pressing the knees down.' : /frog/.test(lower) ? 'Start on hands and knees, slide your knees apart, and keep your lower legs roughly parallel. Rock your hips backward or hold when you feel a comfortable inner-thigh stretch.' : 'Take a wide stance or seated straddle with toes pointing up or forward. Shift or hinge toward the named side while keeping the opposite leg long and both feet grounded.'
+  if (/cross-body shoulder|posterior shoulder/.test(lower)) return 'Bring one arm across your chest at shoulder height. Use the other forearm to draw it closer while keeping the stretching shoulder down and away from your ear.'
+  if (/triceps stretch/.test(lower)) return 'Reach one arm overhead, bend the elbow, and let the hand move down your upper back. Use the opposite hand to guide the elbow gently without flaring your ribs.'
+  if (/doorway pec|doorway chest|wall pec|chest stretch/.test(lower)) return 'Place your forearm on a wall or doorway with the elbow near shoulder height. Step and rotate your chest away slowly while keeping the shoulder down and back.'
+  if (/lat stretch|lat-thoracic/.test(lower)) return 'Place your hands on a wall, bench, or the floor and send your hips backward. Let your chest sink between your arms while keeping your ribs gently tucked.'
+  if (/upper-trap/.test(lower)) return 'Sit or stand tall and hold the seat or reach the working arm toward the floor. Tilt the opposite ear toward the opposite shoulder without turning or forcing your neck.'
+  if (/levator/.test(lower)) return 'Sit tall, turn your head about 45 degrees away, and look down toward the opposite front pocket. Use only light hand pressure while the working shoulder stays down.'
+  if (/neck rotation/.test(lower)) return 'Sit or stand tall with your chin level. Turn your head slowly to look over one shoulder, return to center, and repeat without tipping or forcing the range.'
+  if (/chin tuck/.test(lower)) return 'Sit or lie with your eyes level and the back of your head supported if needed. Slide your chin straight backward to make a small double chin without looking down.'
+  if (/wrist flexor stretch/.test(lower)) return 'Extend one arm with the palm up and elbow straight. Use the other hand to guide the fingers down and back until the palm-side forearm stretches.'
+  if (/wrist extensor stretch/.test(lower)) return 'Extend one arm with the palm down and elbow straight. Use the other hand to bend the wrist and fingers toward the floor until the top of the forearm stretches.'
+  if (/wrist circle/.test(lower)) return 'Hold your forearms still with relaxed hands. Draw slow circles with both wrists through a comfortable range, then reverse direction.'
+  if (/thread the needle/.test(lower)) return 'Start on hands and knees, slide one arm palm-up underneath the other, and lower that shoulder toward the floor. Return through center by pressing into the planted hand and rotating the chest open.'
+  if (/open book|side-lying thoracic rotation/.test(lower)) return 'Lie on your side with hips and knees bent and both arms reaching forward. Sweep the top arm open as your upper back rotates, keeping both knees stacked.'
+  if (/thoracic rotation/.test(lower)) return 'Set up in the named standing, seated, or kneeling position with your hips facing forward. Rotate your upper back toward the working side while your pelvis and low back stay quiet, then return to center.'
+  if (/thoracic extension|wall shoulder flexion/.test(lower)) return 'Place your hands on a wall or bench and step back. Send your chest gently down between your arms while keeping your ribs from flaring and your low back neutral.'
+  if (/cat-cow|spine flexion-extension/.test(lower)) return 'Start on hands and knees. Exhale as you round your spine, then inhale as you move through neutral into a gentle arch without forcing your neck or low back.'
+  if (/child's pose/.test(lower)) return 'Start on hands and knees, sit your hips back toward your heels, and reach both arms forward. For a side reach, walk both hands to one side while keeping your hips heavy.'
+  if (/cobra|sphinx|prone press-up/.test(lower)) return 'Lie face down with your hands or forearms beneath your shoulders. Press your chest up only as far as comfortable while your pelvis stays on the floor and your shoulders stay away from your ears.'
+  if (/wall slide|wall angel|scapular wall slide/.test(lower)) return 'Stand with your back and forearms against a wall and ribs gently down. Slide your arms upward without shrugging or letting your low back arch, then return slowly.'
+  if (/floor angel/.test(lower)) return 'Lie on your back with knees bent and arms on the floor in a goalpost shape. Slide your arms overhead while keeping your ribs down, then return without forcing your hands flat.'
+  if (/scapular push-up/.test(lower)) return 'Begin in a high plank or on hands and knees with elbows straight. Let your chest sink slightly between your shoulders, then push the floor away to spread your shoulder blades.'
+  if (/scapular retraction|band row/.test(lower)) return 'Hold the band or set your arms in front with your ribs stacked over your pelvis. Pull your elbows back and draw your shoulder blades gently together, then return without shrugging.'
+  if (/serratus punch/.test(lower)) return 'Hold the band or reach one arm toward the ceiling with the elbow straight. Push the hand farther away by sliding the shoulder blade around your ribs, then return without shrugging.'
+  if (/pallof|anti-rotation/.test(lower)) return 'Stand or kneel sideways to an anchored band and hold it at your chest. Press your hands straight forward while resisting the band’s pull to rotate you, then return slowly.'
+  if (/plank/.test(lower)) return 'Place your elbows or hands beneath your shoulders and extend your body into one straight line. Brace your trunk and squeeze your glutes so your hips do not sag, hike, or rotate.'
+  if (/reverse crunch/.test(lower)) return 'Lie on your back with hips and knees bent. Curl your pelvis toward your ribs to lift your tailbone slightly, then lower without swinging your legs.'
+  if (/leg lower|heel tap/.test(lower)) return 'Lie on your back with your low back gently supported and hips and knees bent. Lower the named heel or leg without letting your ribs flare or back lift, then return with control.'
+  if (/mcgill curl-up/.test(lower)) return 'Lie on your back with one knee bent, the other leg straight, and hands supporting the natural curve of your low back. Lift your head and shoulders slightly as one unit without flattening or rounding your lower spine.'
+  if (/squat|cossack/.test(lower)) return /cossack|lateral/.test(lower) ? 'Take a wide stance and shift your hips toward one side as that knee bends and the opposite leg stays long. Keep the working foot flat and chest tall, using support if needed.' : 'Stand with feet about shoulder-width apart and brace lightly. Sit your hips down and back while your knees track over your toes, then press through your whole feet to stand.'
+  if (/lunge/.test(lower)) return 'Step into the named lunge stance with both feet stable. Lower by bending both knees while keeping the front knee over the middle toes, then push through the front foot to return.'
+  if (/single-leg rdl|hip airplane/.test(lower)) return 'Stand on one leg with a soft knee and hold support if needed. Hinge at the hip as the free leg reaches back, keeping your pelvis level before returning to tall.'
+  if (/step-up/.test(lower)) return 'Place one whole foot on a stable step or bench. Drive through that foot to stand tall on the platform without pushing off the floor leg, then lower slowly.'
+  if (/calf raise|heel raise/.test(lower)) return 'Stand tall with your feet flat and use support as needed. Press through the balls of your feet to lift your heels straight up, pause, then lower slowly.'
+  if (/toe raise|tibialis raise/.test(lower)) return 'Stand with your back near a wall and heels planted. Lift the front of both feet toward your shins without rocking your hips, then lower with control.'
+  if (/toe yoga|big-toe lift|four-toe lift|toe spread|short-foot/.test(lower)) return 'Keep your heel and the ball of your foot planted. Move only the named toes, or gently draw the ball of the big toe toward the heel, without curling all of the toes.'
+  if (/ankle alphabet/.test(lower)) return 'Sit with one foot lifted off the floor and keep your lower leg still. Trace the alphabet in the air with your big toe, using the ankle rather than the whole leg.'
+  if (/ankle circle|hip circle|arm circle|shoulder circle/.test(lower)) return `Keep the rest of your body still and draw slow circles with the ${/ankle/.test(lower) ? 'foot from the ankle' : /hip/.test(lower) ? 'knee from the hip' : 'arms from the shoulders'}. Use a smooth range, then reverse direction.`
+  if (/\bcar\b/.test(lower)) return `Brace the rest of your body and slowly circle the working ${region.replace(/s$/, '')} through the largest pain-free range you can control. Move deliberately through every part of the circle before reversing direction.`
+  if (/balance|clock reach|three-way reach|toe tap/.test(lower)) return 'Stand on one leg near a stable support with the knee softly bent. Keep your pelvis level as the free foot reaches or taps in the named directions, returning to center each time.'
+  if (/leg swing/.test(lower)) return 'Stand tall beside a stable support and keep your trunk still. Swing one leg in the named direction with a small controlled range, gradually increasing only if it stays smooth.'
+  if (/hamstring sweep|hamstring scoop/.test(lower)) return 'Step one heel forward with the toes lifted and keep that knee nearly straight. Push your hips back and sweep both hands past the foot, then stand and switch sides.'
+  if (/knee hug/.test(lower)) return 'Stand tall, bring one knee toward your chest, and briefly hold the shin without leaning backward. Release, step forward, and repeat on the other side.'
+  if (/inchworm|walkout/.test(lower)) return 'Hinge forward, place your hands on the floor, and walk them out to a strong high plank. Walk your hands back toward your feet and stand without rushing the transition.'
+  if (/hop|skip|jump|jack|fast feet|high knees|butt kicks|pogo/.test(lower)) return `Begin in an athletic stance and perform ${name.toLowerCase()} with light, quiet contacts. Keep your knees aligned over your toes and stop before speed causes sloppy landings.`
+  if (/rock/.test(lower)) return `Set up in the named position and keep the working joint aligned. Shift your weight slowly into the ${region} until you reach a comfortable limit, then return without bouncing.`
+  if (/rotation|wiper|switch/.test(lower)) return `Set up in the named position with your trunk supported. Move through the ${name.toLowerCase()} slowly while the rest of your body stays quiet, then return through center.`
+  if (/raise|abduction|extension|kick/.test(lower)) return `Use a stable position and keep your trunk and pelvis still. Move the working limb in the direction named by ${name.toLowerCase()}, pause briefly, then return without momentum.`
+  if (prescriptionType === 'time') return `Move slowly into the ${name.toLowerCase()} position until you feel comfortable tension around the ${region}. Keep breathing and hold without bouncing, pinching, or forcing a deeper range.`
+  return `Set your body in the starting position for ${name.toLowerCase()} and keep the ${region} aligned. Perform the named motion slowly through a pain-free range, pause with control, and return to the exact start position.`
 }
 
-function contraindicationsFor(item) {
-  const values = ['medical-restriction-for-target-area']
-  if (item.movementType === 'self-massage') values.push('acute-swelling', 'bruising')
-  if (item.equipment.includes('Pool')) values.push('open-wound', 'unsafe-water-access')
-  return values
+function inferShouldFeel(seed, categories) {
+  if (categories.includes('flexibility')) return [`gentle, broad tension around the ${humanize(seed.bodyRegions[0]).toLowerCase()}`, 'steady breathing with no pinching or sharp pain']
+  if (categories.includes('warm_up')) return ['light, coordinated movement', 'gradually increasing warmth without fatigue']
+  return [`controlled muscular work around the ${humanize(seed.bodyRegions[0]).toLowerCase()}`, 'smooth motion without joint pain']
 }
 
-function painExclusionsFor(item) {
-  const words = item.category.toLowerCase().split(/\s+|\//).filter((word) => word.length > 3)
-  return [...new Set(words.map((word) => `${word.replace(/s$/, '')}-pain`))]
+function inferAvoid(name, prescriptionType) {
+  const avoid = prescriptionType === 'time' ? ['bouncing or forcing a deeper range', 'holding your breath'] : ['rushing or using momentum', 'losing control of the starting position']
+  if (/neck/i.test(name)) avoid.unshift('forcing or circling the neck aggressively')
+  if (/hop|jump|pogo/i.test(name)) avoid.push('hard, noisy landings or continuing when coordination fades')
+  return avoid.slice(0, 3)
 }
+
+function isDemanding(name) { return /jump|hop|pogo|fast feet|high knees|butt kicks|a-skip|lunge switch|copenhagen|reverse nordic|step-up/i.test(name) }
+function inferMovementType(categories) { return categories.includes('flexibility') ? 'flexibility' : categories.includes('warm_up') ? 'dynamic' : categories.includes('activation') ? 'activation' : 'mobility' }
+function inferPosition(name) { return /supine|dead bug|bridge|floor angel|reverse crunch|leg lower/i.test(name) ? 'lying' : /prone|pigeon|cobra/i.test(name) ? 'prone' : /quadruped|bird dog|cat-cow|thread|rock-back|fire hydrant|donkey kick/i.test(name) ? 'quadruped' : /seated|straddle|butterfly|90\/90|shin box/i.test(name) ? 'seated' : /kneeling|half-kneeling/i.test(name) ? 'kneeling' : 'standing' }
+
+function expandPainRegion(region) {
+  const map = { full_body: ['neck', 'shoulder', 'back', 'hip', 'knee', 'ankle'], thoracic_spine: ['back', 'rib'], upper_back: ['back', 'shoulder'], shoulders: ['shoulder'], scapular_region: ['shoulder', 'back'], quadriceps: ['thigh', 'knee'], hamstrings: ['hamstring', 'hip', 'knee'], hips: ['hip', 'groin'], adductors: ['groin', 'hip'], groin: ['groin', 'hip'], glutes: ['hip', 'back'], core: ['back', 'abdomen'], trunk: ['back', 'abdomen'], ankles: ['ankle'], calves: ['calf', 'ankle'], feet: ['foot', 'ankle'], wrists: ['wrist'], forearms: ['wrist', 'forearm'], neck: ['neck'], balance: ['ankle', 'knee', 'hip'] }
+  return map[region] ?? [region.replace(/s$/, '')]
+}
+
+function normalizePrescription(value, movement) {
+  const source = value && typeof value === 'object' ? value : {}
+  if (movement.prescriptionType === 'time') return { type: 'time', durationSeconds: clamp(source.durationSeconds, 15, 90, movement.defaults.durationSeconds), sets: clamp(source.sets, 1, 3, 1), restSeconds: clamp(source.restSeconds, 0, 60, 0) }
+  return { type: 'reps', reps: clamp(source.reps, 3, 20, movement.defaults.reps), sets: clamp(source.sets, 1, 3, 1), restSeconds: clamp(source.restSeconds, 0, 60, 0), secondsPerRep: movement.defaults.secondsPerRep }
+}
+
+function withPrescription(movement, prescription) {
+  const dose = toLegacyDose(prescription)
+  return { ...movement, prescription, dose, durationSeconds: prescription.durationSeconds ?? 0, reps: prescription.reps ?? 0, sets: prescription.sets, restSeconds: prescription.restSeconds }
+}
+
+function toLegacyDose(prescription) {
+  return prescription.type === 'time'
+    ? { model: 'timer', durationSeconds: prescription.durationSeconds, sets: prescription.sets, restSeconds: prescription.restSeconds }
+    : { model: 'reps', reps: prescription.reps, sets: prescription.sets, restSeconds: prescription.restSeconds, tempoSecondsPerRep: prescription.secondsPerRep }
+}
+
+function cloneMovement(movement) {
+  return { ...movement, categories: [...movement.categories], routineTypes: [...movement.routineTypes], bodyRegions: [...movement.bodyRegions], targetAreas: [...movement.targetAreas], equipment: [...movement.equipment], shouldFeel: [...movement.shouldFeel], avoid: [...movement.avoid], painSensitiveRegions: [...movement.painSensitiveRegions], tags: [...movement.tags], prescription: { ...movement.prescription }, defaults: { ...movement.defaults }, dose: { ...movement.dose }, doseModels: movement.doseModels.map((dose) => ({ ...dose })) }
+}
+
+function clamp(value, min, max, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.max(min, Math.min(max, Math.round(number))) : fallback }
+function slugify(value) { return String(value).toLowerCase().replace(/[’']/g, '').replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') }
+function humanize(value) { return String(value).replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase()) }

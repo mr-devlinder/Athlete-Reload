@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.110.9'
+import { getRequestedBarcode, normalizeBarcode, resolveOpenNutritionBarcodeFood } from './barcode.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -20,7 +21,7 @@ Deno.serve(async (request) => {
     if (authError || !user) return json({ error: 'Authentication required' }, 401)
 
     const body = await request.json()
-    const barcode = normalizeBarcode(body.barcode)
+    const barcode = getRequestedBarcode(body)
     const sourceId = String(body.sourceId ?? '').trim()
     const query = normalizeText(body.query)
     if (!barcode && !sourceId && query.length < 2) return json({ foods: [], queryType: 'mixed', provider: 'OpenNutrition' })
@@ -32,7 +33,7 @@ Deno.serve(async (request) => {
 
     let external: Food[] = []
     if (barcode) {
-      const food = await searchOpenNutrition(barcode, 30).then((foods) => foods.find((item) => normalizeBarcode(item.ean_13) === barcode) ?? null)
+      const food = resolveOpenNutritionBarcodeFood(await searchOpenNutrition(barcode, 2), barcode)
       if (food) external = [normalizeOpenNutrition(food)]
     } else if (sourceId) {
       const food = await getOpenNutritionFood(sourceId)
@@ -109,7 +110,7 @@ async function searchOpenNutrition(query: string, limit: number): Promise<Food[]
 }
 
 async function getOpenNutritionFood(id: string): Promise<Food | null> {
-  if (!/^fd_[A-Za-z0-9]+$/.test(id)) return null
+  if (!/^(?:fd|food)_[A-Za-z0-9]+$/.test(id)) return null
   const response = await fetch(`${openNutritionBaseUrl()}/foods/${encodeURIComponent(id)}`, {
     headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(8_000),
   })
@@ -224,11 +225,6 @@ function isPlausibleFood(food: Food) {
 
 function hasCompleteMacros(food: Food) {
   return [food.calories, food.protein, food.carbohydrates, food.fats].every((value) => Number.isFinite(Number(value)))
-}
-
-function normalizeBarcode(value: unknown) {
-  const digits = String(value ?? '').replace(/\D/g, '')
-  return digits.length === 13 ? digits : ''
 }
 
 function normalizeText(value: unknown) {

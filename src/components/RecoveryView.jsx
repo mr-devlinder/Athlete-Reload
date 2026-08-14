@@ -1,325 +1,106 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { format, parseISO } from 'date-fns'
-import { m } from 'motion/react'
 import { AppIcon } from './AppIcon'
-import { normalizeRecoveryExercise } from '../domain/recovery'
-import { buildVettedRoutine, getVettedSubstitute } from '../domain/recovery/routineBuilder'
+import { getMovementById } from '../domain/recovery/exerciseCatalog'
+import { estimateRoutineSeconds, expandUnilateralMovement, normalizeRoutineType, replaySavedMobilityRoutine } from '../domain/recovery/routineBuilder'
 import { recordRoutinePainEvent } from '../lib/athleteData'
 import '../styles/recovery-rework.css'
 
-const equipmentOptions = [
-  'Exercise mat', 'Foam roller', 'Stretching strap', 'Yoga blocks', 'Resistance band', 'Mini band',
-  'Massage ball', 'Massage stick', 'Towel', 'Chair or bench', 'Stability ball', 'Stationary bike',
-  'Pool', 'Compression equipment',
+const ROUTINE_TYPES = [
+  { id: 'session_recovery', label: 'Session Recovery', description: 'Gentle mobility shaped by your latest checkout.' },
+  { id: 'full_body', label: 'Full Body Mobility', description: 'Balanced ankles, hips, trunk, and shoulders.' },
+  { id: 'lower_body', label: 'Lower Body Mobility', description: 'Ankles, calves, hips, hamstrings, quads, and groin.' },
+  { id: 'upper_body', label: 'Upper Body Mobility', description: 'Upper back, shoulders, scapulae, wrists, and neck.' },
+  { id: 'flexibility', label: 'Flexibility', description: 'Longer controlled holds without forced end range.' },
+  { id: 'warm_up', label: 'Warm-Up', description: 'Active mobility and progressive, low-fatigue preparation.' },
+  { id: 'light_recovery', label: 'Light Recovery', description: 'Very low-demand movement for an easier day.' },
+  { id: 'custom_mobility', label: 'Custom Mobility', description: 'Focus the routine on body areas you choose.' },
 ]
-const planTypeOptions = [
-  { id: 'session', label: 'Session recovery', description: 'Respond to your latest workout, practice, and checkout.' },
-  { id: 'competition', label: 'Competition recovery', description: 'Prioritize recovery after a match, race, meet, or game.' },
-  { id: 'quick', label: 'Quick athletic reset', description: 'Joint prep and activation in a focused 5–10 minute block.' },
-  { id: 'full-body', label: 'Full body mobility', description: 'Organized trunk, hip, shoulder, and ankle movement.' },
-  { id: 'flexibility', label: 'Range session', description: 'Controlled flexibility work without forcing end range.' },
-  { id: 'targeted', label: 'Targeted area', description: 'Build around selected areas and reported restrictions.' },
-  { id: 'recovery-day', label: 'Recovery training', description: 'A longer mobility, control, and flexibility session.' },
-  { id: 'pre-event', label: 'Pre-event prep', description: 'Dynamic mobility and activation for what comes next.' },
+const TIME_OPTIONS = [5, 8, 10, 15, 20]
+const EQUIPMENT_OPTIONS = [
+  { id: 'resistance_band', label: 'Resistance band' },
+  { id: 'bench_or_chair', label: 'Bench or chair' },
+  { id: 'foam_roller', label: 'Foam roller' },
+  { id: 'massage_ball', label: 'Massage ball' },
 ]
-const targetAreaOptions = ['Shoulders / arms', 'Back / trunk', 'Hips', 'Quads / hamstrings', 'Knees', 'Calves / ankles / feet']
+const TARGET_OPTIONS = ['Hips', 'Hamstrings', 'Quads', 'Calves', 'Ankles', 'Shoulders', 'Upper back', 'Wrists']
 
-export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved = false, isReplayingSavedRoutine = false, generationStatus = 'idle', onCompleteSavedRoutine, onGeneratePlan, onReplaySavedRoutine, onReportRoutinePain, onSaveRecoveryPlan, recentCompletion, savedRoutines = [], schedule = [] }) {
-  const latestCheckout = useMemo(
-    () => [...checkouts].sort((first, second) => getDateValue(second) - getDateValue(first))[0] ?? null,
-    [checkouts],
-  )
+export function RecoveryView({
+  checkouts = [],
+  generatedPlan,
+  generatedRoutine,
+  generationStatus = 'idle',
+  mobilityGenerationStatus = 'idle',
+  onCompleteRoutine,
+  onGenerateMobilityRoutine,
+  onGenerateRecoveryPlan,
+  onReportRoutinePain,
+  onSaveRoutine,
+  onStartRoutine,
+  recentCompletion,
+  savedRoutines = [],
+  schedule = [],
+}) {
+  const latestCheckout = useMemo(() => [...checkouts].sort((a, b) => dateValue(b) - dateValue(a))[0] ?? null, [checkouts])
   const latestEvent = schedule.find((event) => event.id === latestCheckout?.eventId)
-  const nextRecoveryEvent = getNextRecoveryEvent(schedule, latestEvent)
+  const nextEvent = getNextEvent(schedule, latestEvent)
+  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get('view') === 'mobility' ? 'mobility' : 'plan')
+  const [routineType, setRoutineType] = useState('session_recovery')
+  const [minutes, setMinutes] = useState(10)
+  const [customMinutes, setCustomMinutes] = useState('')
   const [equipment, setEquipment] = useState([])
-  const [equipmentOpen, setEquipmentOpen] = useState(false)
-  const [equipmentTouched, setEquipmentTouched] = useState(false)
-  const [equipmentMenuPosition, setEquipmentMenuPosition] = useState({ left: 12, top: 12 })
-  const equipmentButtonRef = useRef(null)
-  const equipmentPickerRef = useRef(null)
-  const equipmentMenuRef = useRef(null)
-  const routineVariationRef = useRef(0)
-  const recoverySaveStartedRef = useRef(false)
-  const automaticPlanRequestedRef = useRef(false)
-  const [timeAvailable, setTimeAvailable] = useState('15 minutes')
-  const [planType, setPlanType] = useState('session')
-  const [targetedAreas, setTargetedAreas] = useState([])
-  const [routineStarted, setRoutineStarted] = useState(false)
-  const [routineIndex, setRoutineIndex] = useState(0)
-  const [secondsLeft, setSecondsLeft] = useState(0)
-  const [routinePaused, setRoutinePaused] = useState(false)
-  const [completedRoutineExercises, setCompletedRoutineExercises] = useState(() => new Set())
-  const [skippedRoutineExercises, setSkippedRoutineExercises] = useState(() => new Set())
-  const [routineHurtEvents, setRoutineHurtEvents] = useState([])
-  const [routineStartedAt, setRoutineStartedAt] = useState(null)
-  const [routineFeedback, setRoutineFeedback] = useState(null)
-  const [hurtReport, setHurtReport] = useState(null)
-  const [excludedExercises, setExcludedExercises] = useState([])
-  const [preferredSubstitutes, setPreferredSubstitutes] = useState([])
-  const [routineComplete, setRoutineComplete] = useState(false)
-  const [feedback, setFeedback] = useState({ completion: '', feeling: '', tightness: '', pain: '' })
-  const [isSavingPlan, setIsSavingPlan] = useState(false)
-  const [savePlanMessage, setSavePlanMessage] = useState('')
-  const [savedRoutinesOpen, setSavedRoutinesOpen] = useState(false)
-  const [activeSection, setActiveSection] = useState(() => new URLSearchParams(window.location.search).get('view') === 'mobility' ? 'mobility' : 'plan')
-
-  const plan = generatedPlan?.planType === planType ? generatedPlan : null
-  const routineResult = buildVettedRoutine({
-    selections: [...preferredSubstitutes, ...(plan?.routine?.exercises ?? [])],
-    mode: plan?.planType ?? planType,
-    availableMinutes: getTimeAvailableMinutes(timeAvailable),
-    availableEquipment: equipment,
-    excludedIds: excludedExercises,
-    targetBodyParts: planType === 'targeted' ? targetedAreas : [],
-    variationSeed: routineVariationRef.current,
-  })
-  const routine = routineResult.exercises.map(normalizeRecoveryExercise)
-  const currentExercise = routine[routineIndex]
-  const currentSubstitute = getVettedSubstitute(currentExercise, excludedExercises)
-  const isPainAware = Boolean(plan?.routine?.painAware || plan?.painAware)
-  const isRoutineOnlyPlan = ['flexibility', 'targeted', 'full-body', 'quick', 'recovery-day', 'pre-event'].includes(plan?.planType)
-
-  useEffect(() => {
-    if (!routineStarted || routinePaused || !currentExercise?.durationSeconds || secondsLeft <= 0) return undefined
-
-    const timer = window.setInterval(() => {
-      setSecondsLeft((current) => Math.max(0, current - 1))
-    }, 1000)
-
-    return () => window.clearInterval(timer)
-  }, [currentExercise, routinePaused, routineStarted, secondsLeft])
-
-  useEffect(() => {
-    if (routineStarted && currentExercise?.durationSeconds && secondsLeft === 0) {
-      setRoutinePaused(true)
-    }
-  }, [currentExercise, routineStarted, secondsLeft])
-
-  useEffect(() => {
-    if (!equipmentOpen) return undefined
-
-    function closeEquipmentMenu(event) {
-      if (!equipmentPickerRef.current?.contains(event.target) && !equipmentMenuRef.current?.contains(event.target)) {
-        setEquipmentOpen(false)
-        if (equipment.length === 0) setEquipmentTouched(true)
-      }
-    }
-
-    document.addEventListener('pointerdown', closeEquipmentMenu)
-    return () => document.removeEventListener('pointerdown', closeEquipmentMenu)
-  }, [equipment, equipmentOpen])
-
-  useEffect(() => {
-    if (!equipmentOpen) return undefined
-
-    function updateEquipmentMenuPosition() {
-      const rect = equipmentButtonRef.current?.getBoundingClientRect()
-      if (!rect) return
-
-      const menuHeight = 276
-      const top = rect.bottom + 8 + menuHeight > window.innerHeight
-        ? Math.max(12, rect.top - menuHeight - 8)
-        : rect.bottom + 8
-
-      setEquipmentMenuPosition({
-        left: Math.max(12, Math.min(rect.left, window.innerWidth - 272)),
-        top,
-      })
-    }
-
-    updateEquipmentMenuPosition()
-    window.addEventListener('resize', updateEquipmentMenuPosition)
-    window.addEventListener('scroll', updateEquipmentMenuPosition, true)
-
-    return () => {
-      window.removeEventListener('resize', updateEquipmentMenuPosition)
-      window.removeEventListener('scroll', updateEquipmentMenuPosition, true)
-    }
-  }, [equipmentOpen])
+  const [targets, setTargets] = useState([])
+  const [savedOpen, setSavedOpen] = useState(false)
+  const [selectedSavedId, setSelectedSavedId] = useState(null)
+  const [activeRoutine, setActiveRoutine] = useState(null)
+  const [activeRoutineRecordId, setActiveRoutineRecordId] = useState(null)
+  const [routineOrigin, setRoutineOrigin] = useState('generated')
+  const automaticPlanRequested = useRef(null)
+  const currentPlan = generatedPlan?.sourceCheckoutId && generatedPlan.sourceCheckoutId !== latestCheckout?.id ? null : generatedPlan
 
   useEffect(() => {
     const url = new URL(window.location.href)
-    url.searchParams.set('view', activeSection)
+    url.searchParams.set('view', section)
     window.history.replaceState(window.history.state, '', url)
-  }, [activeSection])
+  }, [section])
 
   useEffect(() => {
-    if (activeSection !== 'plan' || !latestCheckout || generatedPlan || generationStatus !== 'idle' || automaticPlanRequestedRef.current) return
-    automaticPlanRequestedRef.current = true
-    handleGenerate('session')
-  }, [activeSection, generatedPlan, generationStatus, latestCheckout])
+    if (section !== 'plan' || currentPlan || !latestCheckout || generationStatus !== 'idle' || automaticPlanRequested.current === latestCheckout.id) return
+    automaticPlanRequested.current = latestCheckout.id
+    onGenerateRecoveryPlan?.()
+  }, [currentPlan, generationStatus, latestCheckout, onGenerateRecoveryPlan, section])
 
-  function startExercise() {
-    setRoutineStartedAt((current) => current ?? new Date().toISOString())
-    setRoutineStarted(true)
-    setRoutinePaused(false)
-    setSecondsLeft(Number(currentExercise?.durationSeconds ?? 0))
+  useEffect(() => {
+    if (!generatedRoutine) return
+    setActiveRoutine(extractRoutine(generatedRoutine))
+    setActiveRoutineRecordId(null)
+    setRoutineOrigin('generated')
+  }, [generatedRoutine])
+
+  const selectedMinutes = customMinutes ? Math.max(5, Math.min(30, Number(customMinutes) || minutes)) : minutes
+  const selectedSaved = savedRoutines.find((routine) => routine.id === selectedSavedId)
+
+  function toggleEquipment(id) {
+    setEquipment((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }
 
-  function advanceExercise(completion = 'complete') {
-    if (completion === 'complete' && currentExercise) {
-      setCompletedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
-    }
-    if (completion !== 'complete' && currentExercise) {
-      setSkippedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
-    }
-
-    if (routineIndex >= routine.length - 1) {
-      setRoutineStarted(false)
-      setRoutineComplete(true)
-      if (isReplayingSavedRoutine) onCompleteSavedRoutine?.({ completedAt: new Date().toISOString(), exerciseCount: routine.length })
-      return
-    }
-
-    const nextExercise = routine[routineIndex + 1]
-    setRoutineIndex((current) => current + 1)
-    setRoutinePaused(false)
-    setSecondsLeft(Number(nextExercise?.durationSeconds ?? 0))
-    setRoutineStarted(false)
-  }
-
-  function reportExercisePain() {
-    setRoutinePaused(true)
-    setHurtReport({ area: currentExercise?.area ?? '', sameIssue: '', severity: '', type: '' })
-  }
-
-  async function handleHurtReport(action) {
-    const exerciseName = currentExercise?.name
-    const report = {
-      ...hurtReport,
-      checkoutId: latestCheckout?.id ?? null,
-      exercise: exerciseName,
-      movementId: currentExercise?.id,
-      bodyRegion: currentExercise?.area ?? '',
-      side: currentExercise?.side ?? 'not_applicable',
-      response: hurtReport?.severity === 'mild' ? 'mild_discomfort' : 'meaningful_pain',
-      actionTaken: action,
-      occurredAt: new Date().toISOString(),
-    }
-    await onReportRoutinePain?.(report)
-    await recordRoutinePainEvent(report).catch((error) => console.error('Unable to save routine pain event', error))
-    setRoutineHurtEvents((current) => [...current, report])
-    if (currentExercise?.id) setSkippedRoutineExercises((current) => new Set([...current, getRoutineExerciseKey(currentExercise)]))
-    setHurtReport(null)
-
-    if (action === 'end') {
-      setRoutineStarted(false)
-      setRoutineComplete(true)
-    } else {
-      if (action === 'substitute') {
-        const substitute = getVettedSubstitute(currentExercise, excludedExercises)
-        if (substitute) setPreferredSubstitutes((current) => [substitute, ...current.filter((item) => item.id !== substitute.id)])
-      }
-      setExcludedExercises((current) => [...new Set([...current, currentExercise?.id])])
-      setRoutineIndex((current) => Math.max(0, Math.min(current, routine.length - 2)))
-      setRoutineStarted(false)
-      setRoutinePaused(false)
-      setSecondsLeft(0)
-    }
-  }
-
-  function handleGenerate(requestedType = planType) {
-    recoverySaveStartedRef.current = false
-    routineVariationRef.current += 1
-    setRoutineFeedback(null)
-    setRoutineComplete(false)
-    setCompletedRoutineExercises(new Set())
-    setSkippedRoutineExercises(new Set())
-    setRoutineHurtEvents([])
-    setRoutineStartedAt(null)
-    setExcludedExercises([])
-    setPreferredSubstitutes([])
-    setRoutineIndex(0)
-    setRoutineStarted(false)
-    setEquipmentTouched(true)
-    setPlanType(requestedType)
-    onGeneratePlan({ equipment, planType: requestedType, targetedAreas, timeAvailable })
-  }
-
-  function selectSection(section) {
-    setActiveSection(section)
-    setPlanType(section === 'plan' ? 'session' : 'full-body')
-  }
-
-  function selectPlanType(nextType) {
-    setPlanType(nextType)
-    if (nextType === 'quick' && getTimeAvailableMinutes(timeAvailable) > 10) setTimeAvailable('10 minutes')
-  }
-
-  function toggleTargetArea(area) {
-    setTargetedAreas((current) => current.includes(area)
-      ? current.filter((item) => item !== area)
-      : [...current, area])
-  }
-
-  async function saveRecoveryPlan() {
-    if (!plan || isSavingPlan || generatedPlanSaved || recoverySaveStartedRef.current) return
-
-    recoverySaveStartedRef.current = true
-    setIsSavingPlan(true)
-    setSavePlanMessage('')
-    try {
-      const hasFeedback = Object.values(feedback).some(Boolean)
-      const saved = await onSaveRecoveryPlan?.({
-        ...plan,
-        routineProgress: {
-          completed: completedRoutineExercises.size,
-          total: routine.length,
-        },
-        routineSession: {
-          routineType: plan.planType ?? planType,
-          generatedAt: plan.generatedAt ?? new Date().toISOString(),
-          startedAt: routineStartedAt,
-          finishedAt: new Date().toISOString(),
-          plannedDurationSeconds: routineResult.estimatedSeconds,
-          actualDurationSeconds: routineStartedAt ? Math.max(0, Math.round((Date.now() - new Date(routineStartedAt).getTime()) / 1000)) : null,
-          movementIds: routine.map((exercise) => exercise.id),
-          movementOrder: routine.map((exercise) => exercise.id),
-          plannedPrescription: routine.map((exercise) => ({ instanceId: getRoutineExerciseKey(exercise), movementId: exercise.id, ...(exercise.durationSeconds ? { seconds: exercise.durationSeconds, side: exercise.side } : { reps: exercise.reps, side: exercise.side }) })),
-          completedPrescription: routine.filter((exercise) => completedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => ({ instanceId: getRoutineExerciseKey(exercise), movementId: exercise.id, ...(exercise.durationSeconds ? { seconds: exercise.durationSeconds, side: exercise.side } : { reps: exercise.reps, side: exercise.side }) })),
-          movementsCompleted: routine.filter((exercise) => completedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => exercise.id),
-          movementsSkipped: routine.filter((exercise) => skippedRoutineExercises.has(getRoutineExerciseKey(exercise))).map((exercise) => exercise.id),
-          completionPercentage: routine.length ? Math.round(completedRoutineExercises.size / routine.length * 10000) / 100 : 0,
-          hurtEvents: routineHurtEvents,
-          modifications: preferredSubstitutes.map((exercise) => ({ type: 'substitute', movementId: exercise.id })),
-          associatedEventId: latestEvent?.id ?? null,
-          equipment,
-          statedGoal: plan.routine?.goal ?? planType,
-          status: routineHurtEvents.some((event) => event.actionTaken === 'end') ? 'ended_for_pain' : completedRoutineExercises.size >= routine.length ? 'completed' : 'partial',
-        },
-        ...(hasFeedback ? { feedback: { ...feedback, recordedAt: new Date().toISOString() } } : {}),
-      })
-      if (!saved) recoverySaveStartedRef.current = false
-      setSavePlanMessage(saved ? 'Saved to your Recovery history.' : 'The recovery plan could not be saved. Please try again.')
-    } catch (error) {
-      recoverySaveStartedRef.current = false
-      console.error('Unable to save recovery plan', error)
-      setSavePlanMessage('The recovery plan could not be saved. Please try again.')
-    } finally {
-      setIsSavingPlan(false)
-    }
-  }
-
-  function toggleEquipment(option) {
-    setEquipment((current) => {
-      if (current.includes(option)) {
-        return current.filter((item) => item !== option)
-      }
-
-      return [...current, option]
+  function generateRoutine() {
+    setSelectedSavedId(null)
+    onGenerateMobilityRoutine?.({
+      equipmentAvailable: equipment,
+      routineType,
+      targetBodyParts: routineType === 'custom_mobility' ? targets : [],
+      timeAvailableMinutes: selectedMinutes,
     })
-    setEquipmentTouched(true)
   }
 
-  function toggleEquipmentMenu() {
-    if (equipmentOpen) {
-      setEquipmentOpen(false)
-      if (equipment.length === 0) setEquipmentTouched(true)
-      return
-    }
-
-    setEquipmentOpen(true)
+  function startSavedRoutine() {
+    const routine = replaySavedMobilityRoutine(selectedSaved)
+    if (!routine) return
+    setActiveRoutine(routine)
+    setActiveRoutineRecordId(selectedSaved.id)
+    setRoutineOrigin('saved')
+    setSavedOpen(false)
   }
 
   return (
@@ -327,336 +108,298 @@ export function RecoveryView({ checkouts = [], generatedPlan, generatedPlanSaved
       <section className="recovery-hero">
         <div>
           <p className="eyebrow">Recovery</p>
-          <h1>What matters after the work.</h1>
-          <div className="recovery-context-line"><span><small>From</small>{latestEvent?.title ?? latestCheckout?.eventTitle ?? 'Complete checkout to begin'}</span><i aria-hidden="true">→</i><span><small>Next</small>{nextRecoveryEvent?.title ?? 'No upcoming event'}</span></div>
+          <h1>Recover with context. Move with purpose.</h1>
+          <div className="recovery-context-line"><span><small>From</small>{latestEvent?.title ?? latestCheckout?.eventTitle ?? 'Complete checkout to begin'}</span><i aria-hidden="true">→</i><span><small>Next</small>{nextEvent?.title ?? 'No upcoming event'}</span></div>
         </div>
       </section>
 
       <div className="recovery-view-toggle" role="tablist" aria-label="Recovery view">
-        <button aria-controls="recovery-plan-panel" aria-selected={activeSection === 'plan'} className={activeSection === 'plan' ? 'active' : ''} id="recovery-plan-tab" onClick={() => selectSection('plan')} role="tab" tabIndex={activeSection === 'plan' ? 0 : -1} type="button">Recovery</button>
-        <button aria-controls="mobility-panel" aria-selected={activeSection === 'mobility'} className={activeSection === 'mobility' ? 'active' : ''} id="mobility-tab" onClick={() => selectSection('mobility')} role="tab" tabIndex={activeSection === 'mobility' ? 0 : -1} type="button">Mobility</button>
+        <button aria-selected={section === 'plan'} className={section === 'plan' ? 'active' : ''} onClick={() => setSection('plan')} role="tab" type="button">Recovery</button>
+        <button aria-selected={section === 'mobility'} className={section === 'mobility' ? 'active' : ''} onClick={() => setSection('mobility')} role="tab" type="button">Mobility</button>
       </div>
 
-      {activeSection === 'plan' && latestCheckout && <section aria-labelledby="recovery-plan-tab" className="recovery-latest recovery-checkout-context glass-panel" id="recovery-plan-panel" role="tabpanel">
-          <div className="recovery-section-heading">
-            <div>
-              <p className="eyebrow">Latest checkout</p>
-              <h2>{latestEvent?.title ?? latestCheckout.eventTitle ?? 'Training session'}</h2>
-            </div>
-            <span>{formatCheckoutDate(latestCheckout.date)}</span>
-          </div>
-          <div className="recovery-session-facts">
-            <span><strong>{latestCheckout.actualMinutes ?? 0}</strong> min</span>
-            <span><strong>{latestCheckout.difficulty ?? 0}/10</strong> effort</span>
-            <span><strong>{latestCheckout.participation ?? latestCheckout.completionLevel ?? 'Logged'}</strong> participation</span>
-          </div>
-      </section>}
+      {section === 'plan' && (
+        <RecoveryPlanPanel
+          checkout={latestCheckout}
+          event={latestEvent}
+          loading={generationStatus === 'loading'}
+          onGenerate={onGenerateRecoveryPlan}
+          onViewMobility={() => { setRoutineType('session_recovery'); setSection('mobility') }}
+          plan={currentPlan}
+        />
+      )}
 
-      {activeSection === 'plan' && <section aria-labelledby="recovery-plan-tab" className="recovery-plan-launch glass-panel" id={latestCheckout ? undefined : 'recovery-plan-panel'} role={latestCheckout ? undefined : 'tabpanel'}>
-        <div><p className="eyebrow">Living recovery plan</p><h2>{latestCheckout ? 'Update priorities from your latest session' : 'Recovery starts with a completed event'}</h2><p>{latestCheckout ? 'Fueling, hydration, mobility, pain, time since the event, and what comes next shape this plan.' : 'Complete Checkout after an event so recovery can respond to what actually happened.'}</p></div>
-        <button className="primary-button" disabled={!latestCheckout || generationStatus === 'loading'} onClick={() => handleGenerate('session')} type="button">{generationStatus === 'loading' ? 'Updating plan...' : plan ? 'Refresh recovery plan' : 'Build recovery plan'}</button>
-      </section>}
-      {activeSection === 'plan' && generationStatus === 'error' && <p className="recovery-plan-error">AI could not build the recovery plan. Your checkout is safe; retry when the connection is available.</p>}
+      {section === 'mobility' && !activeRoutine && (
+        <section className="mobility-builder glass-panel" role="tabpanel">
+          <header className="mobility-builder-header">
+            <div><p className="eyebrow">Mobility routines</p><h2>Build a routine that fits the moment.</h2><p>Choose a purpose, a real time budget, and only the equipment you actually have.</p></div>
+            <button className="secondary-button" onClick={() => setSavedOpen((value) => !value)} type="button"><AppIcon name="folder" size={18} />Saved routines</button>
+          </header>
 
-      {activeSection === 'mobility' && <section aria-labelledby="mobility-tab" className="recovery-builder-panel glass-panel" id="mobility-panel" role="tabpanel">
-          <div className="recovery-generator">
-            <div>
-              <strong>Build your recovery plan</strong>
-              <p>Choose the outcome you need. The plan adapts to your session, sport, pain, nutrition, recovery history, and what is next.</p>
-            </div>
-            <div className="recovery-type-grid" role="radiogroup" aria-label="Recovery plan type">
-              {planTypeOptions.filter((option) => !['session', 'competition'].includes(option.id)).map((option, index) => (
-                <m.button
-                  aria-checked={planType === option.id}
-                  className={planType === option.id ? 'selected' : ''}
-                  key={option.id}
-                  onClick={() => selectPlanType(option.id)}
-                  role="radio"
-                  type="button"
-                  whileHover={{ y: -5, scale: 1.015 }}
-                  whileTap={{ scale: .98 }}
-                >
-                  <span className="recovery-mode-visual"><b>{String(index + 1).padStart(2, '0')}</b><i /></span>
-                  <strong>{option.label}</strong>
-                  <span>{option.description}</span>
-                </m.button>
-              ))}
-            </div>
-            {planType === 'targeted' && (
-              <div className="recovery-target-picker">
-                <span>Target areas</span>
-                <div>
-                  {targetAreaOptions.map((area) => (
-                    <button className={targetedAreas.includes(area) ? 'selected' : ''} key={area} onClick={() => toggleTargetArea(area)} type="button">{area}</button>
-                  ))}
-                </div>
-                {targetedAreas.length === 0 && <small>Select at least one area to generate a targeted plan.</small>}
-              </div>
-            )}
-            <div className="recovery-generator-controls">
-              <label>
-                <span>Time available</span>
-                <select value={timeAvailable} onChange={(event) => setTimeAvailable(event.target.value)}>
-                  {(planType === 'quick' ? ['5 minutes', '10 minutes'] : ['5 minutes', '10 minutes', '15 minutes', '20 minutes', '25 minutes', '30 minutes']).map((option) => <option key={option}>{option}</option>)}
-                </select>
-              </label>
-              <div className="equipment-field" ref={equipmentPickerRef}>
-                <span>Equipment</span>
-                <button
-                  aria-expanded={equipmentOpen}
-                  aria-haspopup="menu"
-                  className="equipment-picker-button"
-                  onClick={toggleEquipmentMenu}
-                  ref={equipmentButtonRef}
-                  type="button"
-                >
-                  {equipment.length > 0 ? `${equipment.length} selected` : equipmentTouched ? 'Nothing' : 'Select'}
-                </button>
-                {equipmentOpen && createPortal(
-                  <div
-                    className="equipment-picker-menu"
-                    ref={equipmentMenuRef}
-                    role="menu"
-                    style={{ left: equipmentMenuPosition.left, top: equipmentMenuPosition.top }}
-                  >
-                    {equipmentOptions.map((option) => (
-                      <label key={option}>
-                        <input checked={equipment.includes(option)} onChange={() => toggleEquipment(option)} type="checkbox" />
-                        <span>{option}</span>
-                      </label>
-                    ))}
-                  </div>,
-                  document.body,
-                )}
-              </div>
-              <button className="primary-button" disabled={generationStatus === 'loading' || (planType === 'targeted' && targetedAreas.length === 0)} onClick={() => handleGenerate()} type="button">
-                <AppIcon name="spark" size={18} />
-                {generationStatus === 'loading' ? 'Building plan...' : plan ? 'Regenerate plan' : 'Generate recovery plan'}
-              </button>
-              <button aria-expanded={savedRoutinesOpen} className="load-saved-routines-button" onClick={() => setSavedRoutinesOpen((current) => !current)} type="button">
-                <AppIcon name="folder" size={18} />
-                Load saved routines
-              </button>
-            </div>
-            {['session', 'competition'].includes(planType) && !latestCheckout && <p className="recovery-context-note">No checkout is available yet. Choose another option to build a standalone routine.</p>}
-            {generationStatus === 'error' && <p className="recovery-error">The recovery plan could not be generated. Check your connection and try again.</p>}
-            {recentCompletion?.completedAt && (
-              <p className="recovery-context-note">Last recovery completed {formatCompletionRecency(recentCompletion.completedAt)}. This is considered when pacing the next plan.</p>
-            )}
-          </div>
-          {savedRoutinesOpen && (
+          {savedOpen && (
             <div className="saved-routine-library">
-              <strong>Saved routines</strong>
-              {savedRoutines.some((routine) => routine.isFavorite) ? <div>
-                {savedRoutines.filter((routine) => routine.isFavorite).map((routine) => (
-                  <button key={routine.id} onClick={() => onReplaySavedRoutine?.(routine)} type="button">
-                    <span>{routine.title}</span>
-                    <em>Replay</em>
-                  </button>
-                ))}
-              </div> : <p className="recovery-context-note">Favorite a routine from Recovery history to load it here.</p>}
+              <strong>Saved Routines</strong>
+              {savedRoutines.length ? savedRoutines.map((saved) => {
+                const routine = extractRoutine(saved.routine)
+                return <button aria-pressed={selectedSavedId === saved.id} className={selectedSavedId === saved.id ? 'selected' : ''} key={saved.id} onClick={() => setSelectedSavedId(saved.id)} type="button"><span><b>{saved.title ?? routine?.routineName ?? 'Mobility routine'}</b><small>{formatSavedRoutineMeta(routine)}</small></span><em>Select</em></button>
+              }) : <p>No saved routines yet. Generate one and save its exact plan here.</p>}
+              {selectedSaved && <button className="primary-button saved-routine-start" onClick={startSavedRoutine} type="button">Start Routine</button>}
             </div>
           )}
-      </section>}
 
-      {plan && (
-        <>
-          {!isRoutineOnlyPlan && plan.reportSections?.length > 0 && <RecoveryPlanExperience plan={plan} />}
-
-          <section className="recovery-routine-panel recovery-plan-panel glass-panel">
-            <div className="recovery-section-heading">
-              <div>
-                <p className="eyebrow">Personalized routine</p>
-                <h2>{plan.routine?.title ?? 'Cooldown and mobility'}</h2>
-              </div>
-              <span>About {Math.max(1, Math.ceil(routineResult.estimatedSeconds / 60))} min</span>
-            </div>
-            {plan.routine?.goal && <p className="routine-goal"><strong>Routine goal:</strong> {plan.routine.goal}</p>}
-            <p className="routine-intro">{plan.routine?.summary ?? 'Use this as an optional way to relax and maintain comfortable mobility, not as a guaranteed repair.'}</p>
-            {isPainAware && <div className="pain-aware-callout">Your reported symptoms changed this routine. Do not stretch a painful area through discomfort.</div>}
-            {!routineComplete && (
-              <details className="routine-preview">
-                <summary>View routine plan ({routine.length} exercises)</summary>
-                <ol className="routine-plan-list">{routine.map((exercise, index) => <li className="routine-plan-step" key={exercise.instanceId ?? `${exercise.name}-${exercise.side}-${index}`}>
-                  <span className="routine-step-number">{String(index + 1).padStart(2, '0')}</span>
-                  <div><strong>{exercise.name}</strong><span className="routine-step-meta">{getExercisePhaseLabel(exercise)} · {formatExerciseBodyArea(exercise)} · {formatExerciseDose(exercise)}</span>{exercise.rationale && <p>{exercise.rationale}</p>}</div>
-                </li>)}</ol>
-              </details>
-            )}
-            {routineComplete ? (
-              <div className="recovery-routine-complete">
-                <p className="eyebrow">Routine complete</p>
-                <h3>Recovery routine completed.</h3>
-                <p>Take a moment to record how your body feels before saving this recovery plan.</p>
-              </div>
-            ) : (
-            <m.div className="routine-player" initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .45 }}>
-              <div className="routine-player-header">
-                <span>Exercise {routineIndex + 1} of {routine.length}</span>
-                <strong>{currentExercise?.type ?? 'Mobility'}</strong>
-              </div>
-              <div className="routine-progress" aria-label={`${routineIndex + 1} of ${routine.length} exercises complete`}>
-                <span style={{ width: `${((routineIndex + 1) / Math.max(1, routine.length)) * 100}%` }} />
-              </div>
-              <h3>{currentExercise?.name}</h3>
-              <div className="routine-current-meta">
-                <span><small>Body area</small><strong>{formatExerciseBodyArea(currentExercise)}</strong></span>
-                <span><small>Duration or repetitions</small><strong>{formatExerciseDose(currentExercise)}</strong></span>
-              </div>
-              <div className="routine-guidance">
-                <details open><summary>How to do it</summary><div><p><strong>Setup</strong>{currentExercise?.setup}</p><p><strong>Movement</strong>{currentExercise?.movement}</p><p><strong>Complete when</strong>{currentExercise?.completionCue}</p></div></details>
-                <details><summary>What you should feel</summary><p>{currentExercise?.feel ?? 'Mild, comfortable tension or controlled movement.'}</p></details>
-                <details><summary>What to avoid</summary><p>{currentExercise?.stopConditions}</p></details>
-                <details><summary>Why this is here</summary><p>{currentExercise?.rationale || currentExercise?.purpose} {currentExercise?.equipment ? `Equipment: ${currentExercise.equipment}.` : ''}</p></details>
-              </div>
-              {currentExercise?.durationSeconds ? <div className="routine-timer">{formatSeconds(routineStarted ? secondsLeft : currentExercise.durationSeconds)}</div> : <div className="routine-reps">{currentExercise?.reps ?? 6} controlled reps</div>}
-              <div className="routine-player-actions">
-                  {!routineStarted ? (
-                    <button className="primary-button" onClick={startExercise} type="button">Start exercise</button>
-                  ) : currentExercise?.durationSeconds && secondsLeft === 0 ? (
-                    <button className="primary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Next exercise'}</button>
-                  ) : !currentExercise?.durationSeconds ? (
-                    <button className="primary-button" onClick={advanceExercise} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Complete and continue'}</button>
-                  ) : (
-                  <button className="secondary-button" onClick={() => setRoutinePaused((current) => !current)} type="button">{routinePaused ? 'Resume' : 'Pause'}</button>
-                )}
-                <button className="secondary-button" onClick={() => advanceExercise('skipped')} type="button">{routineIndex === routine.length - 1 ? 'Finish routine' : 'Skip'}</button>
-                <button className="text-button danger-text" onClick={reportExercisePain} type="button">This hurts</button>
-              </div>
-              {routineFeedback === 'pain' && <div className="routine-feedback"><strong>Stop the movement.</strong><p>Tell us what changed so a gentler substitute can be used.</p><div className="feedback-actions"><button onClick={() => setRoutineFeedback('substitute')} type="button">Use a gentler substitute</button><button onClick={() => setRoutineFeedback('end')} type="button">End this routine section</button></div></div>}
-              {routineFeedback === 'substitute' && <div className="routine-feedback"><strong>Skip this movement for now.</strong><p>Do not test the painful movement again right now. Continue only with comfortable, pain-free options.</p></div>}
-            </m.div>
-            )}
-            {routineComplete && <div className="routine-feedback-form">
-              <strong>How did recovery feel?</strong>
-              <div className="feedback-fields">
-                <label>Routine result<select value={feedback.completion} onChange={(event) => setFeedback({ ...feedback, completion: event.target.value })}><option value="">Choose</option><option>Full routine</option><option>Part of routine</option><option>Did not complete</option></select></label>
-                <label>Feeling after<select value={feedback.feeling} onChange={(event) => setFeedback({ ...feedback, feeling: event.target.value })}><option value="">Choose</option><option>Better</option><option>Same</option><option>Worse</option></select></label>
-                <label>Tightness<select value={feedback.tightness} onChange={(event) => setFeedback({ ...feedback, tightness: event.target.value })}><option value="">1–5</option>{[1, 2, 3, 4, 5].map((value) => <option key={value}>{value}</option>)}</select></label>
-                <label>Pain<select value={feedback.pain} onChange={(event) => setFeedback({ ...feedback, pain: event.target.value })}><option value="">0–10</option>{Array.from({ length: 11 }, (_, value) => <option key={value}>{value}</option>)}</select></label>
-              </div>
-              {feedback.feeling === 'Worse' && <p className="recovery-error">Feeling temporarily looser is not proof that an injury has healed. Stop and tell a qualified adult if symptoms worsen.</p>}
-              {!isReplayingSavedRoutine && <button className="primary-button" disabled={isSavingPlan || generatedPlanSaved} onClick={saveRecoveryPlan} type="button">{isSavingPlan ? 'Saving recovery plan...' : generatedPlanSaved ? 'Recovery plan saved' : 'Save recovery plan'}</button>}
-              {isReplayingSavedRoutine && <p className="recovery-saved-message">Completed a favorite routine. This replay will not create a new recovery plan.</p>}
-              {!isReplayingSavedRoutine && (savePlanMessage || generatedPlanSaved) && <p className={savePlanMessage.startsWith('Saved') || generatedPlanSaved ? 'recovery-saved-message' : 'recovery-error'}>{savePlanMessage || 'Saved to your Recovery history.'}</p>}
-            </div>}
-          </section>
-
-        </>
+          <div className="mobility-steps">
+            <fieldset className="mobility-step"><legend><span>1</span>Select Routine Type</legend><div className="mobility-type-grid">{ROUTINE_TYPES.map((option) => <button aria-pressed={routineType === option.id} className={routineType === option.id ? 'selected' : ''} key={option.id} onClick={() => setRoutineType(option.id)} type="button"><strong>{option.label}</strong><small>{option.description}</small></button>)}</div></fieldset>
+            {routineType === 'custom_mobility' && <fieldset className="mobility-step"><legend>Target areas</legend><div className="mobility-choice-row">{TARGET_OPTIONS.map((target) => <button aria-pressed={targets.includes(target)} className={targets.includes(target) ? 'selected' : ''} key={target} onClick={() => setTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} type="button">{target}</button>)}</div></fieldset>}
+            <fieldset className="mobility-step"><legend><span>2</span>How much time do you have?</legend><div className="mobility-choice-row">{TIME_OPTIONS.map((value) => <button aria-pressed={!customMinutes && minutes === value} className={!customMinutes && minutes === value ? 'selected' : ''} key={value} onClick={() => { setMinutes(value); setCustomMinutes('') }} type="button">{value} min</button>)}<label className={customMinutes ? 'selected' : ''}>Custom<input aria-label="Custom minutes" inputMode="numeric" max="30" min="5" onChange={(event) => setCustomMinutes(event.target.value)} placeholder="min" type="number" value={customMinutes} /></label></div></fieldset>
+            <fieldset className="mobility-step"><legend><span>3</span>Equipment Available</legend><div className="mobility-choice-row"><button aria-pressed={equipment.length === 0} className={equipment.length === 0 ? 'selected' : ''} onClick={() => setEquipment([])} type="button">Nothing</button>{EQUIPMENT_OPTIONS.map((option) => <button aria-pressed={equipment.includes(option.id)} className={equipment.includes(option.id) ? 'selected' : ''} key={option.id} onClick={() => toggleEquipment(option.id)} type="button">{option.label}</button>)}</div></fieldset>
+            <div className="mobility-generate-row"><span><b>4</b>Ready to build</span><button className="primary-button mobility-generate-button" disabled={mobilityGenerationStatus === 'loading' || (routineType === 'custom_mobility' && targets.length === 0)} onClick={generateRoutine} type="button">{mobilityGenerationStatus === 'loading' ? 'Generating…' : 'Generate Mobility Routine'}</button></div>
+            {mobilityGenerationStatus === 'error' && <p className="recovery-error">The routine could not be generated. Try again when your connection is available.</p>}
+            {recentCompletion?.completedAt && <p className="recovery-context-note">Last mobility routine completed {formatCompletionRecency(recentCompletion.completedAt)}.</p>}
+          </div>
+        </section>
       )}
-      {hurtReport && createPortal(
-        <div className="modal-backdrop" onClick={() => setHurtReport(null)}>
-          <section className="event-modal routine-hurt-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
-            <p className="eyebrow">Stop this movement</p>
-            <h2>Tell us what changed.</h2>
-            <label className="compact-field">Where does it hurt?<input value={hurtReport.area} onChange={(event) => setHurtReport((current) => ({ ...current, area: event.target.value }))} /></label>
-            <label className="compact-field">What does it feel like?<select value={hurtReport.type} onChange={(event) => setHurtReport((current) => ({ ...current, type: event.target.value }))}><option value="">Choose</option><option>Sharp</option><option>Aching</option><option>Pulling</option><option>Unstable</option><option>Numb or tingling</option></select></label>
-            <label className="compact-field">Pain level<select value={hurtReport.severity} onChange={(event) => setHurtReport((current) => ({ ...current, severity: event.target.value }))}><option value="">Choose</option>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}/10</option>)}</select></label>
-            <label className="compact-field">Was this a previously reported issue?<select value={hurtReport.sameIssue} onChange={(event) => setHurtReport((current) => ({ ...current, sameIssue: event.target.value }))}><option value="">Choose</option><option>Yes</option><option>No</option><option>Not sure</option></select></label>
-            <p className="recovery-error">Do not push through sharp, worsening, unstable, numb, or tingling symptoms.</p>
-            <div className="routine-hurt-actions">{currentSubstitute && <button className="primary-button" onClick={() => handleHurtReport('substitute')} type="button">Use vetted substitute</button>}<button className="secondary-button" onClick={() => handleHurtReport('skip')} type="button">Skip this movement</button><button className="remove-button" onClick={() => handleHurtReport('end')} type="button">End routine</button></div>
-          </section>
-        </div>,
-        document.body,
+
+      {section === 'mobility' && activeRoutine && (
+        <MobilityRoutinePlayer
+          equipmentAvailable={equipment}
+          latestCheckout={latestCheckout}
+          latestEvent={latestEvent}
+          onBack={() => { setActiveRoutine(null); setActiveRoutineRecordId(null) }}
+          onComplete={onCompleteRoutine}
+          onReportPain={onReportRoutinePain}
+          onSave={routineOrigin === 'generated' ? onSaveRoutine : null}
+          onStart={onStartRoutine}
+          origin={routineOrigin}
+          routine={activeRoutine}
+          routineRecordId={activeRoutineRecordId}
+        />
       )}
     </div>
   )
 }
 
-function RecoveryPlanExperience({ plan }) {
-  const sections = Object.fromEntries((plan.reportSections ?? []).map((section) => [section.id, section]))
-  const priorities = sections['recovery-priorities']?.items?.slice(0, 3) ?? []
-  const nextHours = [sections['nutrition-guidance'], sections['hydration-guidance'], sections['active-recovery-rest']].filter(Boolean)
-  const tonight = sections['sleep-rest-guidance']
-  const nextEvent = sections['next-event-impact']
-  const pain = sections['pain-guidance']
-  const status = sections['recovery-status']
+function RecoveryPlanPanel({ checkout, event, loading, onGenerate, onViewMobility, plan }) {
+  const sections = plan?.reportSections ?? []
+  const priorities = sections.find((section) => section.id === 'recovery-priorities')?.items ?? plan?.priorities ?? []
+  return <div className="recovery-plan-stack">
+    {checkout && <section className="recovery-latest recovery-checkout-context glass-panel"><div className="recovery-section-heading"><div><p className="eyebrow">Latest checkout</p><h2>{event?.title ?? checkout.eventTitle ?? 'Training session'}</h2></div><span>{formatCheckoutDate(checkout.date)}</span></div><div className="recovery-session-facts"><span><strong>{checkout.actualMinutes ?? 0}</strong> min</span><span><strong>{checkout.difficulty ?? 0}/10</strong> effort</span><span><strong>{checkout.postSoreness ?? 0}/5</strong> soreness</span></div></section>}
+    {!plan && <section className="recovery-plan-launch glass-panel"><div><p className="eyebrow">Recovery Plan</p><h2>{checkout ? 'Turn your checkout into near-term priorities.' : 'Complete Checkout to build a recovery plan.'}</h2><p>Fuel, fluids, sleep, symptom monitoring, and the next event belong here. Physical routines live in Mobility.</p></div><button className="primary-button" disabled={!checkout || loading} onClick={onGenerate} type="button">{loading ? 'Building…' : 'Build Recovery Plan'}</button></section>}
+    {plan && <section className="recovery-plan-panel recovery-plan-only glass-panel"><header><div><p className="eyebrow">Recovery Plan</p><h2>{plan.label ?? 'Your post-event priorities'}</h2><p>{plan.summary}</p></div><span>{plan.generatedAt ? format(parseISO(plan.generatedAt), 'MMM d · h:mm a') : 'Current plan'}</span></header>{priorities.length > 0 && <div className="recovery-priority-list"><strong>{priorities.length} priorities</strong><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></div>}<div className="recovery-report-grid">{sections.filter((section) => section.id !== 'recovery-priorities').map((section) => <article key={section.id}><span>{section.title}</span><strong>{section.summary}</strong>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</article>)}</div><footer className="recovery-plan-actions"><button className="recovery-plan-refresh-button" disabled={loading} onClick={onGenerate} type="button"><AppIcon name="recovery" size={17} />{loading ? 'Refreshing…' : 'Refresh Plan'}</button><button className="recovery-plan-mobility-button" onClick={onViewMobility} type="button">View Mobility<AppIcon name="arrow" size={17} /></button></footer></section>}
+  </div>
+}
 
-  return <section className="recovery-plan-experience" aria-labelledby="recovery-plan-heading">
-    <header className="recovery-status-deck">
-      <div><p className="eyebrow">AI recovery plan</p><h2 id="recovery-plan-heading">{plan.label ?? 'Recovery priorities'}</h2><p>{status?.summary ?? plan.summary}</p></div>
-      <span className={`recovery-priority-badge ${plan.tone ?? ''}`}>{plan.nextEventWarning ? 'Short turnaround' : plan.tone === 'danger' || plan.tone === 'warning' ? 'High priority' : 'Active plan'}</span>
-    </header>
+function MobilityRoutinePlayer({ equipmentAvailable, latestCheckout, latestEvent, onBack, onComplete, onReportPain, onSave, onStart, origin, routine, routineRecordId }) {
+  const exercises = useMemo(() => (routine?.exercises ?? []).flatMap(hydrateRoutineStep), [routine])
+  const [index, setIndex] = useState(0)
+  const [secondsLeft, setSecondsLeft] = useState(0)
+  const [timerState, setTimerState] = useState('idle')
+  const [readyForNext, setReadyForNext] = useState(false)
+  const [completed, setCompleted] = useState(() => new Set())
+  const [skipped, setSkipped] = useState(() => new Set())
+  const [hurtEvents, setHurtEvents] = useState([])
+  const [removedIds, setRemovedIds] = useState(() => new Set())
+  const [startedAt, setStartedAt] = useState(null)
+  const [sessionId, setSessionId] = useState(null)
+  const startedAtRef = useRef(null)
+  const sessionIdRef = useRef(null)
+  const startPromiseRef = useRef(null)
+  const [summary, setSummary] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [hurtOpen, setHurtOpen] = useState(false)
+  const [painDetail, setPainDetail] = useState({ area: '', severity: '', type: '' })
+  const current = exercises[index]
+  const currentSide = /^(left|right)$/i.test(String(current?.side ?? '')) ? titleCase(current.side) : null
+  const prescription = current?.prescription ?? {}
+  const isTimed = current?.prescriptionType === 'time'
+  const plannedSeconds = routine.estimatedDurationSeconds ?? estimateRoutineSeconds(exercises)
 
-    <section className="recovery-now-block">
-      <div className="recovery-window-heading"><span>Right now</span><small>Highest value first</small></div>
-      <div className="recovery-action-list">{priorities.length ? priorities.map((item, index) => <RecoveryAction item={item} index={index} key={`${item}-${index}`} />) : <RecoveryAction item={plan.action ?? 'Begin with the highest-priority recovery action above.'} index={0} />}</div>
-    </section>
+  useEffect(() => {
+    if (timerState !== 'running' || secondsLeft <= 0) return undefined
+    const timer = window.setInterval(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearInterval(timer)
+  }, [secondsLeft, timerState])
 
-    {pain && <section className="recovery-pain-priority"><span>Pain-specific</span><strong>{pain.summary}</strong>{pain.items?.map((item) => <p key={item}>{item}</p>)}</section>}
+  useEffect(() => {
+    if (timerState === 'running' && secondsLeft === 0) { setTimerState('complete'); setReadyForNext(true) }
+  }, [secondsLeft, timerState])
 
-    <div className="recovery-window-grid">
-      <RecoveryWindow eyebrow="Next few hours" sections={nextHours} fallback="Follow the immediate priorities, then reassess how your body responds." />
-      <RecoveryWindow eyebrow="Tonight" sections={tonight ? [tonight] : []} fallback="Protect normal food, fluids, and a full sleep opportunity." />
-      <RecoveryWindow eyebrow="Tomorrow / next event" sections={nextEvent ? [nextEvent] : []} fallback="Use the next check-in to reassess soreness, fatigue, and pain before training." />
-    </div>
+  async function ensureStarted() {
+    if (sessionIdRef.current) return sessionIdRef.current
+    if (startPromiseRef.current) return startPromiseRef.current
+
+    const now = startedAtRef.current ?? new Date().toISOString()
+    if (!startedAtRef.current) {
+      startedAtRef.current = now
+      setStartedAt(now)
+    }
+
+    const startPromise = Promise.resolve(onStart?.(buildSessionPayload({ exercises, latestCheckout, latestEvent, plannedSeconds, routine, routineRecordId, startedAt: now, equipmentAvailable })))
+      .then((record) => {
+        const id = record?.id ?? null
+        sessionIdRef.current = id
+        setSessionId(id)
+        return id
+      })
+      .catch(() => null)
+      .finally(() => { startPromiseRef.current = null })
+
+    startPromiseRef.current = startPromise
+    return startPromise
+  }
+
+  function startTimer() {
+    if (secondsLeft === 0 || timerState === 'idle' || timerState === 'complete') setSecondsLeft(Number(prescription.durationSeconds ?? current.durationSeconds ?? 30))
+    setReadyForNext(false)
+    setTimerState('running')
+    void ensureStarted()
+  }
+
+  async function markDone() {
+    await ensureStarted()
+    setReadyForNext(true)
+  }
+
+  function nextSideOrExercise(status = 'completed') {
+    const key = exerciseKey(current)
+    const nextCompleted = new Set(completed)
+    const nextSkipped = new Set(skipped)
+    if (status === 'completed') nextCompleted.add(key)
+    else nextSkipped.add(key)
+    setCompleted(nextCompleted)
+    setSkipped(nextSkipped)
+    const nextIndex = findNextIndex(exercises, index, removedIds)
+    if (nextIndex < 0) { finishRoutine(nextCompleted, nextSkipped); return }
+    setIndex(nextIndex)
+    resetExerciseState()
+  }
+
+  async function finishRoutine(finalCompleted = completed, finalSkipped = skipped, statusOverride, finalHurtEvents = hurtEvents) {
+    const finishedAt = new Date().toISOString()
+    const actualSeconds = startedAt ? Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)) : 0
+    const payload = buildCompletionPayload({ actualSeconds, completed: finalCompleted, exercises, finishedAt, hurtEvents: finalHurtEvents, latestCheckout, latestEvent, plannedSeconds, routine, sessionId, skipped: finalSkipped, startedAt, statusOverride })
+    setSaving(true)
+    await onComplete?.(payload)
+    setSaving(false)
+    setSummary(payload)
+  }
+
+  async function skipCurrent() {
+    await ensureStarted()
+    nextSideOrExercise('skipped')
+  }
+
+  async function reportHurt() {
+    setTimerState((value) => value === 'running' ? 'paused' : value)
+    setPainDetail({ area: current?.targetAreas?.join(', ') ?? current?.bodyRegions?.join(', ') ?? '', severity: '', type: '' })
+    setHurtOpen(true)
+  }
+
+  async function submitPain() {
+    const activeSessionId = await ensureStarted()
+    const event = { routineCompletionId: activeSessionId, routineId: origin === 'saved' ? routineRecordId : null, sourceCheckoutId: latestCheckout?.id ?? null, movementId: current.id, bodyRegion: painDetail.area, side: currentSide?.toLowerCase() ?? 'not_applicable', response: Number(painDetail.severity) <= 3 ? 'mild_discomfort' : 'meaningful_pain', actionTaken: 'skip', occurredAt: new Date().toISOString(), context: { painType: painDetail.type, severity: Number(painDetail.severity) || null } }
+    await recordRoutinePainEvent(event)
+    await onReportPain?.({ ...event, area: painDetail.area, checkoutId: latestCheckout?.id, exercise: current.name, severity: Number(painDetail.severity), type: painDetail.type })
+    const nextEvents = [...hurtEvents, event]
+    setHurtEvents(nextEvents)
+    const sensitive = new Set(current.painSensitiveRegions)
+    const removed = new Set(removedIds)
+    exercises.slice(index + 1).forEach((movement) => { if (movement.painSensitiveRegions.some((region) => sensitive.has(region))) removed.add(movement.id) })
+    setRemovedIds(removed)
+    setHurtOpen(false)
+    const nextSkipped = new Set(skipped).add(exerciseKey(current))
+    exercises.filter((movement) => removed.has(movement.id)).forEach((movement) => nextSkipped.add(exerciseKey(movement)))
+    setSkipped(nextSkipped)
+    const nextIndex = findNextIndex(exercises, index, removed)
+    if (nextIndex < 0) { setHurtEvents(nextEvents); finishRoutine(completed, nextSkipped, 'ended_for_pain', nextEvents); return }
+    setIndex(nextIndex)
+    resetExerciseState()
+  }
+
+  async function saveRoutine() {
+    setSaving(true)
+    const result = await onSave?.({ routine: { ...routine, exercises }, title: routine.routineName ?? routine.title, planType: routine.routineType, generatedAt: routine.generatedAt ?? new Date().toISOString(), equipment: equipmentAvailable, originalDurationSeconds: plannedSeconds })
+    setSaving(false)
+    setSaved(Boolean(result))
+  }
+
+  function goPrevious() {
+    if (index <= 0) return
+    setIndex(index - 1)
+    resetExerciseState()
+  }
+
+  function resetExerciseState() { setSecondsLeft(0); setTimerState('idle'); setReadyForNext(false) }
+
+  if (!exercises.length) return <section className="routine-player-shell glass-panel"><p className="recovery-error">This routine has no valid catalog movements.</p><button className="routine-back-button" onClick={onBack} type="button"><span aria-hidden="true">←</span>Back to Mobility</button></section>
+  if (summary) return <RoutineSummary exercises={exercises} onBack={onBack} onSave={onSave ? saveRoutine : null} saved={saved} saving={saving} summary={summary} />
+
+  return <section className="routine-player-shell glass-panel">
+    <header className="routine-title-block"><button className="routine-back-button" onClick={onBack} type="button"><span aria-hidden="true">←</span>Back to Mobility</button><p className="eyebrow">{origin === 'saved' ? 'Saved routine' : 'Mobility routine'}</p><h1>{routine.routineName ?? routine.title}</h1><p>{routine.goal}</p><div><span>{Math.max(1, Math.round(plannedSeconds / 60))} min</span><span>{exercises.length} exercises</span><span>{Math.round(completed.size / exercises.length * 100)}% complete</span></div></header>
+    <details className="routine-plan-dropdown"><summary>View Routine Plan <span>{exercises.length} movements</span></summary><ol>{exercises.map((exercise, position) => <li className={position === index ? 'active' : ''} key={exerciseKey(exercise)}><b>{position + 1}</b><span><strong>{exercise.name}</strong><small>{formatBodyArea(exercise)} · {formatPrescription(exercise)}</small></span></li>)}</ol></details>
+    <div className="routine-player-progress"><span>Exercise {index + 1} of {exercises.length}</span><div><i style={{ width: `${(index + 1) / exercises.length * 100}%` }} /></div></div>
+    <article className="active-movement-card">
+      <header><div><p>{currentSide ? `${currentSide} side` : formatBodyArea(current)}</p><h2>{current.name}</h2><span>{formatBodyArea(current)}</span></div><div className="movement-prescription">{isTimed ? <strong>{formatSeconds(timerState === 'idle' ? prescription.durationSeconds : secondsLeft)}</strong> : <strong>{prescription.reps} reps{current.unilateral ? ' each side' : ''}</strong>}<small>{currentSide ? `${currentSide} side` : current.prescriptionType === 'time' ? 'controlled hold' : 'controlled pace'}</small></div></header>
+      <section className="movement-how"><h3>How to Perform</h3><p>{current.instructions}</p></section>
+      <div className="movement-cue-grid"><section><h3>You Should Feel</h3><ul>{current.shouldFeel.slice(0, 3).map((item) => <li key={item}>{formatCue(item)}</li>)}</ul></section><section><h3>Avoid</h3><ul>{current.avoid.slice(0, 3).map((item) => <li key={item}>{formatCue(item)}</li>)}</ul></section></div>
+      <div className="routine-bottom-controls">
+        <div className="routine-secondary-controls">{index > 0 && <button onClick={goPrevious} type="button">Previous</button>}<button onClick={skipCurrent} type="button">Skip</button><button className="hurt-control" onClick={reportHurt} type="button">This Hurts</button></div>
+        <div className={`routine-primary-controls${isTimed && timerState === 'paused' ? ' routine-primary-controls-paired' : ''}`}>
+          {isTimed && timerState === 'idle' && <button className="primary-button" onClick={startTimer} type="button">Start</button>}
+          {isTimed && timerState === 'running' && <button className="primary-button" onClick={() => setTimerState('paused')} type="button">Pause</button>}
+          {isTimed && timerState === 'paused' && <><button className="secondary-button" onClick={() => { setSecondsLeft(prescription.durationSeconds); setTimerState('idle') }} type="button">Restart</button><button className="primary-button" onClick={() => setTimerState('running')} type="button">Resume</button></>}
+          {!isTimed && !readyForNext && <button className="primary-button" onClick={markDone} type="button">Done</button>}
+          {readyForNext && <button className="primary-button" disabled={saving} onClick={() => nextSideOrExercise('completed')} type="button">{index === exercises.length - 1 ? 'Finish Routine' : 'Next Exercise'}</button>}
+        </div>
+      </div>
+    </article>
+    {hurtOpen && <div className="modal-backdrop" onClick={() => setHurtOpen(false)}><section className="event-modal routine-hurt-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><p className="eyebrow">Stop this movement</p><h2>This should not hurt.</h2><p>The timer is paused. Add a short note so this movement and similar remaining options can be stopped.</p><label>Where?<input onChange={(event) => setPainDetail((value) => ({ ...value, area: event.target.value }))} value={painDetail.area} /></label><label>What does it feel like?<select onChange={(event) => setPainDetail((value) => ({ ...value, type: event.target.value }))} value={painDetail.type}><option value="">Choose</option><option>Sharp</option><option>Aching</option><option>Pulling</option><option>Unstable</option><option>Numb or tingling</option></select></label><label>Pain level<select onChange={(event) => setPainDetail((value) => ({ ...value, severity: event.target.value }))} value={painDetail.severity}><option value="">Optional</option>{Array.from({ length: 10 }, (_, value) => <option key={value + 1}>{value + 1}</option>)}</select></label><div className="routine-hurt-actions"><button className="secondary-button" onClick={() => setHurtOpen(false)} type="button">Cancel</button><button className="primary-button" onClick={submitPain} type="button">Stop and Skip</button></div></section></div>}
   </section>
 }
 
-function RecoveryAction({ item, index }) {
-  const [lead, ...rest] = String(item).split(/[:—]/)
-  const hasLead = rest.length > 0 && lead.length < 42
-  return <article><span>{String(index + 1).padStart(2, '0')}</span><div><strong>{hasLead ? lead.trim() : index === 0 ? 'Start here' : 'Then'}</strong><p>{hasLead ? rest.join('—').trim() : item}</p></div></article>
+function RoutineSummary({ onBack, onSave, saved, saving, summary }) {
+  return <section className="routine-complete-card"><p className="eyebrow">Routine Complete</p><h2>{formatElapsed(summary.actualDurationSeconds)} completed</h2><div><span><strong>{summary.movementsCompleted.length} of {summary.exerciseCount}</strong> exercises completed</span><span><strong>{summary.completionPercentage}%</strong> completion</span></div>{summary.hurtEvents.length > 0 && <p>You stopped {summary.hurtEvents.length} exercise{summary.hurtEvents.length === 1 ? '' : 's'} because it hurt.</p>}<footer>{onSave && <button className="secondary-button" disabled={saving || saved} onClick={onSave} type="button">{saved ? 'Routine Saved' : saving ? 'Saving…' : 'Save Routine'}</button>}<button className="primary-button" onClick={onBack} type="button">Done</button></footer></section>
 }
 
-function RecoveryWindow({ eyebrow, sections, fallback }) {
-  return <section className="recovery-window-card"><span>{eyebrow}</span>{sections.length ? sections.map((section) => <div key={section.id}><strong>{section.title}</strong>{section.summary && <p>{section.summary}</p>}{section.items?.slice(0, 2).map((item) => <small key={item}>{item}</small>)}</div>) : <p>{fallback}</p>}</section>
+function hydrateExercise(selection) {
+  const movement = getMovementById(selection?.movementId ?? selection?.id)
+  if (!movement) return null
+  const prescription = selection.prescription ?? selection.dose ?? movement.prescription
+  const normalized = movement.prescriptionType === 'time'
+    ? { type: 'time', durationSeconds: Number(prescription.durationSeconds) || movement.defaults.durationSeconds, sets: Number(prescription.sets) || 1, restSeconds: Number(prescription.restSeconds) || 0 }
+    : { type: 'reps', reps: Number(prescription.reps) || movement.defaults.reps, sets: Number(prescription.sets) || 1, restSeconds: Number(prescription.restSeconds) || 0, secondsPerRep: movement.defaults.secondsPerRep }
+  return { ...movement, prescription: normalized, side: selection?.side ?? movement.side }
 }
 
-
-function getDateValue(item) {
-  return new Date(item?.createdAt ?? `${item?.date ?? '1970-01-01'}T12:00:00`).getTime()
+function hydrateRoutineStep(selection) {
+  const movement = hydrateExercise(selection)
+  return expandUnilateralMovement(movement)
 }
 
-function formatCheckoutDate(date) {
-  if (!date) return 'Recent session'
-  return format(parseISO(date), 'EEE, MMM d')
+function buildSessionPayload({ exercises, latestCheckout, latestEvent, plannedSeconds, routine, routineRecordId, startedAt, equipmentAvailable }) {
+  return { routineId: routineRecordId, routineType: normalizeRoutineType(routine.routineType), generatedAt: routine.generatedAt ?? new Date().toISOString(), startedAt, plannedDurationSeconds: plannedSeconds, selectedTimeSeconds: plannedSeconds, movementIds: exercises.map((exercise) => exercise.id), movementOrder: exercises.map(exerciseKey), plannedPrescription: exercises.map((exercise) => ({ movementId: exercise.id, side: exercise.side ?? null, prescription: exercise.prescription })), associatedEventId: latestEvent?.id ?? null, sourceCheckoutId: latestCheckout?.id ?? null, equipment: equipmentAvailable, statedGoal: routine.goal, status: 'in_progress', generationContext: { catalogVersion: exercises[0]?.catalogVersion ?? null, origin: routineRecordId ? 'saved' : 'generated' }, routineSnapshot: { ...routine, exercises } }
 }
 
-function getTimeAvailableMinutes(value) {
-  const minutes = Number.parseInt(value, 10)
-  return Number.isFinite(minutes) ? Math.max(5, Math.min(30, minutes)) : 15
+function buildCompletionPayload({ actualSeconds, completed, exercises, finishedAt, hurtEvents, latestCheckout, latestEvent, plannedSeconds, routine, sessionId, skipped, startedAt, statusOverride }) {
+  const completedExercises = exercises.filter((exercise) => completed.has(exerciseKey(exercise)))
+  const skippedExercises = exercises.filter((exercise) => skipped.has(exerciseKey(exercise)))
+  const movementsCompleted = completedExercises.map(exerciseKey)
+  const movementsSkipped = skippedExercises.map(exerciseKey)
+  const exerciseStatuses = exercises.map((exercise) => ({ movementId: exercise.id, side: exercise.side ?? null, status: completed.has(exerciseKey(exercise)) ? 'completed' : skipped.has(exerciseKey(exercise)) ? 'skipped' : 'not_started' }))
+  return { id: sessionId, type: 'mobility_routine', routineType: normalizeRoutineType(routine.routineType), generatedAt: routine.generatedAt ?? null, startedAt, finishedAt, completedAt: finishedAt, plannedDurationSeconds: plannedSeconds, selectedTimeSeconds: plannedSeconds, actualDurationSeconds: actualSeconds, actualSeconds, movementIds: exercises.map((exercise) => exercise.id), movementOrder: exercises.map(exerciseKey), plannedPrescription: exercises.map((exercise) => ({ movementId: exercise.id, side: exercise.side ?? null, prescription: exercise.prescription })), completedPrescription: completedExercises.map((exercise) => ({ movementId: exercise.id, side: exercise.side ?? null, prescription: exercise.prescription })), movementsCompleted, movementsSkipped, exerciseStatuses, skipEvents: skippedExercises.map((exercise) => ({ movementId: exercise.id, side: exercise.side ?? null, occurredAt: finishedAt })), completionPercentage: exercises.length ? Math.round(movementsCompleted.length / exercises.length * 100) : 0, hurtEvents, associatedEventId: latestEvent?.id ?? null, sourceCheckoutId: latestCheckout?.id ?? null, statedGoal: routine.goal, status: statusOverride ?? (hurtEvents.length && movementsCompleted.length === 0 ? 'ended_for_pain' : movementsCompleted.length === exercises.length ? 'completed' : 'partial'), exerciseCount: exercises.length, generationContext: { catalogVersion: exercises[0]?.catalogVersion ?? null }, details: { type: 'mobility_routine', routineSnapshot: { ...routine, exercises } } }
 }
 
-function formatCompletionRecency(value) {
-  const elapsedMinutes = Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 60000))
-  if (elapsedMinutes < 60) return `${elapsedMinutes || 1} min ago`
-  const hours = Math.round(elapsedMinutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
-}
-
-function formatExerciseBodyArea(exercise) {
-  return [exercise?.side, exercise?.bodyRegion ?? exercise?.area].filter(Boolean).join(' · ')
-}
-
-function getRoutineExerciseKey(exercise) { return exercise?.instanceId ?? `${exercise?.id}-${exercise?.side ?? 'both'}-${exercise?.sequenceIndex ?? 0}` }
-
-function getExercisePhaseLabel(exercise) {
-  if (['activation', 'control', 'isometric'].includes(exercise?.movementType)) return 'Activation & control'
-  if (['flexibility', 'self-massage'].includes(exercise?.movementType)) return 'Range work'
-  return 'Mobility'
-}
-
-function getNextRecoveryEvent(schedule, latestEvent) {
-  const after = latestEvent ? getEventDateValue(latestEvent) : Date.now()
-  return schedule.filter((event) => getEventDateValue(event) > after).sort((first, second) => getEventDateValue(first) - getEventDateValue(second))[0] ?? null
-}
-
-function getEventDateValue(event) {
-  return new Date(`${event?.date ?? '1970-01-01'}T${event?.time && /^\d{1,2}:\d{2}$/.test(event.time) ? event.time : '23:59'}:00`).getTime()
-}
-
-function formatExerciseDose(exercise) {
-  const dose = exercise?.doseModel === 'timer' || exercise?.durationSeconds
-    ? `${exercise.durationSeconds} seconds`
-    : `${exercise?.reps ?? 6} controlled reps`
-  const sets = Number(exercise?.sets ?? 1)
-  const rest = Number(exercise?.restSeconds ?? 0)
-  return `${sets > 1 ? `${sets} sets × ` : ''}${dose}${rest > 0 ? ` · ${rest}s rest` : ''}`
-}
-
-function formatSeconds(value) {
-  const seconds = Math.max(0, Number(value) || 0)
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-}
+function extractRoutine(value) { return value?.routine?.routine ?? value?.routine ?? value?.plan?.routine ?? (value?.exercises ? value : null) }
+function exerciseKey(exercise) { return `${exercise.id}:${String(exercise.side ?? 'both').toLowerCase()}` }
+function findNextIndex(exercises, currentIndex, removedIds) { for (let next = currentIndex + 1; next < exercises.length; next += 1) if (!removedIds.has(exercises[next].id)) return next; return -1 }
+function formatBodyArea(exercise) { return exercise.targetAreas?.slice(0, 2).map(titleCase).join(' · ') || exercise.bodyRegions?.map(titleCase).join(' · ') || 'Full body' }
+function formatPrescription(exercise) { const side = /^(left|right)$/i.test(String(exercise.side ?? '')) ? ` · ${titleCase(exercise.side)}` : exercise.unilateral ? ' each side' : ''; return exercise.prescriptionType === 'time' ? `${exercise.prescription.durationSeconds} sec${side}` : `${exercise.prescription.reps} reps${side}` }
+function formatSeconds(value) { const seconds = Math.max(0, Number(value) || 0); return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}` }
+function formatElapsed(value) { const seconds = Math.max(0, Number(value) || 0); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` }
+function formatSavedRoutineMeta(routine) { if (!routine) return 'Unavailable'; const exercises = routine.exercises?.length ?? 0; const seconds = routine.estimatedDurationSeconds ?? estimateRoutineSeconds((routine.exercises ?? []).map(hydrateExercise).filter(Boolean)); return `${Math.max(1, Math.round(seconds / 60))} min · ${exercises} exercises` }
+function titleCase(value) { return String(value).replaceAll('_', ' ').replace(/\b\w/g, (character) => character.toUpperCase()) }
+function formatCue(value) { const text = String(value ?? '').trim().replace(/\s+/g, ' '); if (!text) return ''; const sentence = `${text.charAt(0).toUpperCase()}${text.slice(1)}`; return /[.!?]$/.test(sentence) ? sentence : `${sentence}.` }
+function dateValue(item) { return new Date(item?.createdAt ?? `${item?.date ?? '1970-01-01'}T12:00:00`).getTime() }
+function formatCheckoutDate(date) { return date ? format(parseISO(`${date}T12:00:00`), 'MMM d, yyyy') : '' }
+function formatCompletionRecency(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? 'recently' : format(date, 'MMM d · h:mm a') }
+function getNextEvent(schedule, currentEvent) { const current = currentEvent ? new Date(`${currentEvent.date}T${currentEvent.time ?? '12:00'}`).getTime() : Date.now(); return [...schedule].filter((event) => new Date(`${event.date}T${event.time ?? '12:00'}`).getTime() > current).sort((a, b) => new Date(`${a.date}T${a.time ?? '12:00'}`) - new Date(`${b.date}T${b.time ?? '12:00'}`))[0] ?? null }

@@ -4,10 +4,11 @@ import { configDefaults } from 'vitest/config'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), '')
+  const env = mode === 'e2e' ? {} : loadEnv(mode, process.cwd(), '')
 
   return {
     base: mode === 'production' ? (env.VITE_BASE_PATH || '/Athlete-Reload/') : '/',
+    envDir: mode === 'e2e' ? './tests/e2e/env' : undefined,
     build: {
       chunkSizeWarningLimit: 850,
       cssMinify: 'lightningcss',

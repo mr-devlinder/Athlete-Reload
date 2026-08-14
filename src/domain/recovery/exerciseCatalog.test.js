@@ -1,55 +1,95 @@
 import { describe, expect, it } from 'vitest'
-import { estimateExerciseSeconds, getCatalogExercises, RECOVERY_CATEGORIES, RECOVERY_EXERCISES, resolveVettedExerciseSelections } from './exerciseCatalog'
-import { buildVettedRoutine } from './routineBuilder'
+import { MOBILITY_MOVEMENTS, estimateExerciseSeconds, getMovementById } from './exerciseCatalog'
+import {
+  buildDeterministicMobilityRoutine,
+  expandUnilateralMovement,
+  filterMovementCatalog,
+  replaySavedMobilityRoutine,
+  validateGeneratedRoutine,
+} from './routineBuilder'
 
-describe('vetted recovery exercise catalog', () => {
-  it('contains at least 120 recognizable, structured canonical movements', () => {
-    expect(Object.keys(RECOVERY_EXERCISES).length).toBeGreaterThanOrEqual(120)
-    expect(RECOVERY_CATEGORIES.length).toBeGreaterThanOrEqual(20)
-    for (const exercise of Object.values(RECOVERY_EXERCISES)) {
-      expect(exercise.id).toBeTruthy()
-      expect(exercise.name).toBeTruthy()
-      expect(exercise.steps.length).toBeGreaterThanOrEqual(2)
-      expect(exercise.whatYouShouldFeel.length).toBeGreaterThan(0)
-      expect(exercise.thingsToAvoid.length).toBeGreaterThan(0)
-      expect(exercise.stopConditions.length).toBeGreaterThan(0)
-      expect(['bilateral', 'each-side', 'alternating']).toContain(exercise.laterality)
-      expect(['timer', 'reps']).toContain(exercise.dose.model)
-      expect(Boolean(exercise.durationSeconds) && Boolean(exercise.reps)).toBe(false)
+describe('canonical mobility catalog', () => {
+  it('contains one structured canonical record per stable ID', () => {
+    expect(MOBILITY_MOVEMENTS.length).toBeGreaterThanOrEqual(320)
+    expect(new Set(MOBILITY_MOVEMENTS.map((movement) => movement.id)).size).toBe(MOBILITY_MOVEMENTS.length)
+    expect(getMovementById('hip_90_90_switch')?.instructions).toContain('Lower both knees')
+    for (const movement of MOBILITY_MOVEMENTS) {
+      expect(movement.name).toBeTruthy()
+      expect(movement.categories.length).toBeGreaterThan(0)
+      expect(movement.routineTypes.length).toBeGreaterThan(0)
+      expect(movement.bodyRegions.length).toBeGreaterThan(0)
+      expect(movement.instructions.length).toBeGreaterThan(20)
+      expect(movement.instructions).not.toMatch(/stand or set up securely|set up securely for/i)
+      expect(movement.instructions.split(/(?<=[.!?])\s+/).filter(Boolean).length).toBeLessThanOrEqual(2)
+      expect(movement.shouldFeel.length).toBeGreaterThan(0)
+      expect(movement.avoid.length).toBeGreaterThan(0)
     }
-    expect(new Set(Object.keys(RECOVERY_EXERCISES)).size).toBe(Object.keys(RECOVERY_EXERCISES).length)
   })
 
-  it('rejects invented exercise selections', () => {
-    expect(resolveVettedExerciseSelections([{ id: 'invented-by-model' }, { id: 'cat-cow' }]).map((item) => item.id)).toEqual(['cat-cow'])
+  it('keeps no-equipment floor movements eligible and adds band work only when selected', () => {
+    const none = filterMovementCatalog({ routineType: 'full_body', equipmentAvailable: [] })
+    const noneIds = new Set(none.map((movement) => movement.id))
+    expect(noneIds.has('glute_bridge')).toBe(true)
+    expect(noneIds.has('dead_bug')).toBe(true)
+    expect(noneIds.has('open_book')).toBe(true)
+    expect(none.some((movement) => movement.equipment.includes('resistance_band'))).toBe(false)
+
+    const withBand = filterMovementCatalog({ routineType: 'full_body', equipmentAvailable: ['resistance_band'] })
+    expect(withBand.some((movement) => movement.equipment.includes('resistance_band'))).toBe(true)
+    expect(withBand.some((movement) => movement.id === 'glute_bridge')).toBe(true)
   })
 
-  it('counts laterality, reps, tempo, sets, rest, and transitions', () => {
-    const [exercise] = getCatalogExercises(['open-book'])
-    expect(estimateExerciseSeconds(exercise)).toBe(60)
+  it('counts unilateral sides and repetition tempo', () => {
+    const unilateral = getMovementById('open_book')
+    const bilateral = getMovementById('cat_cow')
+    expect(unilateral.unilateral).toBe(true)
+    expect(estimateExerciseSeconds(unilateral, 0)).toBeGreaterThan(estimateExerciseSeconds(bilateral, 0))
   })
 
-  it('keeps the real routine duration within the selected budget', () => {
-    for (const minutes of [5, 10, 15, 20, 30]) {
-      const routine = buildVettedRoutine({ availableMinutes: minutes })
-      expect(routine.estimatedSeconds).toBeLessThanOrEqual(minutes * 60)
-      expect(routine.exercises.length).toBeGreaterThan(0)
-    }
-    const tenMinuteQuick = buildVettedRoutine({ availableMinutes: 10, mode: 'quick' })
-    expect(tenMinuteQuick.estimatedSeconds).toBeGreaterThanOrEqual(8 * 60)
+  it('expands unilateral work into distinct left and right routine steps', () => {
+    const steps = expandUnilateralMovement(getMovementById('open_book'))
+    expect(steps.map((movement) => movement.side)).toEqual(['Left', 'Right'])
+    expect(steps.map((movement) => `${movement.id}:${movement.side.toLowerCase()}`)).toEqual(['open_book:left', 'open_book:right'])
   })
 
-  it('filters equipment, expands laterality, and excludes pain-tagged movements', () => {
-    const noEquipment = buildVettedRoutine({ availableMinutes: 10, mode: 'flexibility', availableEquipment: [] })
-    expect(noEquipment.exercises.every((item) => item.equipment.every((value) => ['Mat', 'Wall', 'Doorway', 'Stable support', 'Chair or bench'].includes(value)))).toBe(true)
-    const targeted = buildVettedRoutine({ availableMinutes: 10, mode: 'targeted', targetBodyParts: ['Hamstrings'], painExclusions: ['hamstring-pain'] })
-    expect(targeted.exercises.every((item) => !item.painExclusions.includes('hamstring-pain'))).toBe(true)
-    const sided = buildVettedRoutine({ selections: ['open-book'], availableMinutes: 5, availableEquipment: ['Exercise mat'] })
-    expect(sided.exercises.filter((item) => item.id === 'open-book').map((item) => item.side)).toEqual(['Left side', 'Right side'])
+  it('rejects an unknown movement ID instead of trusting generated content', () => {
+    const result = validateGeneratedRoutine({ routine: { exercises: [{ movementId: 'invented_movement' }] } })
+    expect(result.valid).toBe(false)
+    expect(result.errors).toContain('unknown_movement:invented_movement')
+  })
+})
+
+describe('mobility routine rules', () => {
+  it.each([5, 10])('fits a %i-minute routine within ten percent', (minutes) => {
+    const target = minutes * 60
+    const routine = buildDeterministicMobilityRoutine({ routineType: 'full_body', requestedDurationSeconds: target })
+    expect(routine.estimatedDurationSeconds).toBeGreaterThanOrEqual(target * 0.9)
+    expect(routine.estimatedDurationSeconds).toBeLessThanOrEqual(target * 1.1)
   })
 
-  it('rejects unsupported model doses and preserves an allowed catalog dose', () => {
-    const [resolved] = resolveVettedExerciseSelections([{ id: 'cat-cow', dose: { model: 'reps', reps: 999, sets: 9 } }])
-    expect(resolved.dose).toEqual(RECOVERY_EXERCISES['cat-cow'].doseModels[0])
+  it('keeps warm-up dynamic, light recovery non-plyometric, and lower body focused', () => {
+    const warmUp = buildDeterministicMobilityRoutine({ routineType: 'warm_up', requestedDurationSeconds: 600 })
+    const staticHolds = warmUp.exercises.filter((movement) => movement.prescriptionType === 'time' && movement.prescription.durationSeconds >= 30)
+    expect(staticHolds.length).toBeLessThanOrEqual(Math.floor(warmUp.exercises.length / 3))
+
+    const light = buildDeterministicMobilityRoutine({ routineType: 'light_recovery', requestedDurationSeconds: 600 })
+    expect(light.exercises.every((movement) => !movement.categories.includes('plyometrics'))).toBe(true)
+    expect(light.exercises.some((movement) => movement.prescriptionType === 'time')).toBe(true)
+
+    const lower = buildDeterministicMobilityRoutine({ routineType: 'lower_body', requestedDurationSeconds: 600 })
+    expect(lower.exercises.filter((movement) => movement.routineTypes.includes('lower_body')).length / lower.exercises.length).toBeGreaterThanOrEqual(0.65)
+    expect(lower.exercises.some((movement) => movement.prescriptionType === 'time')).toBe(true)
+  })
+
+  it('excludes pain-sensitive regions', () => {
+    const eligible = filterMovementCatalog({ routineType: 'lower_body', painSensitiveRegions: ['hamstrings'] })
+    expect(eligible.every((movement) => !movement.painSensitiveRegions.includes('hamstrings'))).toBe(true)
+  })
+
+  it('replays a saved routine without regenerating or changing prescriptions', () => {
+    const saved = { id: 'saved-1', routine: { routineName: 'Exact replay', exercises: [{ movementId: 'cat_cow', prescription: { type: 'reps', reps: 7, sets: 1, restSeconds: 0 } }, { movementId: 'open_book', prescription: { type: 'reps', reps: 4, sets: 1, restSeconds: 0 } }] } }
+    const replay = replaySavedMobilityRoutine(saved)
+    expect(replay).toEqual(saved.routine)
+    expect(replay).not.toBe(saved.routine)
   })
 })

@@ -13,7 +13,7 @@ describe('classifyFoodQuery', () => {
 describe('food ranking rules', () => {
   it('prioritizes verified exact matches', () => {
     const verified = { name: 'Banana', isVerified: true, sourceType: 'athlete_reload', calories: 100, protein: 1, carbohydrates: 25, fats: 0, standardServingSize: '1', servingWeight: 100 }
-    const external = { ...verified, isVerified: false, sourceType: 'usda_generic' }
+    const external = { ...verified, isVerified: false, sourceType: 'opennutrition' }
     expect(scoreFoodResult(verified, 'banana', 'generic')).toBeGreaterThan(scoreFoodResult(external, 'banana', 'generic'))
   })
 

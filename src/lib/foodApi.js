@@ -1,9 +1,10 @@
 import { supabase } from './supabaseClient'
 import { friendlyFeatureError, recordOperationalEvent } from './operationalEvents'
-import { classifyFoodQuery, deduplicateFoods, scoreFoodResult } from './foodSearchRules'
+import { deduplicateFoods, scoreFoodResult } from './foodSearchRules'
+import { normalizeFoodBarcode } from './foodBarcode'
 
 export async function findFoodByBarcode(barcode) {
-  const value = String(barcode ?? '').replace(/\D/g, '')
+  const value = normalizeFoodBarcode(barcode)
   if (!value) return null
   if (!supabase) throw new Error('Sign in to look up a barcode with OpenNutrition.')
   const { data, error } = await supabase.functions.invoke('search-food', { body: { barcode: value } })
@@ -17,6 +18,11 @@ export async function findFoodByBarcode(barcode) {
 export async function searchFoods(query) {
   const search = query.trim()
   if (search.length < 2) return []
+  const barcode = normalizeFoodBarcode(search)
+  if (barcode) {
+    const food = await findFoodByBarcode(barcode)
+    return food ? [food] : []
+  }
   if (!supabase) throw new Error('Sign in to search OpenNutrition, or add the food manually.')
   try {
     const { data, error } = await supabase.functions.invoke('search-food', { body: { query: search } })
@@ -118,9 +124,8 @@ function stripFoodState(food) {
 }
 
 function rankFoods(foods, query) {
-  const queryType = classifyFoodQuery(query, foods.map((food) => food.brand).filter(Boolean))
   return deduplicateFoods(foods.filter((food) => matchesQuery(food, query) && plausible(food)))
-    .sort((first, second) => personalScore(second) - personalScore(first) || scoreFoodResult(second, query, queryType) - scoreFoodResult(first, query, queryType))
+    .sort((first, second) => personalScore(second) - personalScore(first) || scoreFoodResult(second, query) - scoreFoodResult(first, query))
     .slice(0, 12)
 }
 

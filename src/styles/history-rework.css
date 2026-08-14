@@ -66,3 +66,121 @@
     height: 220px;
   }
 }
+
+/* Recovery guidance and physical Mobility sessions remain visually distinct. */
+.history-view {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.recovery-plan-history-row,
+.mobility-history-row {
+  border-left: 4px solid transparent;
+}
+
+.recovery-plan-history-row {
+  border-left-color: #e43d30;
+  background: linear-gradient(90deg, rgba(228, 61, 48, 0.055), transparent 38%);
+}
+
+.mobility-history-row {
+  border-left-color: #347d73;
+  background: linear-gradient(90deg, rgba(52, 125, 115, 0.065), transparent 38%);
+}
+
+.recovery-plan-history-row .history-row-main,
+.mobility-history-row .history-row-main {
+  grid-template-columns: 92px minmax(0, 1fr);
+}
+
+.history-record-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  line-height: 1.15;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.recovery-plan-record-kind {
+  background: #fff0ee;
+  color: #a62b22;
+}
+
+.mobility-record-kind {
+  background: #e9f5f2;
+  color: #24685f;
+}
+
+.recovery-plan-history-row .history-row-main > div,
+.mobility-history-row .history-row-main > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.recovery-plan-history-row small,
+.mobility-history-row small {
+  color: var(--ui-muted);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.recovery-plan-record-modal,
+.recovery-history-modal {
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(88vh, 900px);
+  overflow: auto;
+}
+
+.recovery-plan-priorities {
+  border-left: 4px solid #e43d30;
+  background: #fff7f5;
+}
+
+.history-recovery-plan-sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.history-recovery-plan-sections .history-detail-section {
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .record-filters {
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .history-recovery-plan-sections {
+    grid-template-columns: 1fr;
+  }
+
+  .recovery-plan-record-modal,
+  .recovery-history-modal {
+    width: min(100% - 16px, 860px);
+    max-height: calc(100dvh - 16px);
+  }
+}
+
+@media (max-width: 430px) {
+  .recovery-plan-history-row .history-row-main,
+  .mobility-history-row .history-row-main {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .history-record-kind {
+    justify-self: start;
+  }
+}

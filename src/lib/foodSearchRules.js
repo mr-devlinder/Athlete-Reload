@@ -17,7 +17,7 @@ export function classifyFoodQuery(value, knownBrands = []) {
   return 'mixed'
 }
 
-export function scoreFoodResult(food, value, queryType = classifyFoodQuery(value)) {
+export function scoreFoodResult(food, value) {
   const query = normalizeFoodQuery(value)
   const name = normalizeFoodQuery(food.name)
   const brand = normalizeFoodQuery(food.brand)
@@ -28,9 +28,6 @@ export function scoreFoodResult(food, value, queryType = classifyFoodQuery(value
   else if (terms.every((term) => name.includes(term) || brand.includes(term))) score += 65
   if (food.isVerified) score += 80
   if (brand && query.includes(brand)) score += 35
-  if (queryType === 'generic' && food.sourceType === 'usda_generic') score += 45
-  if (queryType === 'generic' && ['usda_branded', 'open_food_facts'].includes(food.sourceType)) score -= 20
-  if (queryType === 'branded' && ['usda_branded', 'open_food_facts'].includes(food.sourceType)) score += 35
   if ([food.calories, food.protein, food.carbohydrates, food.fats].every((item) => Number.isFinite(Number(item)))) score += 18
   if (food.standardServingSize && food.servingWeight) score += 12
   return score

@@ -2,12 +2,12 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { format, parseISO, startOfYear } from 'date-fns'
 import { calendarWeekStart, localDateKey, parseLocalCalendarDate } from '../utils/calendarDate'
+import { createRecoveryHistoryRecords } from '../domain/recovery/historyRecords'
 import { RecoveryPlanCard } from './RecommendationCard'
 import { AiDecisionReport, DecisionHeader } from './AiDecisionModal'
 import '../styles/history-rework.css'
 import { SectionHeading } from './SectionHeading'
 import { bodyPainAreas } from '../data/bodyPainMap'
-import { formatHydration } from '../utils/units'
 import { AppIcon } from './AppIcon'
 import { DialogShell } from './DialogShell'
 import { Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -25,8 +25,8 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ athleteProfile, checkouts = [], history, insights, onClear, onDeleteEntry, onFavoriteRoutine, recoveryCompletions = [], savedRoutines = [], schedule = [], weekStartsOn = 1 }) {
-  const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0
+export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry, recoveryCompletions = [], recoveryPlans = [], savedRoutines = [], schedule = [], weekStartsOn = 1 }) {
+  const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0 || recoveryPlans.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
@@ -39,7 +39,12 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
   const filteredHistory = filterByWindow(history, timeWindow, customRange)
   const filteredCheckouts = filterByWindow(checkouts, timeWindow, customRange)
   const filteredRecovery = filterByWindow(recoveryCompletions, timeWindow, customRange)
-  const archive = getHistoryArchive(recordFilter === 'checkout' || recordFilter === 'recovery' ? [] : filteredHistory, recordFilter === 'check-in' || recordFilter === 'recovery' ? [] : filteredCheckouts, recordFilter === 'check-in' || recordFilter === 'checkout' ? [] : filteredRecovery, weekStartsOn)
+  const filteredPlans = filterByWindow(recoveryPlans, timeWindow, customRange)
+  const includeCheckIns = ['all', 'events', 'check-in'].includes(recordFilter)
+  const includeCheckouts = ['all', 'events', 'checkout'].includes(recordFilter)
+  const includePlans = ['all', 'recovery-plan'].includes(recordFilter)
+  const includeRoutines = ['all', 'mobility-routine'].includes(recordFilter)
+  const archive = getHistoryArchive(includeCheckIns ? filteredHistory : [], includeCheckouts ? filteredCheckouts : [], includeRoutines ? filteredRecovery : [], includePlans ? filteredPlans : [], weekStartsOn)
   const summary = getWindowSummary(filteredHistory, filteredCheckouts)
   const analytics = getHistoryAnalytics(filteredHistory, filteredCheckouts, filteredRecovery)
   const chartData = getQuestionChartData(filteredHistory, filteredCheckouts, filteredRecovery, schedule)
@@ -152,7 +157,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
         {insights.length === 0 && <article className="insight-card muted"><strong>No reliable pattern yet</strong><p>Insights appear only when enough comparable records support something worth watching.</p></article>}
       </div></section>
 
-      <section className="history-records-section"><div className="history-section-heading records-heading"><div><span>Records</span><h2>Your Athlete Reload archive</h2></div><div className="record-filters" role="group" aria-label="Record type">{[['all','All'],['check-in','Check-ins'],['checkout','Checkouts'],['recovery','Recovery']].map(([value,label]) => <button aria-pressed={recordFilter === value} key={value} onClick={() => setRecordFilter(value)} type="button">{label}</button>)}</div></div>
+      <section className="history-records-section"><div className="history-section-heading records-heading"><div><span>Records</span><h2>Your Athlete Reload archive</h2></div><div className="record-filters" role="group" aria-label="Record type">{[['all','All'],['events','Events'],['check-in','Check-Ins'],['checkout','Checkouts'],['recovery-plan','Recovery Plans'],['mobility-routine','Mobility Routines']].map(([value,label]) => <button aria-pressed={recordFilter === value} key={value} onClick={() => setRecordFilter(value)} type="button">{label}</button>)}</div></div>
       <div className="history-list">
         {archive.length === 0 ? (
           <article className="history-row empty-history">
@@ -188,6 +193,7 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
                             checkouts={week.items.filter((item) => item.kind === 'checkout')}
                             checkIns={week.items.filter((item) => item.kind === 'check-in')}
                             recoveryCompletions={week.items.filter((item) => item.kind === 'recovery-completion')}
+                            recoveryPlans={week.items.filter((item) => item.kind === 'recovery-plan')}
                             onDeleteEntry={onDeleteEntry}
                             onSelectEntry={setSelectedEntry}
                           />
@@ -206,8 +212,6 @@ export function HistoryView({ athleteProfile, checkouts = [], history, insights,
       {selectedEntry && createPortal(
         <HistoryModal
           entry={selectedEntry}
-          unitSystem={athleteProfile?.unitSystem}
-          onFavoriteRoutine={onFavoriteRoutine}
           onClose={() => setSelectedEntry(null)}
           savedRoutines={savedRoutines}
         />,
@@ -284,7 +288,7 @@ function filterByWindow(entries, windowValue, customRange) {
     ? new Date(`${customRange.end}T23:59:59.999`)
     : endOfLocalDay(today)
   return entries.filter((entry) => {
-    const value = entry.date ?? entry.sessionDate ?? entry.completedAt ?? entry.createdAt
+    const value = entry.date ?? entry.sessionDate ?? entry.completedAt ?? entry.generatedAt ?? entry.refreshedAt ?? entry.createdAt
     if (!value) return false
     const parsed = new Date(String(value).includes('T') ? value : `${value}T12:00:00`)
     return !Number.isNaN(parsed.getTime()) && (!cutoff || parsed >= cutoff) && parsed <= end
@@ -356,16 +360,8 @@ function getWindowSummary(history, checkouts) {
   }
 }
 
-function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recoveryCompletions }) {
-  const completedRecoveryCheckoutIds = new Set(recoveryCompletions.map((item) => item.entry.sourceCheckoutId).filter(Boolean))
-  const recoveryItems = checkouts.filter((item) => (
-    item.entry.recommendation?.recoveryPlan && !completedRecoveryCheckoutIds.has(item.entry.id)
-  ))
-  const recoveryRecords = [
-    ...recoveryCompletions.map((item) => ({ ...item, historyKind: 'recovery-completion' })),
-    ...recoveryItems.map((item) => ({ ...item, historyKind: 'recovery' })),
-  ].sort((first, second) => getHistoryItemSortValue(second) - getHistoryItemSortValue(first))
-
+function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recoveryCompletions, recoveryPlans }) {
+  const recoveryRecords = recoveryCompletions.map((item) => ({ ...item, historyKind: 'mobility-routine' }))
   return (
     <>
       <div className="history-subsection">
@@ -423,22 +419,32 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
       </div>
 
       <div className="history-subsection">
-        <p className="eyebrow">Recovery</p>
+        <p className="eyebrow">Recovery Plans</p>
+        {recoveryPlans.length === 0 ? <p>No Recovery Plans this week.</p> : recoveryPlans.map((item) => {
+          const plan = item.entry.plan ?? {}
+          const priorities = plan.reportSections?.find((section) => section.id === 'recovery-priorities')?.items ?? plan.priorities ?? []
+          const eventTitle = item.entry.contextSnapshot?.event?.title ?? item.entry.contextSnapshot?.checkout?.title ?? 'Post-event recovery'
+          return <HistoryRow className="history-row recovery-plan-history-row" entry={item.entry} key={`recovery-plan-${item.entry.id}`} kind="recovery-plan" onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}><span className="history-record-kind recovery-plan-record-kind">Recovery Plan</span><div><p className="eyebrow">{format(parseISO(item.entry.generatedAt ?? item.entry.refreshedAt), 'MMM d, yyyy · h:mm a')}</p><strong>{eventTitle}</strong><small>{priorities.length} priorit{priorities.length === 1 ? 'y' : 'ies'}{priorities[0] ? ` · ${priorities[0]}` : ''}</small></div></HistoryRow>
+        })}
+      </div>
+
+      <div className="history-subsection">
+        <p className="eyebrow">Mobility Routines</p>
         {recoveryRecords.length === 0 ? (
-          <p>No saved recovery plans this week.</p>
+          <p>No Mobility Routines this week.</p>
         ) : (
           recoveryRecords.map((item) => {
-            const isCompletion = item.historyKind === 'recovery-completion'
-            const plan = isCompletion ? item.entry.details?.plan : item.entry.recommendation?.recoveryPlan
+            const isCompletion = true
+            const plan = { routine: item.entry.details?.routineSnapshot ?? item.entry.details?.plan?.routine ?? {} }
             const exerciseCount = plan?.routine?.exercises?.length ?? item.entry.details?.exerciseCount ?? 0
             const savedAt = isCompletion ? item.entry.completedAt : item.entry.createdAt
 
-            return <HistoryRow className="history-row recovery-history-row" entry={item.entry} key={`${item.historyKind}-${item.entry.id}`} kind={item.historyKind} onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
-              <span className="history-record-kind recovery-record-kind">{isCompletion ? 'Completed' : 'Plan'}</span>
+            return <HistoryRow className="history-row mobility-history-row" entry={item.entry} key={`${item.historyKind}-${item.entry.id}`} kind="mobility-routine" onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}>
+              <span className="history-record-kind mobility-record-kind">Mobility Routine</span>
               <div>
                 <p className="eyebrow">{savedAt ? format(parseISO(savedAt), 'MMM d, yyyy · h:mm a') : formatCheckoutDate(item.entry)}</p>
-                <strong>{plan?.routine?.title ?? 'Recovery routine'}</strong>
-                <small>{plan?.routine?.durationMinutes ?? '—'} min · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'}{isCompletion && item.entry.completionPercentage != null ? ` · ${Math.round(item.entry.completionPercentage)}% complete` : ''}</small>
+                <strong>{plan?.routine?.routineName ?? plan?.routine?.title ?? 'Mobility routine'}</strong>
+                <small>{Math.max(1, Math.round(Number(item.entry.plannedDurationSeconds ?? plan?.routine?.estimatedDurationSeconds ?? 0) / 60))} min · {exerciseCount} exercise{exerciseCount === 1 ? '' : 's'} · {Math.round(item.entry.completionPercentage ?? 0)}% completed</small>
               </div>
             </HistoryRow>
           })
@@ -582,17 +588,21 @@ function ClearHistoryModal({ onClear, onClose }) {
   )
 }
 
-function HistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines, unitSystem }) {
+function HistoryModal({ entry, onClose, savedRoutines }) {
   if (entry.historyKind === 'checkout') {
     return <CheckoutHistoryModal entry={entry} onClose={onClose} />
   }
 
-  if (entry.historyKind === 'recovery') {
-    return <RecoveryHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
+  if (entry.historyKind === 'recovery-completion') {
+    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} savedRoutines={savedRoutines} />
   }
 
-  if (entry.historyKind === 'recovery-completion') {
-    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} onFavoriteRoutine={onFavoriteRoutine} savedRoutines={savedRoutines} />
+  if (entry.historyKind === 'mobility-routine') {
+    return <RecoveryCompletionHistoryModal entry={entry} onClose={onClose} savedRoutines={savedRoutines} />
+  }
+
+  if (entry.historyKind === 'recovery-plan') {
+    return <RecoveryPlanRecordModal entry={entry} onClose={onClose} />
   }
 
   return (
@@ -714,8 +724,17 @@ function getReadinessBand(score) {
   return 'readiness-red'
 }
 
-function RecoveryCompletionHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
-  const plan = entry.details?.plan
+function RecoveryPlanRecordModal({ entry, onClose }) {
+  const plan = entry.plan ?? {}
+  const sections = plan.reportSections ?? []
+  const priorities = sections.find((section) => section.id === 'recovery-priorities')?.items ?? plan.priorities ?? []
+  const eventTitle = entry.contextSnapshot?.event?.title ?? entry.contextSnapshot?.checkout?.title ?? 'Post-event recovery'
+  return <div className="modal-backdrop history-modal-backdrop" onClick={onClose}><section className="event-modal history-modal recovery-plan-record-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Recovery Plan" title={eventTitle} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><p>{plan.summary}</p>{priorities.length > 0 && <section className="history-detail-section recovery-plan-priorities"><h3>{priorities.length} priorities</h3><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></section>}<div className="history-recovery-plan-sections">{sections.filter((section) => section.id !== 'recovery-priorities').map((section) => <section className="history-detail-section" key={section.id}><h3>{section.title}</h3><p>{section.summary}</p>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</section>)}</div><footer className="ai-decision-footer"><button className="primary-button" onClick={onClose} type="button">Done</button></footer></section></div>
+}
+
+function RecoveryCompletionHistoryModal({ entry, onClose, savedRoutines }) {
+  const routine = entry.details?.routineSnapshot ?? entry.details?.plan?.routine ?? {}
+  const plan = { routine, planType: entry.routineType }
   const savedRoutine = findSavedRecoveryRoutine(savedRoutines, plan, entry.sourceCheckoutId)
 
   return (
@@ -727,13 +746,13 @@ function RecoveryCompletionHistoryModal({ entry, onClose, onFavoriteRoutine, sav
         aria-modal="true"
       >
         <div className="schedule-header">
-          <SectionHeading eyebrow="Recovery history" title={plan?.routine?.title ?? 'Recovery routine'} />
+          <SectionHeading eyebrow="Mobility Routine" title={routine.routineName ?? routine.title ?? 'Mobility routine'} />
           <button className="ghost-close" onClick={onClose} type="button">Close</button>
         </div>
         <div className="history-detail-grid recovery-history-summary">
           <span><strong>Finished</strong>{format(parseISO(entry.finishedAt ?? entry.completedAt), 'MMM d, yyyy · h:mm a')}</span>
           <span><strong>Routine type</strong>{formatRecoveryPlanType(entry.routineType ?? plan?.planType)}</span>
-          <span><strong>Routine length</strong>{plan?.routine?.durationMinutes ?? '—'} min</span>
+          <span><strong>Routine length</strong>{Math.max(1, Math.round(Number(entry.plannedDurationSeconds ?? routine.estimatedDurationSeconds ?? 0) / 60))} min</span>
           <span><strong>Exercises</strong>{plan?.routine?.exercises?.length ?? entry.details?.exerciseCount ?? '—'}</span>
           <span><strong>Completion</strong>{entry.completionPercentage == null ? 'Not measured' : `${Math.round(entry.completionPercentage)}%`}</span>
           <span><strong>Completed / skipped</strong>{entry.movementsCompleted?.length ?? 0} / {entry.movementsSkipped?.length ?? 0}</span>
@@ -741,53 +760,8 @@ function RecoveryCompletionHistoryModal({ entry, onClose, onFavoriteRoutine, sav
           <span><strong>Equipment</strong>{getRecoveryRoutineEquipment(plan?.routine)}</span>
         </div>
         {entry.hurtEvents?.length > 0 && <section className="history-detail-section"><h3>Movement safety notes</h3><ul>{entry.hurtEvents.map((event, index) => <li key={`${event.movementId ?? event.exercise ?? 'movement'}-${index}`}>{event.exercise ?? event.movementId ?? 'Movement'}: {String(event.response ?? 'pain reported').replaceAll('_', ' ')} — {String(event.actionTaken ?? 'stopped').replaceAll('_', ' ')}</li>)}</ul></section>}
-        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan details are available.</p>}
-        {plan?.routine && (
-          <button className={`secondary-button recovery-modal-favorite ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
-            {savedRoutine?.isFavorite ? 'Favorited routine' : 'Favorite routine'}
-          </button>
-        )}
-      </section>
-    </div>
-  )
-}
-
-function RecoveryHistoryModal({ entry, onClose, onFavoriteRoutine, savedRoutines }) {
-  const plan = entry.recommendation?.recoveryPlan
-  const savedRoutine = findSavedRecoveryRoutine(savedRoutines, plan, entry.id)
-
-  return (
-    <div className="modal-backdrop history-modal-backdrop" onClick={onClose}>
-      <section
-        className="event-modal history-modal recovery-history-modal glass-panel"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-      >
-        <div className="schedule-header">
-          <SectionHeading
-            eyebrow={formatCheckoutDate(entry)}
-            title="Recovery details."
-          />
-          <button className="ghost-close" onClick={onClose} type="button">
-            Close
-          </button>
-        </div>
-        {plan?.routine && (
-          <div className="history-detail-grid recovery-history-summary">
-            <span><strong>Routine type</strong>{formatRecoveryPlanType(plan.planType)}</span>
-            <span><strong>Routine length</strong>{plan.routine.durationMinutes ?? '—'} min</span>
-            <span><strong>Exercises</strong>{plan.routine.exercises?.length ?? '—'}</span>
-            <span><strong>Body areas</strong>{getRecoveryRoutineAreas(plan.routine)}</span>
-            <span><strong>Equipment</strong>{getRecoveryRoutineEquipment(plan.routine)}</span>
-          </div>
-        )}
-        {plan ? <SavedRecoveryPlan plan={plan} /> : <p>No saved recovery plan for this session.</p>}
-        {plan?.routine && (
-          <button className={`secondary-button recovery-modal-favorite ${savedRoutine?.isFavorite ? 'favorite-active' : ''}`} onClick={() => onFavoriteRoutine?.(entry)} type="button">
-            {savedRoutine?.isFavorite ? 'Favorited routine' : 'Favorite routine'}
-          </button>
-        )}
+        {routine?.exercises?.length ? <SavedRecoveryPlan plan={plan} /> : <p>No saved mobility sequence is available.</p>}
+        {savedRoutine?.isFavorite && <p className="recovery-saved-message">Saved in your routine library.</p>}
       </section>
     </div>
   )
@@ -798,14 +772,14 @@ function SavedRecoveryPlan({ plan }) {
 
   return (
     <section className="history-detail-section saved-recovery-plan">
-      <p className="eyebrow">Generated recovery routine</p>
-      <h3>{routine?.title ?? 'Recovery routine'}</h3>
+      <p className="eyebrow">Mobility routine plan</p>
+      <h3>{routine?.routineName ?? routine?.title ?? 'Mobility routine'}</h3>
       {routine?.goal && <p className="saved-recovery-goal"><strong>Goal</strong>{routine.goal}</p>}
       {routine?.summary && <p className="saved-recovery-summary">{routine.summary}</p>}
 
       {routine?.exercises?.length > 0 && (
         <div className="saved-recovery-routine">
-          <strong>{routine.durationMinutes ?? 10}-minute routine</strong>
+          <strong>{Math.max(1, Math.round(Number(routine.estimatedDurationSeconds ?? (routine.durationMinutes ? routine.durationMinutes * 60 : 600)) / 60))}-minute routine</strong>
           <ol>
             {routine.exercises.map((exercise, index) => (
               <li key={`${exercise.name}-${index}`}>
@@ -819,8 +793,8 @@ function SavedRecoveryPlan({ plan }) {
                       <em>{exercise.side ?? 'Both sides'}{exercise.durationSeconds ? ` · ${exercise.durationSeconds}s` : exercise.reps ? ` · ${exercise.reps} reps` : ''}</em>
                     </div>
                     {exercise.instruction && <p>{exercise.instruction}</p>}
-                    {exercise.feel && <small><strong>You should feel:</strong> {exercise.feel}</small>}
-                    {exercise.avoid && <small><strong>Avoid:</strong> {exercise.avoid}</small>}
+                    {exercise.feel && <small><strong>You Should Feel:</strong> {formatRecoveryCue(exercise.feel)}</small>}
+                    {exercise.avoid && <small><strong>Avoid:</strong> {formatRecoveryCue(exercise.avoid)}</small>}
                     {exercise.why && <small><strong>Why it is included:</strong> {exercise.why}</small>}
                   </div>
                 </details>
@@ -836,6 +810,13 @@ function SavedRecoveryPlan({ plan }) {
 function formatRecoveryPlanType(value) {
   if (!value) return 'Recovery routine'
   return String(value).split('-').map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
+}
+
+function formatRecoveryCue(value) {
+  const text = String(value ?? '').trim().replace(/\s+/g, ' ')
+  if (!text) return ''
+  const sentence = `${text.charAt(0).toUpperCase()}${text.slice(1)}`
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
 }
 
 function getRecoveryRoutineAreas(routine) {
@@ -881,39 +862,6 @@ function formatCheckoutDate(entry) {
 function valueWithUnit(value, unit) {
   if (value === undefined || value === null) return undefined
   return `${value}${unit}`
-}
-
-function getCheckInDetailSections(entry, unitSystem = 'imperial') {
-  return [
-    {
-      title: 'Event',
-      items: presentItems([
-        ['Event', entry.eventTitle ?? entry.session],
-        ['Date', formatHistoryDate(entry)],
-        ['Expected difficulty', valueWithUnit(entry.expectedDifficulty, '/10')],
-      ]),
-    },
-    {
-      title: 'Readiness inputs',
-      items: presentItems([
-        ['Energy', valueWithUnit(entry.energy, '/5')],
-        ['Muscle soreness', valueWithUnit(entry.soreness, '/5')],
-        ['General fatigue', valueWithUnit(entry.fatigue, '/5')],
-        ['Leg heaviness', valueWithUnit(entry.legHeaviness, '/5')],
-        ['Illness symptoms', formatIllness(entry.illnessSymptoms)],
-      ]),
-    },
-    {
-      title: 'Recovery context',
-      items: presentItems([
-        ['Sleep', valueWithUnit(entry.sleep, 'h')],
-        ['Sleep quality', valueWithUnit(entry.sleepQuality, '/5')],
-        ['Stress', valueWithUnit(entry.stress, '/5')],
-        ['Today\'s hydration', entry.hydrationMl === undefined ? undefined : formatHydration(entry.hydrationMl, unitSystem)],
-        ['Recovery actions', entry.recoveryActions?.length ? entry.recoveryActions.join(', ') : undefined],
-      ]),
-    },
-  ].filter((section) => section.items.length > 0)
 }
 
 function getCheckoutDetailSections(entry) {
@@ -1008,15 +956,6 @@ function yesNo(value) {
   return value ? 'Yes' : 'No'
 }
 
-function formatIllness(value) {
-  if (value === undefined || value === null) return undefined
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) return value
-  if (numeric === 0) return '0/5 - None'
-  if (numeric <= 2) return `${numeric}/5 - Mild`
-  return `${numeric}/5 - Unwell`
-}
-
 function getCutoffDate(days) {
   if (days === null) return null
 
@@ -1030,12 +969,12 @@ function getCutoffDate(days) {
   ].join('-')
 }
 
-function getHistoryArchive(history, checkouts, recoveryCompletions = [], weekStartsOn = 1) {
+function getHistoryArchive(history, checkouts, recoveryCompletions = [], recoveryPlans = [], weekStartsOn = 1) {
   const years = new Map()
   const items = [
     ...history.map((entry) => ({ date: entry.date, entry, kind: 'check-in' })),
     ...checkouts.map((entry) => ({ date: entry.date, entry, kind: 'checkout' })),
-    ...recoveryCompletions.map((entry) => ({ date: localDateKey(entry.completedAt), entry, kind: 'recovery-completion' })),
+    ...createRecoveryHistoryRecords(recoveryPlans, recoveryCompletions, localDateKey),
   ].filter((item) => item.date)
 
   items.forEach((item) => {

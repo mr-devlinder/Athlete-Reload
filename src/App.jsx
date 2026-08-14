@@ -51,8 +51,8 @@ import {
   createEventTemplate,
   createPainIssue,
   createRecommendationRecord,
-  createRecoveryResponse,
   createRecoveryRoutineCompletion,
+  updateRecoveryRoutineCompletion,
   upsertRecoveryPlan,
   createSavedRecoveryRoutine,
   createPainReports,
@@ -62,19 +62,18 @@ import {
   deleteEventTemplate,
   deleteHistoryEntryComplete,
   deleteRecoveryRoutineCompletion,
+  deleteRecoveryPlan,
   deleteScheduleEvent,
   deleteShareAuditLog,
   deleteTournamentWithGames,
   recordLegalConsent,
   updateAssociation,
   updatePainIssue,
-  updateSavedRecoveryRoutine,
   upsertPrivacyPreferences,
   upsertDailyWellness,
   upsertAthleteProfile,
   upsertAthleteBaselines,
   upsertAthleteInsights,
-  updateTrainingCheckout,
   updateScheduleEvent,
   saveTournamentWithGames,
   saveCheckInWithPainReports,
@@ -87,7 +86,7 @@ import { getAgeAccess } from './domain/age'
 import { getCheckoutRecommendation } from './domain/checkoutRecommendation'
 import { getActivityDemandProfile } from './domain/activityDemands'
 import { transitionPainIssue } from './domain/painLifecycle'
-import { RECOVERY_EXERCISE_LIST } from './domain/recovery/exerciseCatalog'
+import { createValidatedMobilityRoutine, filterMovementCatalog, normalizeRoutineType } from './domain/recovery/routineBuilder'
 import { useAthleteSnapshotController } from './features/app/useAthleteSnapshotController'
 import { displayPreferenceDefaults, normalizeDisplayPreferences } from './lib/displayPreferences'
 import { getSportContext } from './data/sportProfiles'
@@ -694,12 +693,6 @@ function attachTournamentContext(event, tournaments, schedule) {
   }
 }
 
-function getRecoveryRoutineSignature(plan) {
-  const routine = plan?.routine ?? plan
-  const exercises = routine?.exercises?.map((exercise) => `${exercise.name}|${exercise.side ?? ''}|${exercise.durationSeconds ?? exercise.reps ?? ''}`) ?? []
-  return `${routine?.title ?? ''}::${exercises.join('::')}`
-}
-
 function App() {
   const savedState = useMemo(() => loadSavedState(), [])
   const [session, setSession] = useState(null)
@@ -726,10 +719,9 @@ function App() {
   const [submittedRecommendationStatus, setSubmittedRecommendationStatus] = useState('local')
   const [checkInAiError, setCheckInAiError] = useState('')
   const [generatedRecoveryPlan, setGeneratedRecoveryPlan] = useState(null)
-  const [generatedRecoveryCheckoutId, setGeneratedRecoveryCheckoutId] = useState(null)
-  const [isGeneratedRecoveryPlanSaved, setIsGeneratedRecoveryPlanSaved] = useState(false)
+  const [generatedMobilityRoutine, setGeneratedMobilityRoutine] = useState(null)
   const [recoveryPlanStatus, setRecoveryPlanStatus] = useState('idle')
-  const recoveryPlanSaveInFlightRef = useRef(false)
+  const [mobilityRoutineStatus, setMobilityRoutineStatus] = useState('idle')
   const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
     scoreLabel: 'readiness',
     session: '',
@@ -752,10 +744,10 @@ function App() {
   const [painIssues, setPainIssues] = useState(savedState?.painIssues ?? [])
   const [savedRoutines, setSavedRoutines] = useState(savedState?.savedRoutines ?? [])
   const [recoveryCompletions, setRecoveryCompletions] = useState(savedState?.recoveryCompletions ?? [])
+  const [recoveryPlans, setRecoveryPlans] = useState(savedState?.recoveryPlans ?? [])
+  const completedMobilityRoutines = useMemo(() => recoveryCompletions.filter((record) => !['planned', 'in_progress'].includes(record.status)), [recoveryCompletions])
   const [shareAuditLogs, setShareAuditLogs] = useState(savedState?.shareAuditLogs ?? [])
   const [tournaments, setTournaments] = useState(savedState?.tournaments ?? [])
-  const [isReplayingSavedRoutine, setIsReplayingSavedRoutine] = useState(false)
-  const [replayingRoutineId, setReplayingRoutineId] = useState(null)
   const [dailyWellness, setDailyWellness] = useState(() => normalizeWellnessUnits(savedState?.dailyWellness ?? ({ date: getTodayIso(), hydrationMl: 0, nutritionEntries: [] })))
   const [nutritionHistory, setNutritionHistory] = useState(() => (savedState?.nutritionHistory ?? []).map(normalizeWellnessUnits))
   const [privacyPreferences, setPrivacyPreferences] = useState(
@@ -999,7 +991,7 @@ function App() {
       })
 
       checkouts.forEach((checkout) => {
-        if (checkout.date !== today || checkout.recommendation?.recoveryPlan) return
+        if (checkout.date !== today || recoveryPlans.some((plan) => plan.sourceCheckoutId === checkout.id)) return
 
         const key = `recovery-${checkout.id}`
         if (sentReminderKeysRef.current.has(key)) return
@@ -1015,7 +1007,7 @@ function App() {
     notifyDueActions()
     const interval = window.setInterval(notifyDueActions, 60_000)
     return () => window.clearInterval(interval)
-  }, [checkouts, history, privacyPreferences.remindersEnabled, schedule])
+  }, [checkouts, history, privacyPreferences.remindersEnabled, recoveryPlans, schedule])
 
   useEffect(() => {
     if (!supabase) {
@@ -1121,6 +1113,7 @@ function App() {
       painIssues,
       savedRoutines,
       recoveryCompletions,
+      recoveryPlans,
       shareAuditLogs,
       tournaments,
       dailyWellness,
@@ -1128,7 +1121,7 @@ function App() {
       privacyPreferences,
       schedule,
     })
-  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, eventTemplates, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, savedRoutines, schedule, shareAuditLogs, tournaments])
+  }, [associations, athleteProfile, checkIn, checkouts, dailyWellness, eventTemplates, history, isAuthReady, isSupabaseSession, nutritionHistory, painIssues, painReports, privacyPreferences, recoveryCompletions, recoveryPlans, savedRoutines, schedule, shareAuditLogs, tournaments])
 
   useAthleteSnapshotController({
     enabled: isSupabaseSession,
@@ -1150,11 +1143,10 @@ function App() {
     setPainIssues(data.painIssues)
     setSavedRoutines(data.savedRoutines)
     setRecoveryCompletions(data.recoveryCompletions ?? [])
+    setRecoveryPlans(data.recoveryPlans ?? [])
     const latestLivingPlan = data.recoveryPlans?.[0]
     if (latestLivingPlan?.plan) {
-      setGeneratedRecoveryPlan(latestLivingPlan.plan)
-      setGeneratedRecoveryCheckoutId(latestLivingPlan.sourceCheckoutId ?? null)
-      setIsGeneratedRecoveryPlanSaved(true)
+      setGeneratedRecoveryPlan({ ...latestLivingPlan.plan, routine: undefined, generatedAt: latestLivingPlan.generatedAt ?? latestLivingPlan.refreshedAt, recordType: 'recovery_plan', sourceCheckoutId: latestLivingPlan.sourceCheckoutId ?? null })
       setRecoveryPlanStatus('saved')
     }
     setShareAuditLogs(data.shareAuditLogs)
@@ -1791,7 +1783,7 @@ function App() {
   async function deleteHistoryEntry(entry, kind) {
     if (!entry?.id) return
 
-    if (kind === 'recovery-completion') {
+    if (kind === 'recovery-completion' || kind === 'mobility-routine') {
       const removedCompletion = recoveryCompletions.find((item) => item.id === entry.id) ?? entry
       setRecoveryCompletions((current) => current.filter((item) => item.id !== entry.id))
 
@@ -1801,6 +1793,22 @@ function App() {
         } catch (error) {
           console.error(error)
           setRecoveryCompletions((current) => [removedCompletion, ...current.filter((item) => item.id !== entry.id)])
+          setDataStatus('error')
+          throw error
+        }
+      }
+      return
+    }
+
+    if (kind === 'recovery-plan') {
+      const removedPlan = recoveryPlans.find((item) => item.id === entry.id) ?? entry
+      setRecoveryPlans((current) => current.filter((item) => item.id !== entry.id))
+      if (isSupabaseSession) {
+        try {
+          await deleteRecoveryPlan(entry.id)
+        } catch (error) {
+          console.error(error)
+          setRecoveryPlans((current) => [removedPlan, ...current.filter((item) => item.id !== entry.id)])
           setDataStatus('error')
           throw error
         }
@@ -2186,37 +2194,57 @@ function App() {
   }
 
   async function persistLivingRecoveryPlan(plan, checkout, completedEvent, upcomingEvent, actionStatuses = {}) {
-    if (!isSupabaseSession || !plan) return
-    await upsertRecoveryPlan({
+    if (!plan) return null
+    const record = {
       sourceCheckoutId: checkout?.id ?? null,
       sourceEventId: checkout?.eventId ?? completedEvent?.id ?? null,
       nextEventId: upcomingEvent?.id ?? null,
       plan,
-      inputSignature: `recovery:${checkout?.id ?? 'standalone'}:${plan.planType ?? 'session'}`,
+      inputSignature: `recovery:${checkout?.id ?? 'standalone'}:${plan.generatedAt ?? Date.now()}`,
       contextSnapshot: {
-        checkoutId: checkout?.id ?? null,
-        eventId: checkout?.eventId ?? completedEvent?.id ?? null,
-        nextEventId: upcomingEvent?.id ?? null,
+        checkout: checkout ? withoutNotes(checkout) : null,
+        event: completedEvent ? withoutNotes(completedEvent) : null,
+        nextEvent: upcomingEvent ? withoutNotes(upcomingEvent) : null,
+        recentCheckin: history.find((entry) => entry.eventId === checkout?.eventId) ?? null,
+        fatigue: checkout?.postFatigue ?? null,
+        soreness: checkout?.postSoreness ?? null,
+        pain: checkout?.painMap ?? null,
+        sleep: dailyWellness?.sleep ?? null,
+        nutritionContext,
+        hydrationContext: { hydrationMl: dailyWellness?.hydrationMl ?? null },
         wellnessUpdatedAt: dailyWellness?.updatedAt ?? null,
       },
       actionStatuses,
       engineVersion: plan.engineVersion,
       promptVersion: plan.promptVersion,
       catalogVersion: plan.catalogVersion,
-    })
+    }
+    if (!isSupabaseSession) {
+      const local = { ...record, generatedAt: plan.generatedAt, id: `recovery-plan-${Date.now()}`, type: 'recovery_plan' }
+      setRecoveryPlans((current) => [local, ...current])
+      return local
+    }
+    const saved = await upsertRecoveryPlan(record)
+    setRecoveryPlans((current) => [saved, ...current.filter((item) => item.id !== saved.id)])
+    return saved
   }
 
-  async function generateRecoveryPlan({ equipment, planType, targetedAreas, timeAvailable }) {
-    recoveryPlanSaveInFlightRef.current = false
+  async function generateRecoveryContent({ kind = 'recovery_plan', equipmentAvailable = [], routineType = 'session_recovery', targetBodyParts = [], timeAvailableMinutes = 10 } = {}) {
+    const isMobility = kind === 'mobility_routine'
+    const planType = isMobility ? normalizeRoutineType(routineType) : 'session'
+    const equipment = equipmentAvailable
+    const targetedAreas = targetBodyParts
+    const timeAvailable = `${Math.max(5, Math.min(30, Number(timeAvailableMinutes) || 10))} minutes`
     const latestCheckout = [...checkouts]
       .sort((first, second) => new Date(second.createdAt ?? `${second.date}T12:00:00`) - new Date(first.createdAt ?? `${first.date}T12:00:00`))[0]
 
-    if (!latestCheckout && ['session', 'competition'].includes(planType)) {
-      setRecoveryPlanStatus('error')
+    if (!latestCheckout && (!isMobility || planType === 'session_recovery')) {
+      if (isMobility) setMobilityRoutineStatus('error')
+      else setRecoveryPlanStatus('error')
       return
     }
 
-    const usesCheckoutContext = ['session', 'competition'].includes(planType)
+    const usesCheckoutContext = !isMobility || planType === 'session_recovery'
     const contextCheckout = usesCheckoutContext ? latestCheckout : null
     const completedEvent = contextCheckout ? schedule.find((event) => event.id === contextCheckout.eventId) : null
     const preCheckIn = contextCheckout ? history.find((entry) => entry.eventId === contextCheckout.eventId) : null
@@ -2238,8 +2266,8 @@ function App() {
     }
     const recentRoutineSequences = [
       ...savedRoutines.map((item) => item?.routine?.routine?.exercises ?? item?.routine?.exercises ?? []),
-      ...checkouts.map((item) => item?.recommendation?.recoveryPlan?.routine?.exercises ?? []),
-    ].map((routine) => routine.map((exercise) => exercise?.name).filter(Boolean)).filter((routine) => routine.length > 0).slice(0, 6)
+      ...completedMobilityRoutines.map((item) => item?.details?.routineSnapshot?.exercises ?? []),
+    ].map((routine) => routine.map((exercise) => exercise?.movementId ?? exercise?.id ?? exercise?.name).filter(Boolean)).filter((routine) => routine.length > 0).slice(0, 6)
     const recentRoutineExerciseNames = recentRoutineSequences.flat().slice(0, 60)
     const weekStart = Date.now() - (7 * 24 * 60 * 60 * 1000)
     const weeklySessions = checkouts.filter((item) => new Date(item.createdAt ?? `${item.date}T12:00:00`).getTime() >= weekStart)
@@ -2253,13 +2281,19 @@ function App() {
       totalSessionLoad: weeklySessions.reduce((sum, item) => sum + (Number(item.actualMinutes ?? item.duration ?? 0) * Number(item.difficulty ?? item.actualIntensity ?? 0)), 0),
     }
 
-    setRecoveryPlanStatus('loading')
-    setIsReplayingSavedRoutine(false)
+    if (isMobility) setMobilityRoutineStatus('loading')
+    else setRecoveryPlanStatus('loading')
 
     try {
       const generatedAt = new Date().toISOString()
       const scheduleContext = getRecommendationScheduleContext(schedule, completedEvent ?? nextScheduledEvent)
       const recentEvents = checkouts.slice(0, 4).map(withoutNotes)
+      const eligibleCatalog = isMobility ? filterMovementCatalog({
+        routineType: planType,
+        equipmentAvailable: equipment,
+        painSensitiveRegions: Object.keys(activePain),
+        targetBodyParts: targetedAreas,
+      }) : []
       const plan = await generateAiRecommendation({
         athleteProfile,
         athleteContext: buildAthleteContext({
@@ -2285,11 +2319,13 @@ function App() {
         preCheckIn: withoutNotes(preCheckIn),
         recentPainReports: painReports.slice(0, 12).map(withoutNotes),
         recentEvents,
-        recentRoutineExerciseNames,
-        recentRoutineSequences,
-        recoveryCompletions: recoveryCompletions.slice(0, 5),
-        recoveryCatalog: RECOVERY_EXERCISE_LIST.map(({ id, name, category, movementType, laterality, equipment, targetBodyParts, targetMuscles, sportDemandTags, recoveryGoalTags, doseModels }) => ({ id, name, category, movementType, laterality, equipment, targetBodyParts, targetMuscles, sportDemandTags, recoveryGoalTags, doseModels })),
-        requestType: 'recovery_plan',
+        ...(isMobility ? {
+          recentRoutineExerciseNames,
+          recentRoutineSequences,
+          recoveryCompletions: completedMobilityRoutines.slice(0, 5),
+          recoveryCatalog: eligibleCatalog.map(({ id, name, categories, routineTypes, bodyRegions, targetAreas, equipment: requiredEquipment, difficulty, prescriptionType, defaults, unilateral, position }) => ({ id, name, categories, routineTypes, bodyRegions, targetAreas, equipment: requiredEquipment, difficulty, prescriptionType, defaults, unilateral, position })),
+        } : {}),
+        requestType: isMobility ? 'mobility_routine' : 'recovery_plan',
         scheduleContext,
         sportContext: getSportContext({ athleteProfile, event: completedEvent, workload: latestCheckout?.sportWorkload }),
         targetedAreas,
@@ -2298,18 +2334,44 @@ function App() {
         weeklyWorkloadContext,
       }, { personalize: privacyPreferences.aiPersonalizationEnabled !== false })
 
-      setGeneratedRecoveryPlan(plan)
-      setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
-      setIsGeneratedRecoveryPlanSaved(false)
-      setRecoveryPlanStatus('ai')
-      await persistLivingRecoveryPlan(plan, latestCheckout, completedEvent, nextScheduledEvent, {
-        fueling: 'pending', hydration: 'pending', routine: 'pending', sleep: 'pending',
-      }).catch((error) => console.warn('Unable to persist the living recovery plan.', error))
+      if (isMobility) {
+        const validated = createValidatedMobilityRoutine({
+          routine: plan.routine ?? plan,
+          routineType: planType,
+          requestedDurationSeconds: Number.parseInt(timeAvailable, 10) * 60,
+          equipmentAvailable: equipment,
+          painSensitiveRegions: Object.keys(activePain),
+          targetBodyParts: targetedAreas,
+          previousMovementIds: recentRoutineExerciseNames,
+        })
+        setGeneratedMobilityRoutine({ ...validated.routine, generatedAt, generationContext: { checkoutId: contextCheckout?.id ?? null, equipmentAvailable: equipment, painRegions: Object.keys(activePain), targetBodyParts: targetedAreas }, validationErrors: validated.errors })
+        setMobilityRoutineStatus('ai')
+      } else {
+        const recoveryPlan = { ...plan, generatedAt, recordType: 'recovery_plan', sourceCheckoutId: contextCheckout?.id ?? null }
+        delete recoveryPlan.routine
+        setGeneratedRecoveryPlan(recoveryPlan)
+        setRecoveryPlanStatus('ai')
+        await persistLivingRecoveryPlan(recoveryPlan, latestCheckout, completedEvent, nextScheduledEvent, {
+          fueling: 'pending', hydration: 'pending', sleep: 'pending',
+        }).catch((error) => console.warn('Unable to persist the recovery plan.', error))
+      }
     } catch (error) {
       console.error(error)
+      if (isMobility) {
+        const fallback = createValidatedMobilityRoutine({
+          routine: { exercises: [] },
+          routineType: planType,
+          requestedDurationSeconds: Number.parseInt(timeAvailable, 10) * 60,
+          equipmentAvailable: equipment,
+          painSensitiveRegions: Object.keys(activePain),
+          targetBodyParts: targetedAreas,
+        }).routine
+        setGeneratedMobilityRoutine({ ...fallback, generatedAt: new Date().toISOString(), generationContext: { checkoutId: contextCheckout?.id ?? null, equipmentAvailable: equipment, painRegions: Object.keys(activePain), targetBodyParts: targetedAreas } })
+        setMobilityRoutineStatus('local')
+        return
+      }
       if (isSupabaseSession) {
         setGeneratedRecoveryPlan(null)
-        setGeneratedRecoveryCheckoutId(null)
         setRecoveryPlanStatus('error')
         return
       }
@@ -2326,110 +2388,88 @@ function App() {
       setGeneratedRecoveryPlan({
         ...fallback,
         planType,
-        routine: {
-          ...fallback.routine,
-          durationMinutes: Math.max(5, Math.min(30, Number.parseInt(timeAvailable, 10) || 15)),
-        },
+        generatedAt: new Date().toISOString(),
+        recordType: 'recovery_plan',
+        sourceCheckoutId: contextCheckout?.id ?? null,
+        routine: undefined,
       })
-      setGeneratedRecoveryCheckoutId(contextCheckout?.id ?? null)
       setRecoveryPlanStatus('local')
       await persistLivingRecoveryPlan({
         ...fallback,
         planType,
-        routine: {
-          ...fallback.routine,
-          durationMinutes: Math.max(5, Math.min(30, Number.parseInt(timeAvailable, 10) || 15)),
-        },
+        generatedAt: new Date().toISOString(),
+        recordType: 'recovery_plan',
+        routine: undefined,
       }, contextCheckout, completedEvent, nextScheduledEvent, {
-        fueling: 'pending', hydration: 'pending', routine: 'pending', sleep: 'pending',
+        fueling: 'pending', hydration: 'pending', sleep: 'pending',
       }).catch((persistError) => console.warn('Unable to persist the local recovery plan.', persistError))
     }
   }
 
-  async function saveRecoveryPlan(plan) {
-    const checkoutId = generatedRecoveryCheckoutId
-    const checkout = checkouts.find((item) => item.id === checkoutId)
-    const completedEvent = checkout ? schedule.find((event) => event.id === checkout.eventId) : null
-    const planNextEvent = completedEvent ? getNextScheduledEvent(schedule, completedEvent) : nextEvent
-
-    if (!plan || recoveryPlanSaveInFlightRef.current || isGeneratedRecoveryPlanSaved) return false
-    recoveryPlanSaveInFlightRef.current = true
-
-    const completion = {
-      completedAt: new Date().toISOString(),
-      details: { plan },
-      id: `recovery-completion-${Date.now()}`,
-      routineId: null,
-      sourceCheckoutId: checkout?.id ?? null,
-    }
-
-    try {
-      if (isSupabaseSession) {
-        await persistLivingRecoveryPlan(plan, checkout, completedEvent, planNextEvent, {
-          fueling: 'pending', hydration: 'pending', routine: 'completed', sleep: 'pending',
-        })
-      }
-      const savedCompletion = isSupabaseSession
-        ? await createRecoveryRoutineCompletion(completion)
-        : completion
-      setRecoveryCompletions((current) => [savedCompletion, ...current.filter((item) => item.id !== savedCompletion.id)])
-      if (isSupabaseSession && athleteProfile?.athleteId && plan.feedback) {
-        createRecoveryResponse({
-          athleteId: athleteProfile.athleteId,
-          routineCompletionId: savedCompletion.id,
-          sourceCheckoutId: checkout?.id,
-          timing: 'immediate',
-          response: {
-            ...plan.feedback,
-            painChange: ({ Better: 'better', Same: 'unchanged', Worse: 'worse' })[plan.feedback.feeling] ?? 'unchanged',
-          },
-        }).catch((error) => console.warn('Unable to store normalized recovery response.', error))
-      }
-    } catch (error) {
-      recoveryPlanSaveInFlightRef.current = false
-      console.error('Unable to save recovery history', error)
-      setDataStatus('error')
-      return false
-    }
-
-    setIsGeneratedRecoveryPlanSaved(true)
-    return true
+  function generateRecoveryPlan() {
+    return generateRecoveryContent({ kind: 'recovery_plan' })
   }
 
-  async function favoriteRecoveryRoutine(entry) {
-    const plan = entry?.details?.plan ?? entry?.recommendation?.recoveryPlan
-    if (!plan?.routine) return
+  function generateMobilityRoutine(options) {
+    return generateRecoveryContent({ kind: 'mobility_routine', ...options })
+  }
 
-    const sourceCheckoutId = entry.sourceCheckoutId ?? (entry.recommendation?.recoveryPlan ? entry.id : null)
-    const existing = savedRoutines.find((routine) => sourceCheckoutId
-      ? routine.sourceCheckoutId === sourceCheckoutId
-      : getRecoveryRoutineSignature(routine.routine) === getRecoveryRoutineSignature(plan))
-    const routine = {
-      ...existing,
-      isFavorite: !existing?.isFavorite,
-      routine: plan,
-      sourceCheckoutId,
-      title: plan.routine.title ?? 'Recovery routine',
+  async function startMobilityRoutine(sessionData) {
+    const local = {
+      ...sessionData,
+      completedAt: sessionData.startedAt,
+      details: { type: 'mobility_routine', routineSnapshot: sessionData.routineSnapshot },
+      id: `mobility-routine-${Date.now()}`,
+      sourceCheckoutId: sessionData.sourceCheckoutId ?? null,
+      type: 'mobility_routine',
     }
-
     if (!isSupabaseSession) {
-      const localRoutine = { ...routine, id: existing?.id ?? `saved-routine-${Date.now()}` }
-      setSavedRoutines((current) => existing
-        ? current.map((item) => item.id === existing.id ? localRoutine : item)
-        : [localRoutine, ...current])
-      return
+      setRecoveryCompletions((current) => [local, ...current])
+      return local
     }
-
     try {
-      const saved = existing
-        ? await updateSavedRecoveryRoutine(existing.id, routine)
-        : await createSavedRecoveryRoutine(routine)
-      setSavedRoutines((current) => existing
-        ? current.map((item) => item.id === saved.id ? saved : item)
-        : [saved, ...current])
+      const saved = await createRecoveryRoutineCompletion(local)
+      setRecoveryCompletions((current) => [saved, ...current])
+      return saved
     } catch (error) {
-      console.error(error)
+      console.error('Unable to start mobility routine', error)
       setDataStatus('error')
+      throw error
+    }
+  }
+
+  async function completeMobilityRoutine(completion) {
+    const local = { ...completion, completedAt: completion.finishedAt, type: 'mobility_routine' }
+    if (!isSupabaseSession || !completion.id || String(completion.id).startsWith('mobility-routine-')) {
+      setRecoveryCompletions((current) => [local, ...current.filter((item) => item.id !== completion.id)])
+      return local
+    }
+    try {
+      const saved = await updateRecoveryRoutineCompletion(completion.id, completion)
+      setRecoveryCompletions((current) => [saved, ...current.filter((item) => item.id !== saved.id)])
+      return saved
+    } catch (error) {
+      console.error('Unable to complete mobility routine', error)
+      setDataStatus('error')
+      throw error
+    }
+  }
+
+  async function saveMobilityRoutine(entry) {
+    const routine = { ...entry, isFavorite: true, catalogVersion: entry.routine?.exercises?.[0]?.catalogVersion ?? 'mobility-catalog-3.0.0' }
+    if (!isSupabaseSession) {
+      const local = { ...routine, id: `saved-routine-${Date.now()}` }
+      setSavedRoutines((current) => [local, ...current])
+      return local
+    }
+    try {
+      const saved = await createSavedRecoveryRoutine(routine)
+      setSavedRoutines((current) => [saved, ...current])
+      return saved
+    } catch (error) {
+      console.error('Unable to save mobility routine', error)
+      setDataStatus('error')
+      return null
     }
   }
 
@@ -2574,51 +2614,6 @@ function App() {
       return false
     }
   }
-
-  function replaySavedRoutine(routine) {
-    setGeneratedRecoveryPlan(routine.routine)
-    setGeneratedRecoveryCheckoutId(null)
-    setIsGeneratedRecoveryPlanSaved(false)
-    setIsReplayingSavedRoutine(true)
-    setReplayingRoutineId(routine.id)
-    setRecoveryPlanStatus('saved')
-  }
-
-  async function completeSavedRoutine(details) {
-    const routine = savedRoutines.find((item) => item.id === replayingRoutineId)
-    if (!routine) return
-
-    let completion = {
-      completedAt: details.completedAt ?? new Date().toISOString(),
-      details,
-      id: `recovery-completion-${Date.now()}`,
-      routineId: routine.id,
-      sourceCheckoutId: routine.sourceCheckoutId,
-    }
-
-    if (isSupabaseSession) {
-      try {
-        const savedCompletion = await createRecoveryRoutineCompletion({
-          details,
-          routineId: routine.id,
-          sourceCheckoutId: routine.sourceCheckoutId,
-        })
-        completion = savedCompletion
-      } catch (error) {
-        console.error(error)
-        setDataStatus('error')
-        return
-      }
-    }
-
-    setRecoveryCompletions((current) => [completion, ...current])
-
-    setIsReplayingSavedRoutine(false)
-    setReplayingRoutineId(null)
-    setGeneratedRecoveryPlan(null)
-    setRecoveryPlanStatus('idle')
-  }
-
 
   function advanceCheckInAfterCheckout(event, savedCheckout) {
     if (event.date !== todayIso) return
@@ -2876,6 +2871,7 @@ function App() {
     setPainIssues([])
     setSavedRoutines([])
     setRecoveryCompletions([])
+    setRecoveryPlans([])
     setDailyWellness({ date: todayIso, hydrationMl: 0, nutritionEntries: [] })
     setNutritionHistory([])
   }
@@ -3193,15 +3189,16 @@ function App() {
               <RecoveryView
                 checkouts={checkouts}
                 generatedPlan={generatedRecoveryPlan}
-                generatedPlanSaved={isGeneratedRecoveryPlanSaved}
-                isReplayingSavedRoutine={isReplayingSavedRoutine}
+                generatedRoutine={generatedMobilityRoutine}
                 generationStatus={recoveryPlanStatus}
-                recentCompletion={recoveryCompletions[0] ?? null}
-                onGeneratePlan={generateRecoveryPlan}
-                onReplaySavedRoutine={replaySavedRoutine}
+                mobilityGenerationStatus={mobilityRoutineStatus}
+                recentCompletion={completedMobilityRoutines[0] ?? null}
+                onGenerateRecoveryPlan={generateRecoveryPlan}
+                onGenerateMobilityRoutine={generateMobilityRoutine}
                 onReportRoutinePain={reportRoutinePain}
-                onCompleteSavedRoutine={completeSavedRoutine}
-                onSaveRecoveryPlan={saveRecoveryPlan}
+                onCompleteRoutine={completeMobilityRoutine}
+                onSaveRoutine={saveMobilityRoutine}
+                onStartRoutine={startMobilityRoutine}
                 schedule={schedule}
                 savedRoutines={savedRoutines}
               />
@@ -3243,8 +3240,8 @@ function App() {
                 insights={trendInsights}
                 onClear={clearHistory}
                 onDeleteEntry={deleteHistoryEntry}
-                onFavoriteRoutine={favoriteRecoveryRoutine}
-                recoveryCompletions={recoveryCompletions}
+                recoveryCompletions={completedMobilityRoutines}
+                recoveryPlans={recoveryPlans}
                 savedRoutines={savedRoutines}
                 schedule={schedule}
                 weekStartsOn={displayPreferences.weekStartsOn}

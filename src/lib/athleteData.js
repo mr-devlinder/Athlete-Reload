@@ -435,6 +435,7 @@ function fromPainIssueRow(row) {
 
 function fromSavedRecoveryRoutineRow(row) {
   return {
+    type: row.record_type ?? 'mobility_routine',
     createdAt: row.created_at,
     id: row.id,
     isFavorite: Boolean(row.is_favorite),
@@ -447,20 +448,25 @@ function fromSavedRecoveryRoutineRow(row) {
     sourceCheckoutId: row.source_checkout_id,
     title: row.title,
     routine: row.routine_json,
+    equipmentRequirements: row.equipment_requirements ?? [],
+    originalDurationSeconds: row.original_duration_seconds ?? row.routine_json?.estimatedDurationSeconds ?? null,
     updatedAt: row.updated_at,
   }
 }
 
 function toSavedRecoveryRoutineRow(routine) {
   return {
+    record_type: 'mobility_routine',
     is_favorite: Boolean(routine.isFavorite),
     plan_type: routine.planType ?? routine.routine?.planType ?? 'mobility',
     generated_at: routine.generatedAt ?? new Date().toISOString(),
     context_snapshot: routine.contextSnapshot ?? {},
     engine_version: routine.engineVersion ?? routine.routine?.engineVersion ?? 'deterministic-3.0.0',
     rule_version: routine.ruleVersion ?? 'recovery-rules-1.0.0',
-    catalog_version: routine.catalogVersion ?? 'recovery-catalog-2.0.0',
+    catalog_version: routine.catalogVersion ?? 'mobility-catalog-3.0.0',
     routine_json: routine.routine,
+    equipment_requirements: routine.equipmentRequirements ?? routine.equipment ?? routine.routine?.exercises?.flatMap((exercise) => exercise.equipment ?? []) ?? [],
+    original_duration_seconds: routine.originalDurationSeconds ?? routine.routine?.estimatedDurationSeconds ?? null,
     source_checkout_id: routine.sourceCheckoutId ?? null,
     title: routine.title,
     updated_at: new Date().toISOString(),
@@ -469,7 +475,8 @@ function toSavedRecoveryRoutineRow(routine) {
 
 function fromRecoveryRoutineCompletionRow(row) {
   return {
-    completedAt: row.completed_at,
+    type: row.record_type ?? 'mobility_routine',
+    completedAt: row.status === 'in_progress' || row.status === 'planned' ? null : row.completed_at,
     details: row.completion_json ?? {},
     routineType: row.routine_type ?? 'mobility',
     generatedAt: row.generated_at ?? null,
@@ -491,6 +498,10 @@ function fromRecoveryRoutineCompletionRow(row) {
     equipment: row.equipment ?? [],
     statedGoal: row.stated_goal ?? '',
     status: row.status ?? 'completed',
+    exerciseStatuses: row.exercise_statuses ?? [],
+    skipEvents: row.skip_events ?? [],
+    selectedTimeSeconds: row.selected_time_seconds ?? row.planned_duration_seconds ?? null,
+    generationContext: row.generation_context ?? {},
     id: row.id,
     routineId: row.routine_id,
     sourceCheckoutId: row.source_checkout_id,
@@ -499,15 +510,20 @@ function fromRecoveryRoutineCompletionRow(row) {
 
 function fromRecoveryPlanRow(row) {
   return {
+    type: row.record_type ?? 'recovery_plan',
     actionStatuses: row.action_statuses ?? {},
+    completedActions: row.completed_actions ?? [],
+    dismissedActions: row.dismissed_actions ?? [],
     catalogVersion: row.catalog_version,
     contextSnapshot: row.context_snapshot ?? {},
     engineVersion: row.engine_version,
     id: row.id,
+    generatedAt: row.generated_at,
     inputSignature: row.input_signature,
     nextEventId: row.next_event_id,
     plan: row.plan_json ?? {},
     promptVersion: row.prompt_version,
+    planVersion: row.plan_version ?? '1',
     refreshedAt: row.refreshed_at,
     ruleVersion: row.rule_version,
     sourceCheckoutId: row.source_checkout_id,
@@ -816,29 +832,18 @@ export async function createSavedRecoveryRoutine(routine) {
   return fromSavedRecoveryRoutineRow(data)
 }
 
-export async function updateSavedRecoveryRoutine(id, routine) {
-  const { data, error } = await supabase
-    .from('saved_recovery_routines')
-    .update(toSavedRecoveryRoutineRow(routine))
-    .eq('id', id)
-    .select('*')
-    .single()
-
-  if (error) throw error
-
-  return fromSavedRecoveryRoutineRow(data)
-}
-
 export async function createRecoveryRoutineCompletion(completion) {
   const session = completion.routineSession ?? completion.details?.routineSession ?? completion.details?.completion?.session ?? completion.details?.plan?.routineSession ?? {}
+  const status = session.status ?? completion.status ?? 'completed'
   const { data, error } = await supabase
     .from('recovery_routine_completions')
     .insert({
+      record_type: 'mobility_routine',
       completion_json: completion.details ?? {},
       routine_type: session.routineType ?? completion.routineType ?? 'mobility',
       generated_at: session.generatedAt ?? completion.generatedAt ?? null,
       started_at: session.startedAt ?? completion.startedAt ?? null,
-      finished_at: session.finishedAt ?? completion.finishedAt ?? completion.completedAt ?? new Date().toISOString(),
+      finished_at: ['planned', 'in_progress'].includes(status) ? null : session.finishedAt ?? completion.finishedAt ?? completion.completedAt ?? new Date().toISOString(),
       planned_duration_seconds: session.plannedDurationSeconds ?? completion.plannedDurationSeconds ?? null,
       actual_duration_seconds: session.actualDurationSeconds ?? completion.actualDurationSeconds ?? null,
       movement_ids: session.movementIds ?? completion.movementIds ?? [],
@@ -854,7 +859,11 @@ export async function createRecoveryRoutineCompletion(completion) {
       athlete_state: session.athleteState ?? completion.athleteState ?? {},
       equipment: session.equipment ?? completion.equipment ?? [],
       stated_goal: session.statedGoal ?? completion.statedGoal ?? '',
-      status: session.status ?? completion.status ?? 'completed',
+      status,
+      exercise_statuses: session.exerciseStatuses ?? completion.exerciseStatuses ?? [],
+      skip_events: session.skipEvents ?? completion.skipEvents ?? [],
+      selected_time_seconds: session.selectedTimeSeconds ?? completion.selectedTimeSeconds ?? session.plannedDurationSeconds ?? completion.plannedDurationSeconds ?? null,
+      generation_context: session.generationContext ?? completion.generationContext ?? {},
       routine_id: completion.routineId ?? null,
       source_checkout_id: completion.sourceCheckoutId ?? null,
     })
@@ -866,12 +875,55 @@ export async function createRecoveryRoutineCompletion(completion) {
   return fromRecoveryRoutineCompletionRow(data)
 }
 
+export async function updateRecoveryRoutineCompletion(id, completion) {
+  const session = completion.routineSession ?? completion
+  const { data, error } = await supabase
+    .from('recovery_routine_completions')
+    .update({
+      record_type: 'mobility_routine',
+      completion_json: completion.details ?? {},
+      routine_type: session.routineType ?? 'full_body',
+      generated_at: session.generatedAt ?? null,
+      started_at: session.startedAt ?? null,
+      finished_at: session.finishedAt ?? completion.completedAt ?? null,
+      completed_at: session.finishedAt ?? completion.completedAt ?? new Date().toISOString(),
+      planned_duration_seconds: session.plannedDurationSeconds ?? null,
+      actual_duration_seconds: session.actualDurationSeconds ?? null,
+      movement_ids: session.movementIds ?? [],
+      movement_order: session.movementOrder ?? session.movementIds ?? [],
+      planned_prescription: session.plannedPrescription ?? [],
+      completed_prescription: session.completedPrescription ?? [],
+      movements_completed: session.movementsCompleted ?? [],
+      movements_skipped: session.movementsSkipped ?? [],
+      completion_percentage: session.completionPercentage ?? null,
+      hurt_events: session.hurtEvents ?? [],
+      modifications: session.modifications ?? [],
+      associated_event_id: session.associatedEventId ?? null,
+      athlete_state: session.athleteState ?? {},
+      equipment: session.equipment ?? [],
+      stated_goal: session.statedGoal ?? '',
+      status: session.status ?? 'completed',
+      exercise_statuses: session.exerciseStatuses ?? [],
+      skip_events: session.skipEvents ?? [],
+      selected_time_seconds: session.selectedTimeSeconds ?? session.plannedDurationSeconds ?? null,
+      generation_context: session.generationContext ?? {},
+      source_checkout_id: completion.sourceCheckoutId ?? session.sourceCheckoutId ?? null,
+    })
+    .eq('id', id)
+    .select('*')
+    .single()
+
+  if (error) throw error
+  return fromRecoveryRoutineCompletionRow(data)
+}
+
 export async function upsertRecoveryPlan(plan) {
   if (!supabase) return null
   const { data: { user }, error: userError } = await supabase.auth.getUser()
   if (userError) throw userError
   if (!user) throw new Error('Sign in to save a recovery plan.')
   const row = {
+    record_type: 'recovery_plan',
     user_id: user.id,
     source_checkout_id: plan.sourceCheckoutId ?? null,
     source_event_id: plan.sourceEventId ?? null,
@@ -884,12 +936,15 @@ export async function upsertRecoveryPlan(plan) {
     prompt_version: plan.promptVersion ?? null,
     catalog_version: plan.catalogVersion ?? 'recovery-catalog-2.0.0',
     action_statuses: plan.actionStatuses ?? {},
+    plan_version: plan.planVersion ?? '1',
+    completed_actions: plan.completedActions ?? [],
+    dismissed_actions: plan.dismissedActions ?? [],
     refreshed_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   }
   const { data, error } = await supabase.from('recovery_plans').upsert(row, { onConflict: 'user_id,input_signature' }).select('*').single()
   if (error) throw error
-  return data
+  return fromRecoveryPlanRow(data)
 }
 
 export async function recordRoutinePainEvent(event) {
@@ -903,6 +958,7 @@ export async function recordRoutinePainEvent(event) {
     side: event.side ?? 'not_applicable',
     response: event.response ?? 'meaningful_pain',
     action_taken: event.actionTaken,
+    occurred_at: event.occurredAt ?? new Date().toISOString(),
     context_json: event.context ?? {},
   }).select('*').single()
   if (error) throw error
@@ -931,6 +987,11 @@ export async function deleteRecoveryRoutineCompletion(id) {
     .delete()
     .eq('id', id)
 
+  if (error) throw error
+}
+
+export async function deleteRecoveryPlan(id) {
+  const { error } = await supabase.from('recovery_plans').delete().eq('id', id)
   if (error) throw error
 }
 
