@@ -1,4 +1,4 @@
-import { differenceInCalendarDays, format, parseISO, startOfWeek, subDays } from 'date-fns'
+import { differenceInCalendarDays, format, parseISO, subDays } from 'date-fns'
 import { useEffect, useState } from 'react'
 import { m } from 'motion/react'
 import NumberFlow from '@number-flow/react'
@@ -18,7 +18,6 @@ export function HomeView({
   painReports = [],
   recoveryCompletions = [],
   schedule,
-  recommendation,
   onGoCheckIn,
   onOpenCheckout,
   onSavePainIssue,
@@ -214,12 +213,6 @@ function getWeeklySignals(history, schedule) {
     }))
 }
 
-function getReadinessHeadline(value) {
-  if (Number(value) >= 80) return 'Ready to express your work.'
-  if (Number(value) >= 60) return 'Build into the day.'
-  return 'Protect the quality of today.'
-}
-
 function PainIssuesCard({ issues, reportGroups, onSaveIssue, onShareIssue }) {
   const [shareTarget, setShareTarget] = useState(null)
 
@@ -343,16 +336,6 @@ function formatPainAreaLabel(report) {
   return `${side}${report.bodyPart}`.replace(/\b\w/g, (character) => character.toUpperCase())
 }
 
-function DashboardMetric({ detail, label, tone = 'neutral', value }) {
-  return (
-    <article className={`stat-card dashboard-metric ${tone}`}>
-      <span>{label}</span>
-      <strong>{value}</strong>
-      {detail && <p>{detail}</p>}
-    </article>
-  )
-}
-
 function _PainTimelineChart({ timeline }) {
   const gradientId = `pain-fill-${timeline.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
 
@@ -427,35 +410,6 @@ function getRecoverySummary(recentHistory, previousHistory) {
     readinessChange: readinessAverage - previousReadiness,
     sleepAverage: average(recentHistory.map((entry) => Number(entry.sleep)), 1),
   }
-}
-
-function getWorkloadSummary(schedule, checkouts) {
-  const weekStart = startOfWeek(new Date())
-  weekStart.setHours(0, 0, 0, 0)
-  const weekCheckouts = checkouts.filter((checkout) =>
-    checkout.date && new Date(`${checkout.date}T12:00:00`) >= weekStart
-  )
-  const thisWeekMinutes = weekCheckouts.reduce((total, checkout) =>
-    total + Number(checkout.actualMinutes ?? 0), 0)
-  const weeklyMinutes = getWeeklyMinutes(checkouts)
-
-  return {
-    averageWeeklyMinutes: average(weeklyMinutes.map((week) => week.minutes)),
-    thisWeekMinutes,
-    weekCount: weeklyMinutes.length,
-  }
-}
-
-function getWeeklyMinutes(checkouts) {
-  const grouped = new Map()
-
-  checkouts.forEach((checkout) => {
-    if (!checkout.date) return
-    const week = format(startOfWeek(parseISO(checkout.date)), 'yyyy-MM-dd')
-    grouped.set(week, (grouped.get(week) ?? 0) + Number(checkout.actualMinutes ?? 0))
-  })
-
-  return [...grouped.entries()].map(([week, minutes]) => ({ minutes, week }))
 }
 
 function getTodayPlan(schedule, history, checkouts, dailyWellness, recoveryCompletions, now, unitSystem) {
@@ -1024,19 +978,6 @@ function formatPainDate(date) {
   if (!date) return 'No date'
 
   return format(parseISO(date), 'MMM d')
-}
-
-function getReadinessTone(score) {
-  if (score >= 80) return 'positive'
-  if (score >= 60) return 'neutral'
-  if (score > 0) return 'warning'
-
-  return 'neutral'
-}
-
-function formatChange(value, label) {
-  if (!Number.isFinite(value) || value === 0) return `No change ${label}`
-  return `${value > 0 ? '+' : ''}${value} ${label}`
 }
 
 function average(values, decimals = 0) {

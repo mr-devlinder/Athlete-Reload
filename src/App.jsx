@@ -2661,33 +2661,6 @@ function App() {
     setCheckoutEvent(event)
   }
 
-  function selectCheckInEvent(eventId) {
-    const event = checkInEventOptions.find((item) => item.id === eventId)
-
-    if (!event || event.date !== todayIso) {
-      return
-    }
-
-    if (event.id !== currentTodayCheckInEvent?.id) {
-      return
-    }
-
-    const existingEntry = history.find((entry) => entry.eventId === event.id)
-
-    setSelectedCheckInEventId(event.id)
-    setIsEditingToday(false)
-    setCheckIn((current) =>
-      existingEntry
-        ? checkInFromHistoryEntry(existingEntry, current)
-        : {
-            ...getFreshCheckInDefaults(),
-            ...getSharedSleepContext(history, todayIso),
-            hydration: getHydrationStatus(dailyWellness.hydrationMl, athleteProfile, schedule, todayIso),
-            hydrationMl: dailyWellness.hydrationMl,
-          },
-    )
-  }
-
   function startDemoSession(email) {
     setIsStartupComplete(false)
     setSession({
@@ -3129,7 +3102,6 @@ function App() {
                 checkIn={scheduleDrivenCheckIn}
                 checkouts={checkouts}
                 dailyWellness={dailyWellness}
-                eventOptions={checkInEventOptions}
                 eventPreparationContext={eventPreparationContext}
                 isSavedToday={isCheckInSavedToday}
                 isSaving={isSavingCheckIn}
@@ -3138,13 +3110,11 @@ function App() {
                 savedEntry={history.find((entry) => selectedCheckInEvent?.id ? entry.eventId === selectedCheckInEvent.id : entry.date === todayIso)}
                 selectedEventId={selectedCheckInEvent?.id ?? null}
                 todayEvents={todayEvents}
-                todayIso={todayIso}
                 todayLabel={todayLabel}
                 onSave={saveCheckIn}
                 onQuickSave={saveCheckIn}
                 onEditToday={editTodayCheckIn}
                 onOpenCheckout={openCheckout}
-                onSelectEvent={selectCheckInEvent}
                 onUpdate={updateField}
                 isFirstEventToday={todayEvents[0]?.id === selectedCheckInEvent?.id}
                 isQuickMode={false}
@@ -3163,8 +3133,6 @@ function App() {
                 painReports={painReports}
                 painIssues={painIssues}
                 recoveryCompletions={recoveryCompletions}
-                recommendation={recommendation}
-                recommendationStatus="local"
                 schedule={schedule}
                 onGoCheckIn={openPreCheckIn}
                 onOpenCheckout={openCheckout}
@@ -3301,7 +3269,7 @@ function App() {
       )}
 
       {submittedRecommendation && submittedRecommendationStatus === 'ai' && submittedRecommendationContext.scoreLabel === 'readiness' && <AiDecisionModal checkIn={submittedRecommendationContext.checkIn} context={submittedRecommendationContext} dialogRef={recommendationDialogRef} onClose={() => setSubmittedRecommendation(null)} recommendation={submittedRecommendation} />}
-      {submittedRecommendation && submittedRecommendationContext.scoreLabel === 'recovery' && <CheckoutAiModal context={submittedRecommendationContext} dialogRef={recommendationDialogRef} onClose={() => setSubmittedRecommendation(null)} onOpenRecovery={() => { setSubmittedRecommendation(null); setActiveView('Recovery') }} recommendation={submittedRecommendation} />}
+      {submittedRecommendation && submittedRecommendationContext.scoreLabel === 'recovery' && <CheckoutAiModal context={submittedRecommendationContext} dialogRef={recommendationDialogRef} onClose={() => setSubmittedRecommendation(null)} onOpenRecovery={() => { setSubmittedRecommendation(null); setActiveView('Recovery') }} />}
 
       {checkInAiError && (
         <div className="modal-backdrop" onClick={() => setCheckInAiError('')}>

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { getCheckInFlowState, getCheckoutFlowState } from './progressiveFlow'
 
-const normalCheckIn = { energy: 4, fatigue: 2, soreness: 1, sleep: 8, sleepQuality: 4, painConcern: false, symptomConcern: false }
-const normalCheckout = { participation: 'Full', actualMinutes: 75, difficulty: 7, painConcern: false, symptomConcern: false, performanceRating: 'Normal' }
+const normalCheckIn = { energy: 4, fatigue: 2, soreness: 1, stress: 1, sleep: 8, sleepQuality: 4, painConcern: false, symptomConcern: false }
+const normalCheckout = { participation: 'Full', actualMinutes: 75, difficulty: 7, postFatigue: 2, postSoreness: 1, painConcern: false, symptomConcern: false, performanceRating: 'Normal' }
 
 describe('progressive Check-In', () => {
   it('completes the normal path without a pain map or symptom follow-up', () => expect(getCheckInFlowState(normalCheckIn).complete).toBe(true))

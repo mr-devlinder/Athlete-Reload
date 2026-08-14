@@ -4,8 +4,6 @@ import { Slider } from './FormControls'
 import { bodyPainAreas, createEmptyPainMap } from '../data/bodyPainMap'
 import { estimatePlannedMinutes } from '../utils/events'
 import { VoiceDraftButton } from './VoiceDraftButton'
-import { getSportWorkloadFields } from '../data/sportProfiles'
-import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
 import { useModalAccessibility } from '../hooks/useModalAccessibility'
 import { clearDraft, loadDraft, saveDraft as saveScopedDraft } from '../utils/draftStorage'
 import { BodyPainMap } from './BodyPainMap'
@@ -31,11 +29,6 @@ export function CheckoutModal({ athleteProfile, checkout, event, preCheckIn, pre
   const [isSaving, setIsSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [draft, setDraft] = useState(() => checkout ? getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) : loadDraft(draftIdentity) ?? getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports))
-  const workloadFields = getSportWorkloadFields(athleteProfile?.sport, {
-    phase: 'checkout',
-    position: athleteProfile?.position,
-    eventType: event.type,
-  })
   const relevantSessionContentOptions = getSessionContentOptions(event)
   const baseQuestionSchema = getCheckoutQuestionSchema(event, athleteProfile)
   const questionSchema = draft.participation === 'Did not participate'
@@ -193,23 +186,6 @@ function getInitialDraft(event, checkout, preCheckIn, preCheckInPainReports) {
     cramping: checkout?.cramping ?? false,
     notes: checkout?.notes ?? '',
   }
-}
-
-function SportWorkloadField({ field, onChange, unitSystem = 'imperial', value }) {
-  const display = getWorkloadFieldDisplay(field, value, unitSystem)
-  return (
-    <label className="compact-field">
-      {field.label}{display.label ? ` (${display.label})` : ''}
-      {field.type === 'select' ? (
-        <select value={value} onChange={(event) => onChange(event.target.value)}>
-          <option value="">Not recorded</option>
-          {field.options.map((option) => <option key={option}>{option}</option>)}
-        </select>
-      ) : (
-        <input min="0" step={display.step} type="number" value={display.value} onChange={(event) => onChange(workloadInputToCanonical(field, event.target.value, unitSystem))} />
-      )}
-    </label>
-  )
 }
 
 function getPreCheckInPainMap(preCheckIn, painReports = []) {

@@ -48,7 +48,7 @@ export function DecisionHeader({ context, onClose }) {
   </header>
 }
 
-export function CheckoutAiModal({ context, dialogRef, onClose, onOpenRecovery, recommendation }) {
+export function CheckoutAiModal({ context, dialogRef, onClose, onOpenRecovery }) {
   const eventName = formatTitle(context.session || 'Completed event')
   return <div className="modal-backdrop checkout-ai-backdrop">
     <m.section animate={{ opacity: 1, scale: 1, y: 0 }} aria-labelledby="checkout-ai-title" className="event-modal checkout-ai-modal" initial={{ opacity: 0, scale: .97, y: 18 }} ref={dialogRef} role="dialog" aria-modal="true" tabIndex={-1}>

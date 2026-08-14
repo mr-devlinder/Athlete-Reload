@@ -3,7 +3,7 @@ import { Slider } from './FormControls'
 import { SectionHeading } from './SectionHeading'
 import { VoiceDraftButton } from './VoiceDraftButton'
 import { RecommendationCard } from './RecommendationCard'
-import { getCheckoutForEvent, hasEventStarted, isAllDayCheckInOpen, isAllDayEvent } from '../utils/events'
+import { getCheckoutForEvent, hasEventStarted, isAllDayEvent } from '../utils/events'
 import '../styles/checkin-progressive.css'
 import { getCheckInFlowState } from '../domain/wellness/progressiveFlow'
 import { formatHydration } from '../utils/units'
@@ -13,7 +13,6 @@ export function CheckInView({
   checkIn,
   checkouts = [],
   dailyWellness,
-  eventOptions = [],
   eventPreparationContext,
   isSavedToday,
   isSaving,
@@ -21,13 +20,11 @@ export function CheckInView({
   savedEntry,
   selectedEventId,
   todayEvents = [],
-  todayIso,
   todayLabel,
   onSave,
   onQuickSave,
   onEditToday,
   onOpenCheckout,
-  onSelectEvent,
   onUpdate,
   isFirstEventToday,
   isQuickMode = false,
@@ -190,15 +187,6 @@ function getTimeUntilEvent(event) {
   const hours = Math.floor(totalMinutes / 60)
   const minutes = totalMinutes % 60
   return `${hours ? `${hours}h ` : ''}${minutes}m until event`
-}
-
-function isInsideCheckInWindow(event) {
-  if (isAllDayEvent(event)) return isAllDayCheckInOpen(event)
-  if (!event?.date || !event?.time) return false
-  const eventStart = new Date(`${event.date}T${event.time}`).getTime()
-  const now = Date.now()
-
-  return eventStart >= now && eventStart - now <= 3 * 60 * 60 * 1000
 }
 
 function DailyFuelContext({ dailyWellness, eventPreparationContext, unitSystem }) {
