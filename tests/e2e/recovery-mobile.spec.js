@@ -7,7 +7,20 @@ for (const width of [320, 390, 430]) {
       const today = new Date().toISOString().slice(0, 10)
       localStorage.setItem('athlete-reload-state', JSON.stringify({
         athleteProfile: { age: 20, dateOfBirth: '2000-01-01', displayName: 'Demo Athlete', onboardingCompleted: true, sport: 'Soccer', unitSystem: 'imperial' },
-        checkouts: [{ id: 'checkout-mobile-qa', date: today, createdAt: `${today}T18:00:00.000Z`, title: 'Training', eventTitle: 'Training', eventId: 'event-mobile-qa', actualMinutes: 60, difficulty: 7, postFatigue: 3, postSoreness: 2, painMap: {} }],
+        checkouts: [{
+          id: 'checkout-mobile-qa', date: today, createdAt: `${today}T18:00:00.000Z`, title: 'Training', eventTitle: 'Training', eventId: 'event-mobile-qa', actualMinutes: 60, difficulty: 7, postFatigue: 3, postSoreness: 2, painMap: {},
+          recommendation: {
+            label: 'Restore after a demanding session',
+            summary: 'Refuel, rehydrate, and protect tonight’s sleep window.',
+            priorities: ['Replace fluids gradually.', 'Eat a balanced recovery meal.', 'Keep the rest of the evening easy.'],
+            contextFactors: ['60 minute training session', '7/10 effort', '2/5 soreness'],
+            reportSections: [
+              { id: 'recovery-priorities', title: 'Priorities', items: ['Replace fluids gradually.', 'Eat a balanced recovery meal.', 'Keep the rest of the evening easy.'] },
+              { id: 'next-few-hours', title: 'Next few hours', summary: 'Keep the basics simple.', items: ['Sip fluids.', 'Eat when comfortable.'] },
+              { id: 'sleep', title: 'Sleep', summary: 'Protect a consistent bedtime.', items: ['Start winding down early.'] },
+            ],
+          },
+        }],
         history: [],
         privacyPreferences: { display: { defaultView: 'Recovery', density: 'comfortable', startupMotion: 'reduced', unitSystem: 'imperial', weekStartsOn: 1 } },
         recoveryCompletions: [],
@@ -24,6 +37,13 @@ for (const width of [320, 390, 430]) {
     await page.locator('form').getByRole('button', { name: 'Create account', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Recover with context. Move with purpose.' })).toBeVisible({ timeout: 15_000 })
 
+    await assertNoPageOverflow(page)
+    await expect(page.getByText('Recovery plan ready')).toBeVisible()
+    await expect(page.getByRole('button', { name: /Refresh Plan/i })).toHaveCount(0)
+    await page.getByRole('tab', { name: 'Plan details' }).click()
+    await expect(page.getByText('Next few hours')).toBeVisible()
+    await page.getByRole('tab', { name: 'Session context' }).click()
+    await expect(page.getByText('60', { exact: true })).toBeVisible()
     await assertNoPageOverflow(page)
     await page.getByRole('tab', { name: 'Mobility' }).click()
     await expect(page.getByRole('heading', { name: 'Build a routine that fits the moment.' })).toBeVisible()

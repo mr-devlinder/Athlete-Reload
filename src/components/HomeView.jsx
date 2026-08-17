@@ -25,6 +25,7 @@ export function HomeView({
   onViewRecovery,
 }) {
   const [now, setNow] = useState(() => new Date())
+  const [homeSection, setHomeSection] = useState('today')
   const unitSystem = athleteProfile?.unitSystem ?? 'imperial'
 
   useEffect(() => {
@@ -60,7 +61,7 @@ export function HomeView({
   const readinessScore = Number(dailyRecommendation?.score)
   const hasReadinessScore = Number.isFinite(readinessScore)
   return (
-    <div className="home-view" data-tour="home-page">
+    <div className={`home-view home-section-${homeSection}`} data-tour="home-page">
       <m.section className="home-command-center" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .4 }}>
         <div className="home-event-command">
           <div className="command-label"><span>{getHomeModeLabel({ dueCheckout, checkInReminder, todayCheckIn, latestRecoveryPlan })}</span></div>
@@ -76,6 +77,12 @@ export function HomeView({
           <div><span>Check-in required</span><strong>No event decision yet</strong><p>Complete the check-in for this event before Athlete Reload evaluates readiness or creates an event plan.</p>{checkInReminder && <button className="hero-checkin-button" onClick={() => onGoCheckIn(checkInReminder)} type="button">Complete check-in</button>}</div>
         </div>}
       </m.section>
+
+      <nav className="home-content-tabs" role="tablist" aria-label="Home sections">
+        <button aria-selected={homeSection === 'today'} className={homeSection === 'today' ? 'active' : ''} onClick={() => setHomeSection('today')} role="tab" type="button"><span>01</span><strong>Today</strong><small>Your next action</small></button>
+        <button aria-selected={homeSection === 'signals'} className={homeSection === 'signals' ? 'active' : ''} onClick={() => setHomeSection('signals')} role="tab" type="button"><span>02</span><strong>Signals</strong><small>State and trends</small></button>
+        <button aria-selected={homeSection === 'recovery'} className={homeSection === 'recovery' ? 'active' : ''} onClick={() => setHomeSection('recovery')} role="tab" type="button"><span>03</span><strong>Recovery</strong><small>{activePainSummaries.length ? `${activePainSummaries.length} area${activePainSummaries.length === 1 ? '' : 's'} to watch` : 'Plan and follow-up'}</small></button>
+      </nav>
 
       <section className="home-priority-grid">
         <m.article className={`right-now-command ${dailyRecommendation?.tone ?? 'neutral'}`} whileHover={{ y: -2 }}>
@@ -485,7 +492,7 @@ function getPrimaryHomeAction({ dailyRecommendation, dueCheckout, checkInReminde
     }
   }
   if (latestRecoveryPlan) return { label: latestRecoveryPlan.label ?? 'Continue recovery plan', detail: normalizeRecommendationItem(recoveryPriorities[0]) ?? latestRecoveryPlan.action ?? latestRecoveryPlan.summary, onClick: onViewRecovery }
-  if (nextEvent) return { label: `Prepare for ${getEventName(nextEvent)}`, detail: `${getEventCountdown(nextEvent, new Date())} remain. Check-in opens closer to the event so guidance reflects your current state.`, onClick: undefined }
+  if (nextEvent) return { label: `Prepare for ${getEventName(nextEvent)}`, detail: 'Check-in opens closer to the event so guidance reflects your current state.', onClick: undefined }
   return { label: 'Plan what comes next', detail: 'Add the next event to connect preparation, checkout, recovery, nutrition, and trends.', onClick: undefined }
 }
 

@@ -87,6 +87,7 @@ import { getCheckoutRecommendation } from './domain/checkoutRecommendation'
 import { getActivityDemandProfile } from './domain/activityDemands'
 import { transitionPainIssue } from './domain/painLifecycle'
 import { createValidatedMobilityRoutine, filterMovementCatalog, normalizeRoutineType } from './domain/recovery/routineBuilder'
+import { createCheckoutRecoveryPlan, findRecoveryPlanForCheckout, getRecoveryPlanInputSignature } from './domain/recovery/recoveryPlanIdentity'
 import { useAthleteSnapshotController } from './features/app/useAthleteSnapshotController'
 import { displayPreferenceDefaults, normalizeDisplayPreferences } from './lib/displayPreferences'
 import { getSportContext } from './data/sportProfiles'
@@ -722,6 +723,7 @@ function App() {
   const [generatedMobilityRoutine, setGeneratedMobilityRoutine] = useState(null)
   const [recoveryPlanStatus, setRecoveryPlanStatus] = useState('idle')
   const [mobilityRoutineStatus, setMobilityRoutineStatus] = useState('idle')
+  const generatedRecoveryCheckoutIdsRef = useRef(new Set())
   const [submittedRecommendationContext, setSubmittedRecommendationContext] = useState({
     scoreLabel: 'readiness',
     session: '',
@@ -2027,7 +2029,7 @@ function App() {
       setPainReports((current) => [...deterministicSave.painReports, ...current.filter((report) => report.sourceId !== deterministicSave.record.id && report.sourceId !== existingCheckout?.id)])
     }
 
-    if (isSupabaseSession) {
+    if (isSupabaseSession && !existingCheckout?.recommendation) {
       try {
         const previousCheckout = getPreviousCheckout(checkouts, schedule, event)
 
@@ -2075,9 +2077,6 @@ function App() {
       ...checkout,
       recommendation: finalRecommendation,
     }
-
-    setGeneratedRecoveryPlan(null)
-    setRecoveryPlanStatus('idle')
 
     if (isSupabaseSession) {
       let savedCheckout
@@ -2137,6 +2136,7 @@ function App() {
       } else {
         setDataStatus('synced')
       }
+      await ensureCheckoutRecoveryPlan(finalRecommendation, savedCheckout, event, nextScheduledEvent, finalRecommendationStatus)
       advanceCheckInAfterCheckout(event, savedCheckout)
       await new Promise((resolve) => window.setTimeout(resolve, 1000))
       setCheckoutEvent(null)
@@ -2184,6 +2184,7 @@ function App() {
       })),
       ...current.filter((report) => report.sourceId !== savedCheckout.id),
     ])
+    await ensureCheckoutRecoveryPlan(finalRecommendation, savedCheckout, event, nextScheduledEvent, finalRecommendationStatus)
     advanceCheckInAfterCheckout(event, savedCheckout)
     await new Promise((resolve) => window.setTimeout(resolve, 1000))
     setCheckoutEvent(null)
@@ -2200,7 +2201,7 @@ function App() {
       sourceEventId: checkout?.eventId ?? completedEvent?.id ?? null,
       nextEventId: upcomingEvent?.id ?? null,
       plan,
-      inputSignature: `recovery:${checkout?.id ?? 'standalone'}:${plan.generatedAt ?? Date.now()}`,
+      inputSignature: getRecoveryPlanInputSignature(checkout?.id),
       contextSnapshot: {
         checkout: checkout ? withoutNotes(checkout) : null,
         event: completedEvent ? withoutNotes(completedEvent) : null,
@@ -2220,13 +2221,36 @@ function App() {
       catalogVersion: plan.catalogVersion,
     }
     if (!isSupabaseSession) {
+      const existing = findRecoveryPlanForCheckout(recoveryPlans, checkout?.id)
+      if (existing) return existing
       const local = { ...record, generatedAt: plan.generatedAt, id: `recovery-plan-${Date.now()}`, type: 'recovery_plan' }
-      setRecoveryPlans((current) => [local, ...current])
+      setRecoveryPlans((current) => findRecoveryPlanForCheckout(current, checkout?.id) ? current : [local, ...current])
       return local
     }
     const saved = await upsertRecoveryPlan(record)
     setRecoveryPlans((current) => [saved, ...current.filter((item) => item.id !== saved.id)])
     return saved
+  }
+
+  async function ensureCheckoutRecoveryPlan(recommendation, checkout, completedEvent, upcomingEvent, sourceStatus = 'local') {
+    if (!recommendation || !checkout?.id) return null
+    generatedRecoveryCheckoutIdsRef.current.add(checkout.id)
+    const existing = findRecoveryPlanForCheckout(recoveryPlans, checkout.id)
+    if (existing?.plan) {
+      setGeneratedRecoveryPlan({ ...existing.plan, generatedAt: existing.generatedAt ?? existing.refreshedAt, recordType: 'recovery_plan', sourceCheckoutId: checkout.id })
+      setRecoveryPlanStatus('saved')
+      return existing
+    }
+
+    const recoveryPlan = createCheckoutRecoveryPlan(recommendation, checkout)
+    setGeneratedRecoveryPlan(recoveryPlan)
+    setRecoveryPlanStatus(sourceStatus === 'ai' ? 'ai' : 'local')
+    return persistLivingRecoveryPlan(recoveryPlan, checkout, completedEvent, upcomingEvent, {
+      fueling: 'pending', hydration: 'pending', sleep: 'pending',
+    }).catch((error) => {
+      console.warn('Unable to persist the checkout recovery plan.', error)
+      return null
+    })
   }
 
   async function generateRecoveryContent({ kind = 'recovery_plan', equipmentAvailable = [], routineType = 'session_recovery', targetBodyParts = [], timeAvailableMinutes = 10 } = {}) {
@@ -2279,6 +2303,29 @@ function App() {
       sessions: weeklySessions.length,
       totalMinutes: weeklySessions.reduce((sum, item) => sum + Number(item.actualMinutes ?? item.duration ?? 0), 0),
       totalSessionLoad: weeklySessions.reduce((sum, item) => sum + (Number(item.actualMinutes ?? item.duration ?? 0) * Number(item.difficulty ?? item.actualIntensity ?? 0)), 0),
+    }
+
+    if (!isMobility && contextCheckout) {
+      const existing = findRecoveryPlanForCheckout(recoveryPlans, contextCheckout.id)
+      if (generatedRecoveryPlan?.sourceCheckoutId === contextCheckout.id) return generatedRecoveryPlan
+      if (existing?.plan) {
+        const savedPlan = { ...existing.plan, generatedAt: existing.generatedAt ?? existing.refreshedAt, recordType: 'recovery_plan', sourceCheckoutId: contextCheckout.id }
+        setGeneratedRecoveryPlan(savedPlan)
+        setRecoveryPlanStatus('saved')
+        return savedPlan
+      }
+      if (contextCheckout.recommendation) {
+        generatedRecoveryCheckoutIdsRef.current.add(contextCheckout.id)
+        const checkoutPlan = createCheckoutRecoveryPlan(contextCheckout.recommendation, contextCheckout, contextCheckout.createdAt)
+        setGeneratedRecoveryPlan(checkoutPlan)
+        setRecoveryPlanStatus(contextCheckout.recommendation._source === 'gemini' ? 'ai' : 'local')
+        await persistLivingRecoveryPlan(checkoutPlan, contextCheckout, completedEvent, nextScheduledEvent, {
+          fueling: 'pending', hydration: 'pending', sleep: 'pending',
+        }).catch((error) => console.warn('Unable to persist the checkout recovery plan.', error))
+        return checkoutPlan
+      }
+      if (generatedRecoveryCheckoutIdsRef.current.has(contextCheckout.id)) return null
+      generatedRecoveryCheckoutIdsRef.current.add(contextCheckout.id)
     }
 
     if (isMobility) setMobilityRoutineStatus('loading')
@@ -2371,6 +2418,7 @@ function App() {
         return
       }
       if (isSupabaseSession) {
+        if (contextCheckout?.id) generatedRecoveryCheckoutIdsRef.current.delete(contextCheckout.id)
         setGeneratedRecoveryPlan(null)
         setRecoveryPlanStatus('error')
         return

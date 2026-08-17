@@ -34,6 +34,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
   const [timeWindow, setTimeWindow] = useState('28')
   const [recordFilter, setRecordFilter] = useState('all')
+  const [historySection, setHistorySection] = useState('overview')
   const [customRange, setCustomRange] = useState({ start: '', end: '' })
   const isModalOpen = Boolean(selectedEntry || isClearModalOpen || selectedWeek)
   const filteredHistory = filterByWindow(history, timeWindow, customRange)
@@ -100,7 +101,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
   }
 
   return (
-    <div className="history-view" data-tour="history-page">
+    <div className={`history-view history-section-${historySection}`} data-tour="history-page">
       <div className="schedule-header history-page-header">
         <div className="page-header-copy"><SectionHeading eyebrow="History & insights" title="Learn what changes your day." /><p className="page-header-description">Patterns first. Every original record remains available below.</p></div>
         <div className="history-actions">
@@ -121,6 +122,12 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
         </div>
         {timeWindow === 'custom' && <div className="history-custom-range"><label>From<input type="date" value={customRange.start} onChange={(event) => setCustomRange((current) => ({ ...current, start: event.target.value }))} /></label><label>To<input type="date" value={customRange.end} onChange={(event) => setCustomRange((current) => ({ ...current, end: event.target.value }))} /></label></div>}
       </section>
+
+      <nav className="history-content-tabs" role="tablist" aria-label="History sections">
+        <button aria-selected={historySection === 'overview'} className={historySection === 'overview' ? 'active' : ''} onClick={() => setHistorySection('overview')} role="tab" type="button"><AppIcon name="readiness" size={18} /><span><strong>Overview</strong><small>{summary.checkInCount + summary.checkoutCount} contributing records</small></span></button>
+        <button aria-selected={historySection === 'trends'} className={historySection === 'trends' ? 'active' : ''} onClick={() => setHistorySection('trends')} role="tab" type="button"><AppIcon name="trend" size={18} /><span><strong>Trends</strong><small>{insights.length} pattern{insights.length === 1 ? '' : 's'} available</small></span></button>
+        <button aria-selected={historySection === 'records'} className={historySection === 'records' ? 'active' : ''} onClick={() => setHistorySection('records')} role="tab" type="button"><AppIcon name="report" size={18} /><span><strong>Records</strong><small>Browse the archive</small></span></button>
+      </nav>
 
       <section className="history-overview" aria-label="Athlete analytics">
         <div className="history-overview-lead"><span>Current window</span><strong>{summary.readiness == null ? 'Building your baseline' : summary.readiness >= 80 ? 'Responding near your normal' : summary.readiness >= 65 ? 'More recovery demand than usual' : 'A demanding stretch'}</strong><p>{summary.checkInCount} check-ins and {summary.checkoutCount} completed sessions contribute to this view.</p></div>
@@ -237,7 +244,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
 }
 
 function HistoryQuestionChart({ children, data, empty, question }) {
-  return <article className="history-question-chart"><div><span>Trend question</span><h2>{question}</h2></div>{data.length < 3 ? <p className="history-chart-empty">{empty}</p> : <div aria-label={question} className="history-chart-canvas" role="img"><ResponsiveContainer height="100%" width="100%">{children}</ResponsiveContainer></div>}</article>
+  return <details className="history-question-chart"><summary><span><small>Trend question</small><strong>{question}</strong></span><AppIcon name="chevron" size={19} /></summary><div className="history-question-chart-body">{data.length < 3 ? <p className="history-chart-empty">{empty}</p> : <div aria-label={question} className="history-chart-canvas" role="img"><ResponsiveContainer height="100%" width="100%">{children}</ResponsiveContainer></div>}</div></details>
 }
 
 function getQuestionChartData(history, checkouts, recovery, schedule) {
@@ -313,7 +320,7 @@ function HistoryMetric({ detail, label, unit = '', value }) {
 }
 
 function AnalyticsPanel({ eyebrow, rows, title }) {
-  return <article className="history-analytics-panel"><header><span>{eyebrow}</span><h3>{title}</h3></header><div>{rows.map(([label, value]) => <p key={label}><span>{label}</span><strong>{value ?? 'Not enough data'}</strong></p>)}</div></article>
+  return <details className="history-analytics-panel"><summary><header><span>{eyebrow}</span><h3>{title}</h3></header><AppIcon name="chevron" size={18} /></summary><div>{rows.map(([label, value]) => <p key={label}><span>{label}</span><strong>{value ?? 'Not enough data'}</strong></p>)}</div></details>
 }
 
 function getHistoryAnalytics(history, checkouts, recovery) {

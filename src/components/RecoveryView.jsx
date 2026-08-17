@@ -7,14 +7,14 @@ import { recordRoutinePainEvent } from '../lib/athleteData'
 import '../styles/recovery-rework.css'
 
 const ROUTINE_TYPES = [
-  { id: 'session_recovery', label: 'Session Recovery', description: 'Gentle mobility shaped by your latest checkout.' },
-  { id: 'full_body', label: 'Full Body Mobility', description: 'Balanced ankles, hips, trunk, and shoulders.' },
-  { id: 'lower_body', label: 'Lower Body Mobility', description: 'Ankles, calves, hips, hamstrings, quads, and groin.' },
-  { id: 'upper_body', label: 'Upper Body Mobility', description: 'Upper back, shoulders, scapulae, wrists, and neck.' },
-  { id: 'flexibility', label: 'Flexibility', description: 'Longer controlled holds without forced end range.' },
-  { id: 'warm_up', label: 'Warm-Up', description: 'Active mobility and progressive, low-fatigue preparation.' },
-  { id: 'light_recovery', label: 'Light Recovery', description: 'Very low-demand movement for an easier day.' },
-  { id: 'custom_mobility', label: 'Custom Mobility', description: 'Focus the routine on body areas you choose.' },
+  { id: 'session_recovery', icon: 'recovery', label: 'Session Recovery', description: 'Gentle mobility shaped by your latest checkout.' },
+  { id: 'full_body', icon: 'readiness', label: 'Full Body Mobility', description: 'Balanced ankles, hips, trunk, and shoulders.' },
+  { id: 'lower_body', icon: 'performance', label: 'Lower Body Mobility', description: 'Ankles, calves, hips, hamstrings, quads, and groin.' },
+  { id: 'upper_body', icon: 'warmup', label: 'Upper Body Mobility', description: 'Upper back, shoulders, scapulae, wrists, and neck.' },
+  { id: 'flexibility', icon: 'trend', label: 'Flexibility', description: 'Longer controlled holds without forced end range.' },
+  { id: 'warm_up', icon: 'warmup', label: 'Warm-Up', description: 'Active mobility and progressive, low-fatigue preparation.' },
+  { id: 'light_recovery', icon: 'sleep', label: 'Light Recovery', description: 'Very low-demand movement for an easier day.' },
+  { id: 'custom_mobility', icon: 'spark', label: 'Custom Mobility', description: 'Focus the routine on body areas you choose.' },
 ]
 const TIME_OPTIONS = [5, 8, 10, 15, 20]
 const EQUIPMENT_OPTIONS = [
@@ -55,20 +55,19 @@ export function RecoveryView({
   const [activeRoutine, setActiveRoutine] = useState(null)
   const [activeRoutineRecordId, setActiveRoutineRecordId] = useState(null)
   const [routineOrigin, setRoutineOrigin] = useState('generated')
-  const automaticPlanRequested = useRef(null)
-  const currentPlan = generatedPlan?.sourceCheckoutId && generatedPlan.sourceCheckoutId !== latestCheckout?.id ? null : generatedPlan
+  const checkoutPlan = latestCheckout?.recommendation ? {
+    ...latestCheckout.recommendation,
+    generatedAt: latestCheckout.recommendation.generatedAt ?? latestCheckout.createdAt,
+    recordType: 'recovery_plan',
+    sourceCheckoutId: latestCheckout.id,
+  } : null
+  const currentPlan = generatedPlan?.sourceCheckoutId && generatedPlan.sourceCheckoutId !== latestCheckout?.id ? checkoutPlan : generatedPlan ?? checkoutPlan
 
   useEffect(() => {
     const url = new URL(window.location.href)
     url.searchParams.set('view', section)
     window.history.replaceState(window.history.state, '', url)
   }, [section])
-
-  useEffect(() => {
-    if (section !== 'plan' || currentPlan || !latestCheckout || generationStatus !== 'idle' || automaticPlanRequested.current === latestCheckout.id) return
-    automaticPlanRequested.current = latestCheckout.id
-    onGenerateRecoveryPlan?.()
-  }, [currentPlan, generationStatus, latestCheckout, onGenerateRecoveryPlan, section])
 
   useEffect(() => {
     if (!generatedRoutine) return
@@ -111,6 +110,7 @@ export function RecoveryView({
           <h1>Recover with context. Move with purpose.</h1>
           <div className="recovery-context-line"><span><small>From</small>{latestEvent?.title ?? latestCheckout?.eventTitle ?? 'Complete checkout to begin'}</span><i aria-hidden="true">→</i><span><small>Next</small>{nextEvent?.title ?? 'No upcoming event'}</span></div>
         </div>
+        <RecoveryHeroVisual />
       </section>
 
       <div className="recovery-view-toggle" role="tablist" aria-label="Recovery view">
@@ -148,7 +148,7 @@ export function RecoveryView({
           )}
 
           <div className="mobility-steps">
-            <fieldset className="mobility-step"><legend><span>1</span>Select Routine Type</legend><div className="mobility-type-grid">{ROUTINE_TYPES.map((option) => <button aria-pressed={routineType === option.id} className={routineType === option.id ? 'selected' : ''} key={option.id} onClick={() => setRoutineType(option.id)} type="button"><strong>{option.label}</strong><small>{option.description}</small></button>)}</div></fieldset>
+            <fieldset className="mobility-step"><legend><span>1</span>Select Routine Type</legend><div className="mobility-type-grid">{ROUTINE_TYPES.map((option) => <button aria-pressed={routineType === option.id} className={routineType === option.id ? 'selected' : ''} key={option.id} onClick={() => setRoutineType(option.id)} type="button"><span className="mobility-type-icon"><AppIcon name={option.icon} size={20} /></span><strong>{option.label}</strong><small>{option.description}</small></button>)}</div></fieldset>
             {routineType === 'custom_mobility' && <fieldset className="mobility-step"><legend>Target areas</legend><div className="mobility-choice-row">{TARGET_OPTIONS.map((target) => <button aria-pressed={targets.includes(target)} className={targets.includes(target) ? 'selected' : ''} key={target} onClick={() => setTargets((current) => current.includes(target) ? current.filter((item) => item !== target) : [...current, target])} type="button">{target}</button>)}</div></fieldset>}
             <fieldset className="mobility-step"><legend><span>2</span>How much time do you have?</legend><div className="mobility-choice-row">{TIME_OPTIONS.map((value) => <button aria-pressed={!customMinutes && minutes === value} className={!customMinutes && minutes === value ? 'selected' : ''} key={value} onClick={() => { setMinutes(value); setCustomMinutes('') }} type="button">{value} min</button>)}<label className={customMinutes ? 'selected' : ''}>Custom<input aria-label="Custom minutes" inputMode="numeric" max="30" min="5" onChange={(event) => setCustomMinutes(event.target.value)} placeholder="min" type="number" value={customMinutes} /></label></div></fieldset>
             <fieldset className="mobility-step"><legend><span>3</span>Equipment Available</legend><div className="mobility-choice-row"><button aria-pressed={equipment.length === 0} className={equipment.length === 0 ? 'selected' : ''} onClick={() => setEquipment([])} type="button">Nothing</button>{EQUIPMENT_OPTIONS.map((option) => <button aria-pressed={equipment.includes(option.id)} className={equipment.includes(option.id) ? 'selected' : ''} key={option.id} onClick={() => toggleEquipment(option.id)} type="button">{option.label}</button>)}</div></fieldset>
@@ -178,14 +178,51 @@ export function RecoveryView({
   )
 }
 
+function RecoveryHeroVisual() {
+  return <div className="recovery-hero-visual" aria-hidden="true">
+    <div className="recovery-orbit recovery-orbit-outer"><span /></div>
+    <div className="recovery-orbit recovery-orbit-inner"><span /></div>
+    <div className="recovery-visual-core"><AppIcon name="recovery" size={34} /><strong>Reset</strong><small>refuel · restore · reload</small></div>
+    <span className="recovery-visual-chip recovery-chip-water"><AppIcon name="water" size={17} />Hydrate</span>
+    <span className="recovery-visual-chip recovery-chip-sleep"><AppIcon name="sleep" size={17} />Sleep</span>
+    <span className="recovery-visual-chip recovery-chip-fuel"><AppIcon name="fuel" size={17} />Refuel</span>
+  </div>
+}
+
 function RecoveryPlanPanel({ checkout, event, loading, onGenerate, onViewMobility, plan }) {
+  const [planTab, setPlanTab] = useState('priorities')
   const sections = plan?.reportSections ?? []
   const priorities = sections.find((section) => section.id === 'recovery-priorities')?.items ?? plan?.priorities ?? []
+  const detailSections = sections.filter((section) => section.id !== 'recovery-priorities')
   return <div className="recovery-plan-stack">
-    {checkout && <section className="recovery-latest recovery-checkout-context glass-panel"><div className="recovery-section-heading"><div><p className="eyebrow">Latest checkout</p><h2>{event?.title ?? checkout.eventTitle ?? 'Training session'}</h2></div><span>{formatCheckoutDate(checkout.date)}</span></div><div className="recovery-session-facts"><span><strong>{checkout.actualMinutes ?? 0}</strong> min</span><span><strong>{checkout.difficulty ?? 0}/10</strong> effort</span><span><strong>{checkout.postSoreness ?? 0}/5</strong> soreness</span></div></section>}
+    {checkout && !plan && <CheckoutContext checkout={checkout} event={event} />}
     {!plan && <section className="recovery-plan-launch glass-panel"><div><p className="eyebrow">Recovery Plan</p><h2>{checkout ? 'Turn your checkout into near-term priorities.' : 'Complete Checkout to build a recovery plan.'}</h2><p>Fuel, fluids, sleep, symptom monitoring, and the next event belong here. Physical routines live in Mobility.</p></div><button className="primary-button" disabled={!checkout || loading} onClick={onGenerate} type="button">{loading ? 'Building…' : 'Build Recovery Plan'}</button></section>}
-    {plan && <section className="recovery-plan-panel recovery-plan-only glass-panel"><header><div><p className="eyebrow">Recovery Plan</p><h2>{plan.label ?? 'Your post-event priorities'}</h2><p>{plan.summary}</p></div><span>{plan.generatedAt ? format(parseISO(plan.generatedAt), 'MMM d · h:mm a') : 'Current plan'}</span></header>{priorities.length > 0 && <div className="recovery-priority-list"><strong>{priorities.length} priorities</strong><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></div>}<div className="recovery-report-grid">{sections.filter((section) => section.id !== 'recovery-priorities').map((section) => <article key={section.id}><span>{section.title}</span><strong>{section.summary}</strong>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</article>)}</div><footer className="recovery-plan-actions"><button className="recovery-plan-refresh-button" disabled={loading} onClick={onGenerate} type="button"><AppIcon name="recovery" size={17} />{loading ? 'Refreshing…' : 'Refresh Plan'}</button><button className="recovery-plan-mobility-button" onClick={onViewMobility} type="button">View Mobility<AppIcon name="arrow" size={17} /></button></footer></section>}
+    {plan && <section className="recovery-plan-panel recovery-plan-only glass-panel"><header><div><p className="eyebrow"><AppIcon name="status" size={15} />Recovery plan ready</p><h2>{plan.label ?? 'Your post-event priorities'}</h2><p>{plan.summary}</p></div><span>{plan.generatedAt ? format(parseISO(plan.generatedAt), 'MMM d · h:mm a') : 'Current plan'}</span></header>
+      <div className="recovery-plan-tabs" role="tablist" aria-label="Recovery plan sections">
+        <button aria-controls="recovery-priorities-panel" aria-selected={planTab === 'priorities'} className={planTab === 'priorities' ? 'active' : ''} onClick={() => setPlanTab('priorities')} role="tab" type="button"><AppIcon name="spark" size={17} />Priorities</button>
+        <button aria-controls="recovery-details-panel" aria-selected={planTab === 'details'} className={planTab === 'details' ? 'active' : ''} onClick={() => setPlanTab('details')} role="tab" type="button"><AppIcon name="report" size={17} />Plan details</button>
+        <button aria-controls="recovery-context-panel" aria-selected={planTab === 'context'} className={planTab === 'context' ? 'active' : ''} onClick={() => setPlanTab('context')} role="tab" type="button"><AppIcon name="sessions" size={17} />Session context</button>
+      </div>
+      {planTab === 'priorities' && <div className="recovery-plan-tab-panel" id="recovery-priorities-panel" role="tabpanel"><div className="recovery-priority-visual"><span><AppIcon name="recovery" size={25} /></span><div><strong>Start here</strong><small>Your highest-value actions from this session.</small></div></div>{priorities.length > 0 ? <div className="recovery-priority-list"><strong>{priorities.length} priorities</strong><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></div> : <p className="recovery-empty-copy">Follow the plan details and recheck how you feel before your next session.</p>}</div>}
+      {planTab === 'details' && <div className="recovery-plan-tab-panel recovery-accordion" id="recovery-details-panel" role="tabpanel">{detailSections.length ? detailSections.map((section, index) => <details key={section.id} open={index === 0}><summary><span className="recovery-detail-icon"><AppIcon name={getRecoverySectionIcon(section)} size={19} /></span><span><strong>{section.title}</strong><small>{section.summary}</small></span><AppIcon name="chevron" size={18} /></summary>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</details>) : <p className="recovery-empty-copy">The most important guidance is summarized in Priorities.</p>}</div>}
+      {planTab === 'context' && <div className="recovery-plan-tab-panel" id="recovery-context-panel" role="tabpanel"><CheckoutContext checkout={checkout} event={event} embedded /><details className="recovery-context-disclosure"><summary>What shaped this plan <AppIcon name="chevron" size={17} /></summary><p>{plan.contextFactors?.length ? plan.contextFactors.join(' · ') : 'Your completed session, current fatigue and soreness, pain response, and next scheduled event.'}</p></details></div>}
+      <footer className="recovery-plan-actions"><span><AppIcon name="shield" size={16} />Saved for this checkout</span><button className="recovery-plan-mobility-button" onClick={onViewMobility} type="button">View Mobility<AppIcon name="arrow" size={17} /></button></footer></section>}
   </div>
+}
+
+function CheckoutContext({ checkout, embedded = false, event }) {
+  if (!checkout) return <p className="recovery-empty-copy">No checkout context is available yet.</p>
+  return <section className={`recovery-latest recovery-checkout-context glass-panel${embedded ? ' embedded' : ''}`}><div className="recovery-section-heading"><div><p className="eyebrow">Latest checkout</p><h2>{event?.title ?? checkout.eventTitle ?? checkout.title ?? 'Training session'}</h2></div><span>{formatCheckoutDate(checkout.date)}</span></div><div className="recovery-session-facts"><span><strong>{checkout.actualMinutes ?? 0}</strong><small>min</small></span><span><strong>{checkout.difficulty ?? 0}/10</strong><small>effort</small></span><span><strong>{checkout.postSoreness ?? 0}/5</strong><small>soreness</small></span></div></section>
+}
+
+function getRecoverySectionIcon(section) {
+  const value = `${section?.id ?? ''} ${section?.title ?? ''}`.toLowerCase()
+  if (/hydrat|fluid|water/.test(value)) return 'water'
+  if (/fuel|nutrition|meal|protein|carb/.test(value)) return 'fuel'
+  if (/sleep|rest/.test(value)) return 'sleep'
+  if (/pain|symptom|warning|reassess/.test(value)) return 'alert'
+  if (/next|timeline|hour|later/.test(value)) return 'sessions'
+  return 'recovery'
 }
 
 function MobilityRoutinePlayer({ equipmentAvailable, latestCheckout, latestEvent, onBack, onComplete, onReportPain, onSave, onStart, origin, routine, routineRecordId }) {

@@ -27,6 +27,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
   const [selectedFood, setSelectedFood] = useState(null)
   const [openMeal, setOpenMeal] = useState(null)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [nutritionSection, setNutritionSection] = useState('summary')
   const wellness = nutritionHistory.find((entry) => entry.date === selectedDate) ?? { date: selectedDate, hydrationMl: 0, nutritionEntries: [] }
   const entries = wellness.nutritionEntries ?? []
   const hasFoodLogs = entries.length > 0
@@ -58,7 +59,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
   const displayedDate = selectedDate === today ? 'Today' : format(parseISO(selectedDate), 'EEE, MMM d')
 
   return (
-    <div className="nutrition-view" data-tour="nutrition-page">
+    <div className={`nutrition-view nutrition-section-${nutritionSection}`} data-tour="nutrition-page">
       <section className="nutrition-dashboard-heading">
         <div>
           <SectionHeading eyebrow="Nutrition" title="Fuel for the day." />
@@ -70,6 +71,12 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
         </div>
         <button className="nutrition-detail-button" disabled={isGuidedTour} onClick={() => setDetailsOpen(true)} type="button"><AppIcon name="expand" size={18} />More nutrients</button>
       </section>
+
+      <nav className="nutrition-content-tabs" role="tablist" aria-label="Nutrition sections">
+        <button aria-selected={nutritionSection === 'summary'} className={nutritionSection === 'summary' ? 'active' : ''} onClick={() => setNutritionSection('summary')} role="tab" type="button"><AppIcon name="readiness" size={18} /><span><strong>Intake</strong><small>{Math.round(totals.calories)} kcal · {hydrationProgress}% hydration</small></span></button>
+        <button aria-selected={nutritionSection === 'fueling'} className={nutritionSection === 'fueling' ? 'active' : ''} onClick={() => setNutritionSection('fueling')} role="tab" type="button"><AppIcon name="performance" size={18} /><span><strong>Fueling plan</strong><small>{fuelingContext.eventCount ? `${fuelingContext.eventCount} event${fuelingContext.eventCount === 1 ? '' : 's'} today` : 'Normal day'}</small></span></button>
+        <button aria-selected={nutritionSection === 'meals'} className={nutritionSection === 'meals' ? 'active' : ''} onClick={() => setNutritionSection('meals')} role="tab" type="button"><AppIcon name="nutrition" size={18} /><span><strong>Meals</strong><small>{entries.length} item{entries.length === 1 ? '' : 's'} logged</small></span></button>
+      </nav>
 
       <section className="nutrition-intake-card">
         <div className="nutrition-calorie-orbit" style={{ '--calorie-progress': `${Math.min(360, (totals.calories / Math.max(1, Number(visibleTargets.calories) || totals.calories || 1)) * 360)}deg` }}><span><strong>{Math.round(totals.calories)}</strong><small>kcal logged</small></span></div>
@@ -103,7 +110,7 @@ export function NutritionView({ athleteProfile, isGuidedTour = false, nutritionH
       <section className={`performance-fueling-strip daily-fueling-context demand-${fuelingContext.demand}`}>
         <header><div><span>Today&apos;s fueling context</span><strong>{fuelingContext.headline}</strong></div><small>{fuelingContext.eventCount ? `${fuelingContext.eventCount} event${fuelingContext.eventCount === 1 ? '' : 's'}` : 'Normal day'}</small></header>
         <p>{fuelingContext.summary}</p>
-        <div className="daily-fueling-timeline">{fuelingContext.moments.map((item) => <article className={item.tone} key={`${item.time}-${item.title}`}><time>{item.time}</time><div><strong>{item.title}</strong><p>{item.guidance}</p></div></article>)}</div>
+        <details className="nutrition-fueling-details"><summary>Show timing guidance <span>{fuelingContext.moments.length} moments</span><AppIcon name="chevron" size={18} /></summary><div className="daily-fueling-timeline">{fuelingContext.moments.map((item) => <article className={item.tone} key={`${item.time}-${item.title}`}><time>{item.time}</time><div><strong>{item.title}</strong><p>{item.guidance}</p></div></article>)}</div></details>
       </section>
 
       <section className="nutrition-meals-section">

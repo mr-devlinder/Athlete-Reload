@@ -12,7 +12,7 @@ export function LiquidNavigation({
 }) {
   return (
     <nav aria-label="Primary views" className={`liquid-navigation ${className}`.trim()}>
-      <button className="sidebar-brand" onClick={() => onSelect('Home')} type="button">
+      <button aria-label="Home" className="sidebar-brand" onClick={() => onSelect('Home')} type="button">
         <img alt="" src={appLogo} />
         <span><strong>Athlete</strong><strong>Reload</strong></span>
       </button>
@@ -22,6 +22,7 @@ export function LiquidNavigation({
           const disabled = Boolean(lockedView && lockedView !== view.label)
           return (
             <button
+              aria-label={view.label}
               aria-current={activeView === view.label ? 'page' : undefined}
               className={activeView === view.label ? 'active' : ''}
               data-view={view.label}
