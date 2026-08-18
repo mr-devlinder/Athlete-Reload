@@ -15,9 +15,9 @@ for (const width of [320, 390, 430]) {
             priorities: ['Replace fluids gradually.', 'Eat a balanced recovery meal.', 'Keep the rest of the evening easy.'],
             contextFactors: ['60 minute training session', '7/10 effort', '2/5 soreness'],
             reportSections: [
-              { id: 'recovery-priorities', title: 'Priorities', items: ['Replace fluids gradually.', 'Eat a balanced recovery meal.', 'Keep the rest of the evening easy.'] },
+              { id: 'recovery-priorities', title: 'Priorities', items: [] },
               { id: 'next-few-hours', title: 'Next few hours', summary: 'Keep the basics simple.', items: ['Sip fluids.', 'Eat when comfortable.'] },
-              { id: 'sleep', title: 'Sleep', summary: 'Protect a consistent bedtime.', items: ['Start winding down early.'] },
+              { id: 'sleep', title: 'Sleep', summary: 'Protect a consistent bedtime.', items: [] },
             ],
           },
         }],
@@ -40,8 +40,12 @@ for (const width of [320, 390, 430]) {
     await assertNoPageOverflow(page)
     await expect(page.getByText('Recovery plan ready')).toBeVisible()
     await expect(page.getByRole('button', { name: /Refresh Plan/i })).toHaveCount(0)
+    await expect(page.getByText('Replace fluids gradually.')).toBeVisible()
     await page.getByRole('tab', { name: 'Plan details' }).click()
     await expect(page.getByText('Next few hours')).toBeVisible()
+    const sleepCard = page.locator('.recovery-detail-static').filter({ hasText: 'Sleep' })
+    await expect(sleepCard).toBeVisible()
+    await expect(sleepCard.locator('summary')).toHaveCount(0)
     await page.getByRole('tab', { name: 'Session context' }).click()
     await expect(page.getByText('60', { exact: true })).toBeVisible()
     await assertNoPageOverflow(page)

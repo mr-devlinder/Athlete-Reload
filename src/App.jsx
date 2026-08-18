@@ -3208,6 +3208,7 @@ function App() {
                 generatedRoutine={generatedMobilityRoutine}
                 generationStatus={recoveryPlanStatus}
                 mobilityGenerationStatus={mobilityRoutineStatus}
+                recoveryPlans={recoveryPlans}
                 recentCompletion={completedMobilityRoutines[0] ?? null}
                 onGenerateRecoveryPlan={generateRecoveryPlan}
                 onGenerateMobilityRoutine={generateMobilityRoutine}
@@ -3253,7 +3254,6 @@ function App() {
                 checkouts={checkouts}
                 history={history}
                 painReports={painReports}
-                insights={trendInsights}
                 onClear={clearHistory}
                 onDeleteEntry={deleteHistoryEntry}
                 recoveryCompletions={completedMobilityRoutines}

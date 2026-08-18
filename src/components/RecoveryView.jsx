@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { format, parseISO } from 'date-fns'
 import { AppIcon } from './AppIcon'
 import { getMovementById } from '../domain/recovery/exerciseCatalog'
+import { findRecoveryPlanForCheckout } from '../domain/recovery/recoveryPlanIdentity'
+import { getRecoveryPriorities } from '../domain/recovery/recoveryPlanPresentation'
 import { estimateRoutineSeconds, expandUnilateralMovement, normalizeRoutineType, replaySavedMobilityRoutine } from '../domain/recovery/routineBuilder'
 import { recordRoutinePainEvent } from '../lib/athleteData'
 import '../styles/recovery-rework.css'
@@ -38,6 +40,7 @@ export function RecoveryView({
   onSaveRoutine,
   onStartRoutine,
   recentCompletion,
+  recoveryPlans = [],
   savedRoutines = [],
   schedule = [],
 }) {
@@ -61,7 +64,15 @@ export function RecoveryView({
     recordType: 'recovery_plan',
     sourceCheckoutId: latestCheckout.id,
   } : null
-  const currentPlan = generatedPlan?.sourceCheckoutId && generatedPlan.sourceCheckoutId !== latestCheckout?.id ? checkoutPlan : generatedPlan ?? checkoutPlan
+  const savedPlanRecord = findRecoveryPlanForCheckout(recoveryPlans, latestCheckout?.id)
+  const savedPlan = savedPlanRecord?.plan ? {
+    ...savedPlanRecord.plan,
+    generatedAt: savedPlanRecord.generatedAt ?? savedPlanRecord.refreshedAt,
+    recordType: 'recovery_plan',
+    sourceCheckoutId: latestCheckout.id,
+  } : null
+  const generatedPlanForCheckout = !generatedPlan?.sourceCheckoutId || generatedPlan.sourceCheckoutId === latestCheckout?.id ? generatedPlan : null
+  const currentPlan = savedPlan ?? generatedPlanForCheckout ?? checkoutPlan
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -192,7 +203,7 @@ function RecoveryHeroVisual() {
 function RecoveryPlanPanel({ checkout, event, loading, onGenerate, onViewMobility, plan }) {
   const [planTab, setPlanTab] = useState('priorities')
   const sections = plan?.reportSections ?? []
-  const priorities = sections.find((section) => section.id === 'recovery-priorities')?.items ?? plan?.priorities ?? []
+  const priorities = getRecoveryPriorities(plan)
   const detailSections = sections.filter((section) => section.id !== 'recovery-priorities')
   return <div className="recovery-plan-stack">
     {checkout && !plan && <CheckoutContext checkout={checkout} event={event} />}
@@ -204,10 +215,19 @@ function RecoveryPlanPanel({ checkout, event, loading, onGenerate, onViewMobilit
         <button aria-controls="recovery-context-panel" aria-selected={planTab === 'context'} className={planTab === 'context' ? 'active' : ''} onClick={() => setPlanTab('context')} role="tab" type="button"><AppIcon name="sessions" size={17} />Session context</button>
       </div>
       {planTab === 'priorities' && <div className="recovery-plan-tab-panel" id="recovery-priorities-panel" role="tabpanel"><div className="recovery-priority-visual"><span><AppIcon name="recovery" size={25} /></span><div><strong>Start here</strong><small>Your highest-value actions from this session.</small></div></div>{priorities.length > 0 ? <div className="recovery-priority-list"><strong>{priorities.length} priorities</strong><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></div> : <p className="recovery-empty-copy">Follow the plan details and recheck how you feel before your next session.</p>}</div>}
-      {planTab === 'details' && <div className="recovery-plan-tab-panel recovery-accordion" id="recovery-details-panel" role="tabpanel">{detailSections.length ? detailSections.map((section, index) => <details key={section.id} open={index === 0}><summary><span className="recovery-detail-icon"><AppIcon name={getRecoverySectionIcon(section)} size={19} /></span><span><strong>{section.title}</strong><small>{section.summary}</small></span><AppIcon name="chevron" size={18} /></summary>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</details>) : <p className="recovery-empty-copy">The most important guidance is summarized in Priorities.</p>}</div>}
+      {planTab === 'details' && <div className="recovery-plan-tab-panel recovery-accordion" id="recovery-details-panel" role="tabpanel">{detailSections.length ? detailSections.map((section, index) => <RecoveryDetailCard initiallyOpen={index === 0} key={section.id} section={section} />) : <p className="recovery-empty-copy">The most important guidance is summarized in Priorities.</p>}</div>}
       {planTab === 'context' && <div className="recovery-plan-tab-panel" id="recovery-context-panel" role="tabpanel"><CheckoutContext checkout={checkout} event={event} embedded /><details className="recovery-context-disclosure"><summary>What shaped this plan <AppIcon name="chevron" size={17} /></summary><p>{plan.contextFactors?.length ? plan.contextFactors.join(' · ') : 'Your completed session, current fatigue and soreness, pain response, and next scheduled event.'}</p></details></div>}
       <footer className="recovery-plan-actions"><span><AppIcon name="shield" size={16} />Saved for this checkout</span><button className="recovery-plan-mobility-button" onClick={onViewMobility} type="button">View Mobility<AppIcon name="arrow" size={17} /></button></footer></section>}
   </div>
+}
+
+function RecoveryDetailCard({ initiallyOpen, section }) {
+  const items = Array.isArray(section.items) ? section.items.filter(Boolean) : []
+  const heading = <><span className="recovery-detail-icon"><AppIcon name={getRecoverySectionIcon(section)} size={19} /></span><span><strong>{section.title}</strong><small>{section.summary}</small></span></>
+
+  if (!items.length) return <article className="recovery-detail-static">{heading}</article>
+
+  return <details defaultOpen={initiallyOpen}><summary>{heading}<AppIcon name="chevron" size={18} /></summary><ul>{items.map((item) => <li key={item}>{item}</li>)}</ul></details>
 }
 
 function CheckoutContext({ checkout, embedded = false, event }) {

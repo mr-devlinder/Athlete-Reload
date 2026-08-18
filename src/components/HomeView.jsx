@@ -8,6 +8,7 @@ import { bodyPainAreas } from '../data/bodyPainMap'
 import { getCheckoutForEvent, hasEventStarted, isAllDayEvent, isEventActionable, isRestDayEvent, parseEventDateTime } from '../utils/events'
 import { formatHydration } from '../utils/units'
 import { PainShareModal } from './PainShareModal'
+import { getRecoveryPriorities } from '../domain/recovery/recoveryPlanPresentation'
 
 export function HomeView({
   athleteProfile,
@@ -51,7 +52,7 @@ export function HomeView({
     .filter(Boolean)
     .slice(0, 3)
   const latestRecoveryPlan = recoveryCompletions[0]?.details?.plan
-  const recoveryPriorities = latestRecoveryPlan?.reportSections?.find((section) => section.id === 'recovery-priorities')?.items?.slice(0, 3) ?? []
+  const recoveryPriorities = getRecoveryPriorities(latestRecoveryPlan, 3)
   const recoveryStatus = latestRecoveryPlan?.reportSections?.find((section) => section.id === 'recovery-status')
   const activePainSummaries = getPainIssueSummaries(painReports)
   const primaryEvent = dueCheckout ?? checkInReminder ?? nextEvent

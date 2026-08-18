@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { format, parseISO, startOfYear } from 'date-fns'
 import { calendarWeekStart, localDateKey, parseLocalCalendarDate } from '../utils/calendarDate'
 import { createRecoveryHistoryRecords } from '../domain/recovery/historyRecords'
+import { getRecoveryPriorities } from '../domain/recovery/recoveryPlanPresentation'
+import { getAthleteInsights } from '../domain/insights'
 import { RecoveryPlanCard } from './RecommendationCard'
 import { AiDecisionReport, DecisionHeader } from './AiDecisionModal'
 import '../styles/history-rework.css'
@@ -25,14 +27,14 @@ const clearOptions = [
   { label: 'All time', days: null },
 ]
 
-export function HistoryView({ checkouts = [], history, insights, onClear, onDeleteEntry, recoveryCompletions = [], recoveryPlans = [], savedRoutines = [], schedule = [], weekStartsOn = 1 }) {
+export function HistoryView({ checkouts = [], history, onClear, onDeleteEntry, painReports = [], recoveryCompletions = [], recoveryPlans = [], savedRoutines = [], schedule = [], weekStartsOn = 1 }) {
   const hasSavedHistory = history.length > 0 || checkouts.length > 0 || recoveryCompletions.length > 0 || recoveryPlans.length > 0
   const [isClearModalOpen, setIsClearModalOpen] = useState(false)
   const [selectedEntry, setSelectedEntry] = useState(null)
   const [selectedWeek, setSelectedWeek] = useState(null)
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set([getCurrentWeekKey(weekStartsOn)]))
   const [expandedYears, setExpandedYears] = useState(() => new Set([getCurrentYearKey()]))
-  const [timeWindow, setTimeWindow] = useState('28')
+  const [timeWindow, setTimeWindow] = useState('7')
   const [recordFilter, setRecordFilter] = useState('all')
   const [historySection, setHistorySection] = useState('overview')
   const [customRange, setCustomRange] = useState({ start: '', end: '' })
@@ -41,6 +43,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
   const filteredCheckouts = filterByWindow(checkouts, timeWindow, customRange)
   const filteredRecovery = filterByWindow(recoveryCompletions, timeWindow, customRange)
   const filteredPlans = filterByWindow(recoveryPlans, timeWindow, customRange)
+  const filteredPainReports = filterByWindow(painReports, timeWindow, customRange)
   const includeCheckIns = ['all', 'events', 'check-in'].includes(recordFilter)
   const includeCheckouts = ['all', 'events', 'checkout'].includes(recordFilter)
   const includePlans = ['all', 'recovery-plan'].includes(recordFilter)
@@ -49,6 +52,8 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
   const summary = getWindowSummary(filteredHistory, filteredCheckouts)
   const analytics = getHistoryAnalytics(filteredHistory, filteredCheckouts, filteredRecovery)
   const chartData = getQuestionChartData(filteredHistory, filteredCheckouts, filteredRecovery, schedule)
+  const windowInsights = getAthleteInsights({ history: filteredHistory, checkouts: filteredCheckouts, painReports: filteredPainReports, recoveryCompletions: filteredRecovery })
+  const windowLabel = getHistoryWindowLabel(timeWindow, customRange)
 
   useEffect(() => {
     if (!isModalOpen) return undefined
@@ -125,7 +130,7 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
 
       <nav className="history-content-tabs" role="tablist" aria-label="History sections">
         <button aria-selected={historySection === 'overview'} className={historySection === 'overview' ? 'active' : ''} onClick={() => setHistorySection('overview')} role="tab" type="button"><AppIcon name="readiness" size={18} /><span><strong>Overview</strong><small>{summary.checkInCount + summary.checkoutCount} contributing records</small></span></button>
-        <button aria-selected={historySection === 'trends'} className={historySection === 'trends' ? 'active' : ''} onClick={() => setHistorySection('trends')} role="tab" type="button"><AppIcon name="trend" size={18} /><span><strong>Trends</strong><small>{insights.length} pattern{insights.length === 1 ? '' : 's'} available</small></span></button>
+        <button aria-selected={historySection === 'trends'} className={historySection === 'trends' ? 'active' : ''} onClick={() => setHistorySection('trends')} role="tab" type="button"><AppIcon name="trend" size={18} /><span><strong>Trends</strong><small>{windowInsights.length} pattern{windowInsights.length === 1 ? '' : 's'} in {windowLabel.toLowerCase()}</small></span></button>
         <button aria-selected={historySection === 'records'} className={historySection === 'records' ? 'active' : ''} onClick={() => setHistorySection('records')} role="tab" type="button"><AppIcon name="report" size={18} /><span><strong>Records</strong><small>Browse the archive</small></span></button>
       </nav>
 
@@ -155,13 +160,9 @@ export function HistoryView({ checkouts = [], history, insights, onClear, onDele
         </HistoryQuestionChart>
       </section>
 
-      <section className="history-insights-section"><div className="history-section-heading"><div><span>Insights</span><h2>Patterns worth watching</h2></div><p>Associations only—not proof that one factor caused another.</p></div><div className="trend-grid">
-        {insights.map((insight) => (
-          <article className="insight-card" key={insight.id ?? insight}>
-            {typeof insight === 'string' ? insight : <><strong>{insight.title}</strong><p>{insight.summary}</p><small>{insight.window} · {insight.sampleSize} records · {Math.round(insight.confidence * 100)}% confidence</small></>}
-          </article>
-        ))}
-        {insights.length === 0 && <article className="insight-card muted"><strong>No reliable pattern yet</strong><p>Insights appear only when enough comparable records support something worth watching.</p></article>}
+      <section className="history-insights-section"><div className="history-section-heading history-pattern-heading"><div><span>{windowLabel}</span><h2>Patterns worth watching</h2></div></div><div className="trend-grid history-pattern-grid">
+        {windowInsights.map((insight, index) => <HistoryInsightCard index={index} insight={insight} key={insight.id} windowLabel={windowLabel} />)}
+        {windowInsights.length === 0 && <HistoryPatternEmptyState checkInCount={filteredHistory.length} checkoutCount={filteredCheckouts.length} painCount={filteredPainReports.length} recoveryCount={filteredRecovery.length} windowLabel={windowLabel} />}
       </div></section>
 
       <section className="history-records-section"><div className="history-section-heading records-heading"><div><span>Records</span><h2>Your Athlete Reload archive</h2></div><div className="record-filters" role="group" aria-label="Record type">{[['all','All'],['events','Events'],['check-in','Check-Ins'],['checkout','Checkouts'],['recovery-plan','Recovery Plans'],['mobility-routine','Mobility Routines']].map(([value,label]) => <button aria-pressed={recordFilter === value} key={value} onClick={() => setRecordFilter(value)} type="button">{label}</button>)}</div></div>
@@ -285,6 +286,17 @@ function shortDate(value) {
   try { return format(parseISO(String(value).slice(0, 10)), 'MMM d') } catch { return String(value) }
 }
 
+function getHistoryWindowLabel(windowValue, customRange) {
+  if (windowValue === '7') return 'Past 7 days'
+  if (windowValue === '28') return 'Past 28 days'
+  if (windowValue === '84') return 'Past 12 weeks'
+  if (windowValue === 'all') return 'All time'
+  if (customRange.start && customRange.end) return `${shortDate(customRange.start)} – ${shortDate(customRange.end)}`
+  if (customRange.start) return `Since ${shortDate(customRange.start)}`
+  if (customRange.end) return `Through ${shortDate(customRange.end)}`
+  return 'Custom range'
+}
+
 function filterByWindow(entries, windowValue, customRange) {
   if (windowValue === 'all') return entries
   const today = new Date()
@@ -317,6 +329,29 @@ function endOfLocalDay(date) {
 
 function HistoryMetric({ detail, label, unit = '', value }) {
   return <div className="history-overview-metric"><span>{label}</span><strong>{value}<small>{unit}</small></strong><p>{detail}</p></div>
+}
+
+function HistoryInsightCard({ index, insight, windowLabel }) {
+  const confidence = Math.max(0, Math.min(100, Math.round(Number(insight.confidence ?? 0) * 100)))
+  return <article className="insight-card history-insight-card" style={{ '--history-signal-strength': `${confidence}%` }}>
+    <div className="history-insight-lead"><span className="history-insight-icon"><AppIcon name={getInsightIcon(insight.id)} size={21} /></span><div><small>Pattern {String(index + 1).padStart(2, '0')} · {windowLabel}</small><strong>{insight.title}</strong></div></div>
+    <p>{insight.summary}</p>
+    <footer><span>{insight.sampleSize} contributing record{insight.sampleSize === 1 ? '' : 's'}</span><div className="history-confidence"><i aria-hidden="true"><b /></i><small>{confidence}% signal confidence</small></div></footer>
+  </article>
+}
+
+function HistoryPatternEmptyState({ checkInCount, checkoutCount, painCount, recoveryCount, windowLabel }) {
+  const evidence = [['Check-ins', checkInCount, 'readiness'], ['Sessions', checkoutCount, 'workload'], ['Pain reports', painCount, 'pain'], ['Recovery', recoveryCount, 'recovery']]
+  const total = evidence.reduce((sum, [, count]) => sum + count, 0)
+  return <article className="history-pattern-empty"><div className="history-pattern-empty-copy"><span><AppIcon name="trend" size={24} /></span><div><small>{windowLabel}</small><strong>No reliable pattern in this window yet</strong><p>{total ? 'The selected window has activity, but not enough comparable records for a pattern to clear the evidence threshold.' : 'There are no contributing records in the selected window. Choose a wider range or keep logging to build this view.'}</p></div></div><div className="history-pattern-evidence">{evidence.map(([label, count, icon]) => <span key={label}><AppIcon name={icon} size={17} /><strong>{count}</strong><small>{label}</small></span>)}</div></article>
+}
+
+function getInsightIcon(id = '') {
+  if (id.includes('sleep')) return 'sleep'
+  if (id.includes('pain') || id.includes('soreness')) return 'pain'
+  if (id.includes('recovery')) return 'recovery'
+  if (id.includes('effort') || id.includes('duration')) return 'workload'
+  return 'trend'
 }
 
 function AnalyticsPanel({ eyebrow, rows, title }) {
@@ -429,7 +464,7 @@ function HistoryGroup({ checkouts, checkIns, onDeleteEntry, onSelectEntry, recov
         <p className="eyebrow">Recovery Plans</p>
         {recoveryPlans.length === 0 ? <p>No Recovery Plans this week.</p> : recoveryPlans.map((item) => {
           const plan = item.entry.plan ?? {}
-          const priorities = plan.reportSections?.find((section) => section.id === 'recovery-priorities')?.items ?? plan.priorities ?? []
+          const priorities = getRecoveryPriorities(plan)
           const eventTitle = item.entry.contextSnapshot?.event?.title ?? item.entry.contextSnapshot?.checkout?.title ?? 'Post-event recovery'
           return <HistoryRow className="history-row recovery-plan-history-row" entry={item.entry} key={`recovery-plan-${item.entry.id}`} kind="recovery-plan" onDeleteEntry={onDeleteEntry} onSelectEntry={onSelectEntry}><span className="history-record-kind recovery-plan-record-kind">Recovery Plan</span><div><p className="eyebrow">{format(parseISO(item.entry.generatedAt ?? item.entry.refreshedAt), 'MMM d, yyyy · h:mm a')}</p><strong>{eventTitle}</strong><small>{priorities.length} priorit{priorities.length === 1 ? 'y' : 'ies'}{priorities[0] ? ` · ${priorities[0]}` : ''}</small></div></HistoryRow>
         })}
@@ -734,7 +769,7 @@ function getReadinessBand(score) {
 function RecoveryPlanRecordModal({ entry, onClose }) {
   const plan = entry.plan ?? {}
   const sections = plan.reportSections ?? []
-  const priorities = sections.find((section) => section.id === 'recovery-priorities')?.items ?? plan.priorities ?? []
+  const priorities = getRecoveryPriorities(plan)
   const eventTitle = entry.contextSnapshot?.event?.title ?? entry.contextSnapshot?.checkout?.title ?? 'Post-event recovery'
   return <div className="modal-backdrop history-modal-backdrop" onClick={onClose}><section className="event-modal history-modal recovery-plan-record-modal glass-panel" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true"><div className="schedule-header"><SectionHeading eyebrow="Recovery Plan" title={eventTitle} /><button className="ghost-close" onClick={onClose} type="button">Close</button></div><p>{plan.summary}</p>{priorities.length > 0 && <section className="history-detail-section recovery-plan-priorities"><h3>{priorities.length} priorities</h3><ol>{priorities.map((priority) => <li key={priority}>{priority}</li>)}</ol></section>}<div className="history-recovery-plan-sections">{sections.filter((section) => section.id !== 'recovery-priorities').map((section) => <section className="history-detail-section" key={section.id}><h3>{section.title}</h3><p>{section.summary}</p>{section.items?.length > 0 && <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>}</section>)}</div><footer className="ai-decision-footer"><button className="primary-button" onClick={onClose} type="button">Done</button></footer></section></div>
 }

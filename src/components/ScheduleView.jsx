@@ -25,6 +25,7 @@ import { getCompetitionLabel, getDefaultCompetitionMinutes, getSportEventTypes, 
 import { getWorkloadFieldDisplay, workloadInputToCanonical } from '../utils/units'
 import { compareEventsChronologically, getEventColorStyle, getEventSemanticType } from '../domain/events/eventSemantics'
 import { getEventFormSchema } from '../domain/events/eventFormSchema'
+import { isTournamentSummaryVisible } from '../domain/events/tournamentVisibility'
 import '../styles/schedule-semantics.css'
 
 const repeatOptions = ['Does not repeat', 'Daily', 'Weekly']
@@ -811,16 +812,6 @@ function escapeIcs(value) {
 
 function isTournamentDate(tournament, date) {
   return Boolean(tournament?.startDate && tournament?.endDate && date >= tournament.startDate && date <= tournament.endDate)
-}
-
-function isTournamentSummaryVisible(tournament) {
-  if (!tournament?.startDate || !tournament?.endDate) return false
-
-  const today = toIsoDate(new Date())
-  const visibleFrom = toIsoDate(addDays(parseISO(tournament.startDate), -1))
-  const visibleUntil = toIsoDate(addDays(parseISO(tournament.endDate), 1))
-
-  return today >= visibleFrom && today <= visibleUntil
 }
 
 function EventModal({ associations, athleteProfile, draftEvent, error, isOnboardingEventCreation, isSaving, mode, onClose, onDuplicate, onSave, onUpdate }) {
